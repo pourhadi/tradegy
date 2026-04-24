@@ -6,7 +6,7 @@ A document set defining the architecture, components, and processes for an ES-on
 
 1. [`00_master_architecture.md`](00_master_architecture.md) — start here. The holistic picture and how components relate.
 2. [`01_strategy_definition.md`](01_strategy_definition.md) — what a strategy is, identity rules, five required components.
-3. [`02_feature_pipeline.md`](02_feature_pipeline.md) — upstream data/feature/model pipeline with fidelity classification.
+3. [`02_feature_pipeline.md`](02_feature_pipeline.md) — upstream data/feature/model pipeline with a single admission bar for every data source.
 4. [`03_strategy_class_registry.md`](03_strategy_class_registry.md) — code-level building blocks that specs compose.
 5. [`04_strategy_spec_schema.md`](04_strategy_spec_schema.md) — the library entry contract.
 6. [`05_backtest_harness.md`](05_backtest_harness.md) — deterministic execution engine with signed outputs.

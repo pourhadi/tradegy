@@ -15,7 +15,7 @@ A single-instrument (ES) futures trading platform built around a three-layer arc
 
 - **Capital:** $10k starting account. Dictates instrument selection (MES over ES in most cases) and position sizing.
 - **Market:** ES only. Soybeans dropped from the original plan. Future expansion considered NQ/RTY before returning to agricultural products.
-- **Data:** Several years of tick-level ES data available. Additional data sources onboarded through the feature pipeline's fidelity-classified ingestion process.
+- **Data:** Several years of tick-level ES data available. Additional data sources onboarded through the feature pipeline's admission process (each source must meet the universal bar: point-in-time queryable, deterministic, declared availability latency, explicit revision policy, sufficient coverage).
 - **Broker:** Interactive Brokers via their trading API.
 - **Latency stance:** LLM-driven decision cycles are 2–5 seconds. The architecture assumes this is fine because strategic reasoning is not on the critical path of any trade execution. We do not compete on speed.
 
@@ -80,9 +80,9 @@ Two pipelines feed the three-layer runtime system. They operate at development-t
 
 Transforms raw data into registered, point-in-time-correct features and model-backed features. Upstream of everything. Detailed in `02_feature_pipeline.md`.
 
-Seven stages: ingestion, audit, fidelity classification, computation, model training, validation, registration.
+Seven stages: ingestion, audit, source admission, computation, model training, validation, registration.
 
-Produces three registries: data sources, features, models. Each versioned, each fidelity-classified, each queryable via API.
+Produces three registries: data sources, features, models. Each versioned, each queryable via API. Sources are admitted (or not) against a single universal bar — there is no quality ladder.
 
 ### Strategy pipeline
 
@@ -101,7 +101,7 @@ DATA SOURCES (external)
     ↓
 ┌───────────────────────────────────────────────┐
 │ FEATURE PIPELINE                              │
-│   Ingestion → Audit → Fidelity Classification │
+│   Ingestion → Audit → Source Admission        │
 │   Feature Computation → Model Training        │
 │   Validation → Registration                   │
 │                                               │
@@ -172,7 +172,7 @@ Every state change that touches capital requires appropriate authority:
 
 | Action | Authority required |
 |---|---|
-| New data source registered | Human sign-off on fidelity tier |
+| New data source registered | Human sign-off on admission evidence |
 | New feature registered for live | Human sign-off |
 | New strategy promoted to `live` tier | Human sign-off, full validation packet |
 | Strategy moved from `confirm_then_execute` to `auto_execute` | Human sign-off, minimum N successful live trades |
@@ -191,7 +191,7 @@ The human-in-loop horizon relaxes over time as the system demonstrates statistic
 
 Each live library strategy runs at one of three tiers:
 
-- **`proposal_only`** — logged for review, never traded. Used during initial library build-out and for Tier E / Tier D feature-dependent strategies in early life.
+- **`proposal_only`** — logged for review, never traded. Used during initial library build-out and for strategies whose live behavior needs observation before capital is committed.
 - **`confirm_then_execute`** — LLM proposes, human confirms via fast approval interface. Default for newly live strategies.
 - **`auto_execute`** — LLM picks, tactical layer runs it. Only after minimum live trade count with envelope-consistent performance.
 

@@ -95,7 +95,7 @@ Before any backtest runs, the harness validates the spec:
 2. **Registry resolution** — every referenced class (strategy, sizing, stop, exit, condition) resolves to an available implementation.
 3. **Parameter envelope** — every current parameter value lies within its declared tested envelope.
 4. **Feature availability** — every feature the strategy depends on exists in the feature registry with sufficient historical coverage for the requested backtest window.
-5. **Fidelity tier propagation** — computes the strategy's effective fidelity tier from its feature dependencies; records in output.
+5. **Revisability inheritance** — records whether any feature dependency is revisable; if so, the backtest run pins source vintages as well as feature versions, and results are tagged accordingly.
 6. **Invariant checks** — `hard_max_distance_ticks` respected, `max_daily_loss` within portfolio limits, auto-disable triggers declared.
 
 Validation failure aborts the run with structured error. No partial validation — all or none.

@@ -209,7 +209,7 @@ Initial entries:
 - **`bars_since_entry`** — N bars have elapsed since entry
 - **`price_returns_to_level`** — price has touched specified level
 - **`opposite_direction_break`** — price has broken specified level in opposite direction with volume
-- **`sentiment_shock`** — sentiment feature delta exceeds threshold (Tier D feature, flagged accordingly)
+- **`sentiment_shock`** — sentiment feature delta exceeds threshold (only usable once a sentiment source has been admitted against the universal bar in the feature pipeline)
 
 Conditions can be composed with `and`, `or`, `not` in the spec.
 
@@ -309,10 +309,8 @@ A class can have multiple major versions live simultaneously. Library strategies
 
 1. **Should classes declare compatibility with specific sizing/stop/exit combinations, or is compatibility determined at spec validation time?** Current schema has compatibility lists. Alternative: always allow any combination and catch incompatibilities at validation. Leaning toward declared compatibility for clarity.
 
-2. **How to handle classes that depend on features of a specific fidelity tier?** A class that requires Tier D sentiment features contaminates every library strategy using it. Should the class itself declare its fidelity ceiling? Probably yes — add `max_fidelity_tier` to class registry entry.
+2. **Multi-instrument classes.** Currently all classes are ES-specific in behavior. When we add NQ, do we generalize classes to be instrument-parameterized, or fork class-per-instrument? Leaning generalize, with instrument-specific parameter defaults.
 
-3. **Multi-instrument classes.** Currently all classes are ES-specific in behavior. When we add NQ, do we generalize classes to be instrument-parameterized, or fork class-per-instrument? Leaning generalize, with instrument-specific parameter defaults.
+3. **Class performance telemetry.** Should the registry track aggregate performance across all library strategies using each class? Useful for "this class's implementations tend to underperform their envelopes" signals. Probably add in Phase 2.
 
-4. **Class performance telemetry.** Should the registry track aggregate performance across all library strategies using each class? Useful for "this class's implementations tend to underperform their envelopes" signals. Probably add in Phase 2.
-
-5. **Class deprecation triggers.** What causes a class to move from `available_for_library` to `deprecated`? Currently undefined. Propose: no new library strategies can use a deprecated class, existing ones must migrate within N months, class is retired when unused.
+4. **Class deprecation triggers.** What causes a class to move from `available_for_library` to `deprecated`? Currently undefined. Propose: no new library strategies can use a deprecated class, existing ones must migrate within N months, class is retired when unused.

@@ -15,11 +15,13 @@ trading — every downstream stage depends on its output.
    contamination from future information. A feature that cannot demonstrate this
    does not get registered. Full stop.
 
-2. **Fidelity classification over fidelity pretense.** Not all data sources have
-   perfect point-in-time history. Rather than pretending they do, each source is
-   classified by its fidelity class, and that class propagates to every feature
-   derived from it. Strategies depending on lower-fidelity features are constrained
-   in how they can be validated.
+2. **One bar for admission; no quality ladder.** Every data source either meets
+   our requirements or we don't use it. The universal bar: point-in-time queryable,
+   deterministic given inputs, declared availability latency, explicit revision
+   policy, sufficient coverage for intended use. There are no "lower-fidelity"
+   sources admitted with caveats — if a source can't meet the bar, it stays out.
+   What we *do* track per source are orthogonal data-model facts (revisability,
+   derivation method) that drive storage and versioning, not quality tiers.
 
 3. **Deterministic computation.** Features are pure functions of their declared
    inputs. Same inputs produce identical outputs. No hidden state, no stochastic
@@ -35,7 +37,7 @@ trading — every downstream stage depends on its output.
 
 6. **Backfill is not optional.** Every registered feature must have a complete
    historical series available at registration. "We'll backfill later" is how
-   fidelity gets lost. Register when ready, not before.
+   point-in-time correctness gets lost. Register when ready, not before.
 
 7. **Live and historical must be the same code path.** The code that produces a
    feature in live must be the same code that produces it for backtest. No
@@ -94,52 +96,53 @@ acceptance before source can be used for live trading.
 - Latency assumed constant when actually variable
 - Missing data forward-filled without audit trail
 
-### Stage 3: Fidelity classification
+### Stage 3: Source admission
 
 **Inputs:** Data source + its audit history.
 
-**Activities:** Classify the source into a fidelity tier.
+**Activities:** Evaluate the source against the universal admission bar and
+record the data-model properties that downstream storage and versioning depend
+on.
 
-**Fidelity tiers:**
+**Universal admission bar (all required; no exceptions, no overrides):**
 
-- **Tier A — Reconstructible.** Data captured as-received, timestamped at receipt,
-  never revised. Bit-exact point-in-time history. Example: our own tick capture
-  from broker feed.
+- **Point-in-time queryable.** Can reconstruct "what was known at time T" for
+  every historical timestamp, bounded by the source's declared revision policy.
+- **Deterministic.** Same raw inputs produce identical values on re-fetch or
+  replay.
+- **Declared availability latency.** A characterized distribution of
+  (decision_time − observation_time), not an assumption.
+- **Explicit revision policy.** One of `never_revised`, `revised_with_vintages`
+  (every prior vintage retained and keyed by transaction time), or `not_admitted`.
+  A source that revises without retained vintages cannot meet the bar and is
+  rejected; we do not admit sources that would contaminate historical replay.
+- **Sufficient coverage.** Continuous series across the window any intended
+  consumer needs, with gaps catalogued and bounded.
 
-- **Tier B — Captured with known latency.** Data timestamped with known publication
-  time; received with some lag but lag is known. No revisions. Example: scheduled
-  economic releases.
+A source that fails any check is not admitted. There is no "admit with
+caveats" path.
 
-- **Tier C — Revised but versioned.** Source publishes revisions but we have all
-  historical versions. Can replay "what was known at time T" by using the version
-  available at T. Example: some government statistics.
+**Data-model properties recorded at admission (not quality ratings; used for
+storage and versioning):**
 
-- **Tier D — Revised, unversioned.** Current data available, but no point-in-time
-  snapshots of prior versions. Historical use contaminated by future revisions.
-  Example: many sentiment APIs that score text with current model retroactively.
+- `revisable: bool` — `false` for append-only series (tick data, receipt-stamped
+  captures, finalized publications); `true` for series that publish vintages
+  (fundamentals, analyst estimates, some government statistics). Drives storage
+  model: append-only time series vs bitemporal (valid_time × transaction_time).
+- `derivation: raw | transform | model` — declared on features, not sources, but
+  the source admission record notes whether the source itself is raw or is the
+  output of an upstream model/vendor pipeline (affects retrain / re-version
+  triggers).
 
-- **Tier E — Live-only.** No reliable historical series exists or can be
-  reconstructed. Feature can only be validated forward from go-live date.
+**Outputs:** Data source registry entry with admission evidence, revisability
+flag, availability-latency characterization, and coverage record.
 
-**Propagation rule:** A feature's fidelity tier equals the *worst* tier of any
-data source it depends on. A feature combining Tier A price data with Tier D
-sentiment data is a Tier D feature.
-
-**Strategy validation implications:**
-- Tier A, B, C features: usable in full backtest validation including CPCV
-- Tier D features: backtestable with explicit caveats, flagged in validation record
-- Tier E features: excluded from backtest; dependent strategy cannot use CPCV
-  evidence; must validate exclusively through paper trading
-
-**Outputs:** Data source registry entry with fidelity tier, rationale, and audit
-evidence supporting classification.
-
-**Gate:** Human review and sign-off on fidelity classification. Not automated.
-Misclassification contaminates every downstream strategy.
+**Gate:** Human review and sign-off on admission. Not automated. An admission
+error ships corrupted inputs into every downstream backtest and live decision.
 
 ### Stage 4: Feature computation
 
-**Inputs:** Registered data sources at declared fidelity tier.
+**Inputs:** Admitted data sources.
 
 **Activities:**
 - Execute feature definition (deterministic transform) over data
@@ -169,10 +172,20 @@ feature:
       denominator: "cboe_vix3m.close"
   cadence: "daily"
   availability_latency_seconds: 60
-  fidelity_tier: "B"
+  derivation: "transform"              # raw | transform | model
+  revisable: false                     # inherits from inputs; true if any input is revisable
   expected_range: [0.5, 2.0]
   outlier_policy: "flag_and_pass"
 ```
+
+**Revisability and derivation propagation:**
+- A feature's `revisable` is `true` if any input source is revisable; otherwise
+  `false`. Revisable features are stored bitemporally; non-revisable features
+  are append-only.
+- A feature's `derivation` is `model` if any input is a model-produced feature;
+  otherwise `transform` for composed features or `raw` for direct
+  source-passthroughs. Model-derived features trigger retrain/re-version rules
+  (see Stage 5).
 
 **Transform registry:** Like strategy class registry, transforms are registered
 implementations. Common transforms (rolling_mean, rolling_std, ratio, zscore,
@@ -221,7 +234,7 @@ model:
     random_seed: 42
   calibration:
     method: "isotonic"
-  fidelity_constraints:
+  replay_constraints:
     historical_prediction_method: "walk_forward_replay"
     no_retroactive_training: true
 ```
@@ -294,7 +307,8 @@ verified; model artifact serializable and deterministic on reload.
 **Outputs:** Registered feature, queryable via registry API.
 
 **Gate:** Human review of registration packet for features destined for live use.
-Automated registration acceptable for research/development tier only.
+Automated registration acceptable only for features remaining in the
+`in_development` or `research` lifecycle state.
 
 ---
 
@@ -307,10 +321,11 @@ data_source:
   description: "ES continuous front-month tick data from Interactive Brokers"
   type: "market_data"  # market_data | economic | news | alternative | derived
   provider: "interactive_brokers"
-  fidelity_tier: "A"
-  fidelity_rationale: |
+  revisable: false
+  admission_rationale: |
     Captured directly from IB live feed at receipt time. No revisions. Timestamps
-    applied at receipt with NTP-synced system clock. Bit-exact replay possible.
+    applied at receipt with NTP-synced system clock. Meets point-in-time,
+    determinism, availability-latency, and coverage bars.
   coverage:
     start_date: "2020-01-06"
     end_date: "current"
@@ -363,7 +378,8 @@ feature:
       annualization_factor: "intraday_252_78"
   cadence: "1min"
   availability_latency_seconds: 5
-  fidelity_tier: "A"
+  derivation: "transform"
+  revisable: false
   expected_range: [0.05, 2.0]
   outlier_policy: "flag_and_pass"
   historical_coverage:
@@ -452,9 +468,11 @@ Concrete user-facing workflow for onboarding a new dataset:
 3. **Human confirms schema** via CLI or web prompt; corrections applied
 4. **Automated ingestion** moves data into raw data lake with canonical schema
 5. **Automated audit** runs full Stage 2 audit suite; produces audit report
-6. **Human reviews audit** and proposes fidelity tier classification with rationale
-7. **Registration** of data source pending tier review; second human signs off
-   before source becomes available to features
+6. **Human reviews audit** and proposes admission with rationale against the
+   universal bar (point-in-time, determinism, availability latency, revision
+   policy, coverage) plus revisability and derivation annotations
+7. **Registration** of data source pending admission review; second human signs
+   off before source becomes available to features
 8. **Standard feature battery** (user opts in per source) computes a default set
    of derived features (returns, vol, range, zscore, percentile rank, etc.)
    automatically
@@ -504,11 +522,11 @@ Retiring a feature in use requires migration of dependent strategies first.
 - Library monitoring (tracks feature-level P&L attribution across strategies)
 
 **Queries exposed via registry API:**
-- "Give me all features available with Tier ≤ B and cadence ≤ 5min"
+- "Give me all features with cadence ≤ 5min, availability_latency ≤ 10s, and coverage spanning [T₀, T₁]"
 - "For feature X, what strategies depend on it, at what versions"
-- "For strategy Y, what features does it depend on, with what fidelity tiers"
-- "What's the current live-vs-historical drift score for feature Z"
-- "Audit trail: what was feature X's value at time T, per version V"
+- "For strategy Y, what features does it depend on, with what revisability and derivation"
+- "What's the current runtime health (green/degraded/stale/failed) for feature Z"
+- "Audit trail: what was feature X's value at time T, per version V (and per source vintage, if revisable)"
 
 ---
 
@@ -524,7 +542,7 @@ Retiring a feature in use requires migration of dependent strategies first.
 ## MVP and sequencing
 
 **Phase 1 (must exist before any strategy work):**
-- Data ingestion for ES tick data (single source, Tier A)
+- Data ingestion for ES tick data (single admitted source, non-revisable)
 - Data audit suite
 - Feature computation for 15–20 canonical price-derived features (returns at
   multiple horizons, realized vol, range, VWAP, volume features, time-of-day
@@ -538,8 +556,11 @@ Retiring a feature in use requires migration of dependent strategies first.
 - First model-backed features (HMM regime classifier)
 
 **Phase 3 (enabling richer hypotheses):**
-- News/sentiment ingestion (with explicit Tier D or E handling)
-- Alternative data onboarding framework
+- News/sentiment ingestion — only admitted if the source can meet the universal
+  bar (point-in-time queryable with retained vintages for any revisions, or
+  non-revisable captures stamped at receipt). Sources that apply retroactive
+  model rescoring to historical text are not admitted.
+- Alternative data onboarding framework (same bar; no carve-outs)
 - Advanced model types (sequence models, tree ensembles)
 
 **Phase 4 (maturation):**
@@ -566,11 +587,6 @@ Retiring a feature in use requires migration of dependent strategies first.
    retrain off-cycle or retire a model should be human-gated. Need to define the
    workflow.
 
-5. **How to handle Tier E features?** Do we build a parallel "forward-only
-   validation" framework for strategies depending on them, or simply not allow
-   such strategies? Lean: allow, but with materially different promotion criteria
-   (longer paper trading, mandatory human-in-loop longer, capacity constrained).
-
-6. **Feature spec authoring — LLM-assisted?** Similar to strategy specs, LLMs
+5. **Feature spec authoring — LLM-assisted?** Similar to strategy specs, LLMs
    are probably useful for drafting feature specs from natural-language
    descriptions. Same review pattern: LLM drafts, human reviews, human signs off.

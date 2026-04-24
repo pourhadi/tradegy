@@ -283,7 +283,7 @@ Total score: 0–15. Scores feed triage priority but don't auto-decide.
 
 ### Data feasibility check
 
-Automated: does the data required to test this hypothesis exist in our registered sources / feature catalog at acceptable fidelity?
+Automated: does the data required to test this hypothesis exist in our admitted sources / feature catalog with sufficient coverage, cadence, and availability latency for the test?
 
 Output: `feasible | partially_feasible | infeasible | unknown`, with notes on what would need to be added.
 

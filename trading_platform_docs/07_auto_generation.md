@@ -39,7 +39,7 @@ Given a promoted hypothesis, the auto-generator produces N variants (see budget 
 
 - The hypothesis record (observation, mechanism, counterparty, falsification)
 - Current strategy class registry (available classes with parameter schemas)
-- Current feature registry (available features with fidelity tiers and coverage)
+- Current feature registry (available features with coverage, cadence, availability latency, and revisability)
 - Pre-registered variant budget and statistical constraints
 - Previously-generated variants for this hypothesis (to ensure diversity)
 
@@ -70,7 +70,7 @@ For each generated variant:
 - Schema compliance
 - Registry resolution (every referenced class and feature exists)
 - Parameter envelope compliance
-- Fidelity tier computation
+- Revisability inheritance check (flags variants whose dependencies require bitemporal handling)
 - Diversity check against sibling variants (embedding-based; near-duplicates collapsed)
 
 Variants failing any check are discarded with logged reason.
@@ -255,7 +255,7 @@ AVAILABLE STRATEGY CLASSES:
 {class registry filtered to classes plausibly relevant to this hypothesis}
 
 AVAILABLE FEATURES:
-{feature registry filtered to features with compatible cadence and fidelity}
+{feature registry filtered to features with compatible cadence, availability latency, and coverage for the hypothesis}
 
 CONSTRAINTS:
 - Budget: {N} variants

@@ -250,7 +250,7 @@ On days with no clearly-fitting strategy, did the system stand down?
 | Thrashing (flipping playbook every cycle) | Hysteresis: minimum duration between flips; session cap on flips |
 | Narrative drift on open positions | Pinned original thesis; drift alerts when current view diverges |
 | Over-activation | Explicit `stand_down` as a selection; track activation rate; tune LLM prompt toward conservatism |
-| Context manipulation via bad features | Feature fidelity monitoring; selection layer receives fidelity tier per feature it uses; can reject decisions built on compromised features |
+| Context manipulation via bad features | Runtime feature-health monitoring; selection layer receives a health enum (green/degraded/stale/failed) per feature it uses; can reject decisions built on compromised features |
 | LLM unavailable | Fallback: maintain previous cycle's decision; if sustained outage, move all active strategies to DORMANT and flag human |
 | LLM output fails validation repeatedly | Escalate to human after N consecutive failures; fall back to previous cycle |
 | Silent divergence between selection reasoning and actual strategy behavior | Post-session review explicitly compares rationale against outcomes; patterns trigger review |
