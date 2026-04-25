@@ -14,6 +14,7 @@ A document set defining the architecture, components, and processes for an ES-on
 8. [`07_auto_generation.md`](07_auto_generation.md) — automated variant generation with statistical guardrails.
 9. [`08_development_pipeline.md`](08_development_pipeline.md) — 10-stage process from hypothesis to retirement.
 10. [`09_selection_layer.md`](09_selection_layer.md) — runtime LLM decision logic.
+11. [`10_review_gap_analysis.md`](10_review_gap_analysis.md) — independent review of gaps, feasibility, and recommended approach improvements.
 
 ## Status
 
