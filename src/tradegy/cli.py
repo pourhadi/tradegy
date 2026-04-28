@@ -14,6 +14,7 @@ from tradegy.audit.basic import audit_source
 from tradegy.features import transforms  # noqa: F401  — register transforms
 from tradegy.features.engine import compute_feature
 from tradegy.ingest.csv_es import ingest_csv
+from tradegy.ingest.csv_sierra import ingest_sierra_csv
 from tradegy.registry.api import find_features, get_feature, value_at
 from tradegy.registry.loader import load_data_source, load_feature
 from tradegy.validate.no_lookahead import audit_no_lookahead
@@ -31,9 +32,20 @@ def ingest(
     source_id: Annotated[str, typer.Option(help="data source id")],
     input_tz: Annotated[str, typer.Option(help="IANA tz of CSV timestamps")] = "UTC",
 ) -> None:
-    """Ingest a CSV for an admitted data source (Stage 1)."""
+    """Ingest a CSV for an admitted data source (Stage 1).
+
+    Dispatches on `source.ingest.format`:
+      * sierra_chart_csv → ingest_sierra_csv (multi-column timestamp, OHLCV).
+      * generic_csv (or omitted ingest spec) → ingest_csv (ts/price/size).
+    """
     source = load_data_source(source_id)
-    result = ingest_csv(csv_path, source, input_tz=input_tz)
+    fmt = source.ingest.format if source.ingest is not None else "generic_csv"
+    if fmt == "sierra_chart_csv":
+        result = ingest_sierra_csv(csv_path, source, input_tz=input_tz)
+    elif fmt == "generic_csv":
+        result = ingest_csv(csv_path, source, input_tz=input_tz)
+    else:
+        raise typer.BadParameter(f"unknown ingest format {fmt!r}")
     console.print(
         f"[green]ingested[/] {result.rows_in} rows ({result.duplicates_dropped} dedup'd) "
         f"into {len(result.partitions_written)} partitions"
