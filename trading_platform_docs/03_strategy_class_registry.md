@@ -15,6 +15,11 @@ The Phase 2A–C vertical slice has shipped:
   - `stand_down` — the trivial first-class option per the section below.
   - `momentum_breakout` — long-only continuation entry on a return-horizon
     feature crossing a threshold.
+  - `vwap_reversion` — long-only fade of intraday extension below session
+    VWAP. Added in Phase 4 alongside the session-aware harness loop and
+    the `mes_vwap` feature it depends on (the hypothesis-driven feature
+    addition path documented in `02_feature_pipeline.md` "Feature
+    inventory growth").
 - **Five auxiliary registries** — `src/tradegy/strategies/auxiliary.py`.
   Each axis has its own ABC + registry generic. Registered classes:
   - Sizing: `fixed_contracts`
@@ -28,10 +33,10 @@ deferred work, prioritized when a hypothesis spec genuinely needs it —
 see the "vital signs vs hypothesis-driven" principle in
 `02_feature_pipeline.md`):
 
-- Strategy classes: `range_break_fade`, `range_break_continuation`,
-  `vwap_reversion`. (Adding any of these requires the missing
-  features — VWAP, range_high/low, etc. — to be built in the feature
-  pipeline first.)
+- Strategy classes: `range_break_fade`, `range_break_continuation`.
+  (Adding either requires range-defining features — range_high/low or
+  similar — to be built in the feature pipeline first via the same
+  hypothesis-driven path that brought `mes_vwap` in for `vwap_reversion`.)
 - Sizing classes: `fixed_fractional_risk`, `volatility_scaled`,
   `kelly_fraction`.
 - Stop classes: `opposite_range_extreme`, `atr_multiple`,

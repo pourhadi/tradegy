@@ -248,6 +248,17 @@ Adding a new transform type is a code change with tests, not a YAML change.
 
 **Feature inventory growth: vital signs first, hypothesis-driven thereafter.**
 
+*First concrete pull-driven addition (Phase 4): `mes_vwap` was registered
+because the `vwap_reversion` strategy class needed it. The feature went
+through identical admission gates as the vital-signs set — transform
+implementation (`session_vwap`, with unit tests covering per-session
+reset and the weighted-mean math), feature YAML, materialize,
+no-lookahead audit, reproducibility check. End-to-end backtest of the
+strategy then ran successfully against the new feature, demonstrating
+the hybrid push/pull model in operation.*
+
+
+
 The registry is *not* meant to be a speculatively-pre-populated catalog of
 every feature anyone might ever want. We bootstrap it with a thin **vital-
 signs** set (≤10 features) covering the axes nearly every futures strategy

@@ -16,6 +16,7 @@ Phase 3A shipped the MVP single-spec single-window driver in
 | Bar stream loader | implemented (canonical `{instrument}_1m_bars` feature) |
 | Feature stream loader | implemented (join_asof on `served_at`, honors availability_latency) |
 | Time-controlled clock | implemented as bar iterator (no future-data access by construction) |
+| Session-aware loop reset | **implemented (Phase 4A)** — bars tagged with CMES session id; force-flatten with ExitReason.SESSION_END at each boundary; strategy state reinitialized so per-session counters reset; bars outside any session skipped |
 | Strategy state machine driver | implemented |
 | Order lifecycle: market | implemented (next-bar-open + fixed-tick adverse slippage) |
 | Order lifecycle: stop | implemented (fill at stop + adverse slippage when bar trades through) |
@@ -37,12 +38,21 @@ Phase 3A shipped the MVP single-spec single-window driver in
 | Run modes | `single` only; `walk_forward` / `cpcv` / `sensitivity` / `variant_sweep` / `regression` / `batch` deferred |
 | Multi-strategy simulation | NOT implemented |
 | Live replay drift detection | NOT implemented |
-| Session-aware loop reset | NOT implemented (the whole window is one logical "session" today) |
 
 CLI: `tradegy backtest <spec_id>` runs a `single` mode backtest and
-prints aggregate stats. End-to-end run on `mes_momentum_breakout` over
-the full 2019-05 → 2025-06 MES window (609,923 1m bars) produces 9,719
-trades with the deterministic state-machine path described above.
+prints aggregate stats. End-to-end runs on real MES data
+(2019-05 → 2025-06, 609,923 1m bars):
+
+| Spec | Trades | Win rate | Expectancy R | Notes |
+|---|---|---|---|---|
+| `mes_momentum_breakout` | 9,719 | 26.8% | -0.29 | naive momentum continuation |
+| `mes_vwap_reversion` | 1,512 | 25.2% | -0.56 | naive long-only fade; ~1 trade per CMES session via session-aware loop |
+
+Both strategies are unprofitable post-cost — the expected shape for
+naive entry rules without regime filters / volatility gating /
+time-of-day discipline. Surfacing this honestly is the point of the
+harness; finding a strategy with actual edge is the next iteration's
+work.
 
 ---
 
