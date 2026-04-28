@@ -9,3 +9,10 @@ from __future__ import annotations
 from tradegy.harness.execution import CostModel  # noqa: F401
 from tradegy.harness.runner import BacktestResult, run_backtest  # noqa: F401
 from tradegy.harness.stats import AggregateStats, aggregate_trades  # noqa: F401
+from tradegy.harness.walk_forward import (  # noqa: F401
+    WalkForwardConfig,
+    WalkForwardSummary,
+    WalkForwardWindow,
+    run_walk_forward,
+    split_windows,
+)
