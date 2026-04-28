@@ -1,13 +1,9 @@
-# Intermediate feature: 1-minute OHLCV bars resampled from ES tick prints.
-#
-# Schema mirrors trading_platform_docs/02_feature_pipeline.md:362-406.
-
-id: es_1m_bars
+id: synth_1m_bars
 version: v1
-description: 1-minute OHLCV bars from ES tick prints, right-labeled bar close.
+description: 1-minute OHLCV bars from synthetic tick prints; right-labeled close.
 type: derived
 inputs:
-  - source_id: es_ticks
+  - source_id: synth_ticks
 computation:
   type: registered_transform
   transform_id: resample_ohlcv
