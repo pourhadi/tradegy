@@ -74,6 +74,13 @@ licensing:
   redistribution: false
 known_issues:
   - >
-    Continuous-contract roll method TBD; verify by inspecting price gaps
-    near quarterly expiries (Mar/Jun/Sep/Dec) after first ingest.
+    Back-adjusted continuous (verified 2026-04-28 by inspecting session-
+    boundary close-to-close changes at suspected roll dates: 30 quarterly
+    rolls show mean signed change ~0 with no contango-shaped jump,
+    indistinguishable from non-roll session opens). Historical absolute
+    price levels are synthetic; returns / volatility / relative-move
+    features are accurate. Features that depend on absolute price
+    levels (round-number trigger levels, fixed-dollar stops referenced
+    to historical bars, percentile-of-historical-price thresholds)
+    inherit synthetic levels and should be flagged.
 audit_history: []
