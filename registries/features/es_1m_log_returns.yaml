@@ -1,0 +1,22 @@
+# 1-minute log returns over ES 1m bars.
+
+id: es_1m_log_returns
+version: v1
+description: log(close_t / close_{t-1}) on es_1m_bars.
+type: derived
+inputs:
+  - feature_id: es_1m_bars
+computation:
+  type: registered_transform
+  transform_id: log_return
+  parameters:
+    price_column: close
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: -0.5
+  max: 0.5
+outlier_policy: flag_and_pass
+lifecycle_state: in_development
