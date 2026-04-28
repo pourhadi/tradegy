@@ -10,6 +10,7 @@ dependencies = [
     "typer>=0.15",
     "rich>=13.9",
     "ib-async>=2.1.0",
+    "exchange-calendars>=4.13.2",
 ]
 
 [project.scripts]

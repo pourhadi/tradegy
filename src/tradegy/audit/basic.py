@@ -5,11 +5,13 @@ Only the checks needed for the vertical slice. The full audit suite
 characterization, cross-source reconciliation — is out of scope and tracked
 for the next slice.
 
-Implemented checks for a non-revisable tick source:
+Implemented checks for a non-revisable tick or bar source:
   * row count + dedup count
   * monotonic-by-construction (ingestion sorts) sanity check
-  * intra-row-gap distribution (flag if any gap > declared_gap_tolerance_seconds)
-  * value sanity (price > 0, size > 0, no NaN/Inf in declared float fields)
+  * intra-row-gap distribution, with **session-aware exclusion** when the
+    source declares a session_calendar — overnight maintenance halts,
+    weekends, and holidays are not flagged.
+  * value sanity (price/OHLC > 0, no NaN/Inf in declared float fields)
   * coverage start/end vs declared cadence
 
 Findings are emitted with severity levels matching the spec
@@ -17,16 +19,21 @@ Findings are emitted with severity levels matching the spec
 """
 from __future__ import annotations
 
-import json
-import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import polars as pl
 
 from tradegy import config
+from tradegy.calendar import expected_non_session_intervals, is_expected_gap
 from tradegy.ingest.csv_es import read_raw
 from tradegy.types import AuditFinding, AuditReport, DataSource
+
+
+# Field names that must be strictly positive (price-like).
+_POSITIVE_FIELDS = ("price", "open", "high", "low", "close")
+# Field names that must be non-negative (count- or quantity-like).
+_NON_NEGATIVE_FIELDS = ("size", "volume", "num_trades", "bid_volume", "ask_volume")
 
 
 def audit_source(
@@ -64,23 +71,50 @@ def audit_source(
         )
 
     if rows >= 2:
-        gaps = (
+        gap_df = (
             df.select(
+                pl.col("ts_utc"),
+                pl.col("ts_utc").shift(1).alias("prev_ts"),
                 (pl.col("ts_utc").diff().dt.total_microseconds() / 1_000_000).alias(
                     "gap_s"
-                )
+                ),
             )
             .drop_nulls()
-            .get_column("gap_s")
+            .filter(pl.col("gap_s") > max_gap_seconds)
         )
-        max_gap = float(gaps.max() or 0.0)
-        if max_gap > max_gap_seconds:
+
+        if gap_df.height > 0 and source.session_calendar is not None:
+            # Subtract gaps that fall inside an expected non-session window.
+            min_ts: datetime = df.select(pl.col("ts_utc").min()).item()
+            max_ts: datetime = df.select(pl.col("ts_utc").max()).item()
+            expected = expected_non_session_intervals(
+                source.session_calendar, min_ts, max_ts
+            )
+            keep_mask = []
+            for prev_ts, ts, _gap in gap_df.iter_rows():
+                if not is_expected_gap(prev_ts, ts, expected):
+                    keep_mask.append(True)
+                else:
+                    keep_mask.append(False)
+            gap_df = gap_df.filter(pl.Series(keep_mask))
+
+        if gap_df.height > 0:
+            max_gap = float(gap_df.get_column("gap_s").max())
             findings.append(
                 AuditFinding(
                     severity="HIGH",
                     code="excessive_gap",
-                    message=f"max inter-row gap {max_gap:.2f}s exceeds tolerance {max_gap_seconds}s",
-                    detail={"max_gap_seconds": max_gap},
+                    message=(
+                        f"{gap_df.height} unexpected gap(s) > {max_gap_seconds}s; "
+                        f"largest {max_gap:.2f}s"
+                        + (" (after subtracting calendar non-sessions)"
+                           if source.session_calendar else "")
+                    ),
+                    detail={
+                        "max_gap_seconds": max_gap,
+                        "gap_count": gap_df.height,
+                        "session_calendar": source.session_calendar,
+                    },
                 )
             )
 
@@ -108,18 +142,33 @@ def audit_source(
                 )
             )
 
-    for required_positive in ("price", "size"):
-        if required_positive in df.columns:
+    for col_name in _POSITIVE_FIELDS:
+        if col_name in df.columns:
             n_nonpos = int(
-                df.select((pl.col(required_positive) <= 0).sum()).item() or 0
+                df.select((pl.col(col_name) <= 0).sum()).item() or 0
             )
             if n_nonpos:
                 findings.append(
                     AuditFinding(
                         severity="HIGH",
                         code="non_positive_value",
-                        message=f"{n_nonpos} rows with non-positive {required_positive}",
-                        detail={"field": required_positive, "count": n_nonpos},
+                        message=f"{n_nonpos} rows with non-positive {col_name}",
+                        detail={"field": col_name, "count": n_nonpos},
+                    )
+                )
+
+    for col_name in _NON_NEGATIVE_FIELDS:
+        if col_name in df.columns:
+            n_neg = int(
+                df.select((pl.col(col_name) < 0).sum()).item() or 0
+            )
+            if n_neg:
+                findings.append(
+                    AuditFinding(
+                        severity="HIGH",
+                        code="negative_quantity",
+                        message=f"{n_neg} rows with negative {col_name}",
+                        detail={"field": col_name, "count": n_neg},
                     )
                 )
 
