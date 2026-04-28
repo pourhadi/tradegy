@@ -83,6 +83,7 @@ def _resolve_inputs(
     """
     slot_name_for_transform = {
         "resample_ohlcv": ["ticks"],
+        "resample_ohlcv_bars": ["bars"],
         "log_return": ["bars"],
         "rolling_realized_vol": ["returns"],
     }

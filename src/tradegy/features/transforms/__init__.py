@@ -50,5 +50,6 @@ def list_transforms() -> list[str]:
 from tradegy.features.transforms import (  # noqa: E402,F401
     log_return,
     resample_ohlcv,
+    resample_ohlcv_bars,
     rolling_realized_vol,
 )
