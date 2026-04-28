@@ -104,6 +104,7 @@ class DataSource(_Strict):
     ingest: IngestSpec | None = None
     live: LiveSpec | None = None
     session_calendar: str | None = None
+    max_inactivity_seconds: float | None = None
 
     @model_validator(mode="after")
     def _check_timestamp_declaration(self) -> "DataSource":

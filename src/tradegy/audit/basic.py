@@ -40,10 +40,18 @@ def audit_source(
     source: DataSource,
     *,
     batch_id: str | None = None,
-    max_gap_seconds: float = 60.0,
+    max_gap_seconds: float | None = None,
     raw_root: Path | None = None,
     out_dir: Path | None = None,
 ) -> AuditReport:
+    # Threshold precedence: explicit arg > source.max_inactivity_seconds > 60s default.
+    if max_gap_seconds is None:
+        max_gap_seconds = (
+            source.max_inactivity_seconds
+            if source.max_inactivity_seconds is not None
+            else 60.0
+        )
+
     df = read_raw(source.id, root=raw_root)
     findings: list[AuditFinding] = []
 
@@ -85,13 +93,16 @@ def audit_source(
 
         if gap_df.height > 0 and source.session_calendar is not None:
             # Subtract gaps that fall inside an expected non-session window.
+            # gap_df columns are (ts_utc, prev_ts, gap_s) — the observed
+            # gap runs from prev_ts (earlier) to ts_utc (later).
             min_ts: datetime = df.select(pl.col("ts_utc").min()).item()
             max_ts: datetime = df.select(pl.col("ts_utc").max()).item()
             expected = expected_non_session_intervals(
                 source.session_calendar, min_ts, max_ts
             )
             keep_mask = []
-            for prev_ts, ts, _gap in gap_df.iter_rows():
+            for ts, prev_ts, _gap in gap_df.iter_rows():
+                # gap_start = prev_ts (earlier), gap_end = ts (later).
                 if not is_expected_gap(prev_ts, ts, expected):
                     keep_mask.append(True)
                 else:

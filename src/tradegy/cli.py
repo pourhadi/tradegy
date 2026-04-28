@@ -59,9 +59,16 @@ def ingest(
 @app.command()
 def audit(
     source_id: Annotated[str, typer.Argument()],
-    max_gap_seconds: Annotated[float, typer.Option()] = 60.0,
+    max_gap_seconds: Annotated[Optional[float], typer.Option(
+        help="override the source's max_inactivity_seconds (default: per-source)"
+    )] = None,
 ) -> None:
-    """Run Stage 2 (basic) audit for an ingested source."""
+    """Run Stage 2 (basic) audit for an ingested source.
+
+    The gap-tolerance threshold is read from the source registry's
+    `max_inactivity_seconds` field; pass `--max-gap-seconds` to override
+    for one run. Falls back to 60s if neither is set.
+    """
     source = load_data_source(source_id)
     report = audit_source(source, max_gap_seconds=max_gap_seconds)
     console.print(

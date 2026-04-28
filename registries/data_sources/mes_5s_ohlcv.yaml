@@ -56,6 +56,13 @@ live:
     currency: USD
     useRTH: false
 session_calendar: CMES
+# MES has thin overnight liquidity; Sierra Chart only emits a bar when a
+# trade prints, so periods of low activity look like multi-minute gaps.
+# 1 week is the in-session anomaly ceiling — Christmas/New Year/Good
+# Friday combine into ~89-91h closures that exchange_calendars CMES
+# does not fully model. Anything beyond a week with no print is
+# genuinely anomalous and worth investigating.
+max_inactivity_seconds: 604800
 availability_latency:
   median_seconds: 0.0
   p99_seconds: 0.5

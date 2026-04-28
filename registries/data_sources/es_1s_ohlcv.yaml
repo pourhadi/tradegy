@@ -56,6 +56,11 @@ live:
     currency: USD
     useRTH: false
 session_calendar: CMES
+# ES is the deeper-liquidity contract but Sierra Chart still gates emission
+# on print activity. Same 1-week in-session anomaly ceiling as MES; major
+# holiday closures (Christmas/New Year/Good Friday) span up to ~91h and
+# are not fully modeled by exchange_calendars CMES.
+max_inactivity_seconds: 604800
 availability_latency:
   median_seconds: 0.0
   p99_seconds: 1.0
