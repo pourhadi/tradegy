@@ -232,7 +232,7 @@ Expected future additions: execution layer spec, live monitoring spec, governanc
 
 Critical path, earliest to latest:
 
-1. Feature pipeline Phase 1 (MES + ES OHLCV ingestion under the live/historical parity contract — paired Sierra Chart historical adapter and IBKR live adapter per source — canonical feature battery, registry API)
+1. Feature pipeline Phase 1 (MES + ES OHLCV ingestion under the live/historical parity contract — paired Sierra Chart historical adapter and IBKR live adapter per source — vital-signs feature set per `02_feature_pipeline.md` "Feature inventory growth", registry API). Further features are added on demand from hypothesis specs, not speculatively pre-registered.
 2. Strategy class registry + initial 3–5 classes
 3. Backtest harness MVP
 4. Strategy spec schema validator

@@ -246,6 +246,37 @@ implementations. Common transforms (rolling_mean, rolling_std, ratio, zscore,
 rank, percentile, ewma, etc.) implemented once, unit-tested, referenced by ID.
 Adding a new transform type is a code change with tests, not a YAML change.
 
+**Feature inventory growth: vital signs first, hypothesis-driven thereafter.**
+
+The registry is *not* meant to be a speculatively-pre-populated catalog of
+every feature anyone might ever want. We bootstrap it with a thin **vital-
+signs** set (≤10 features) covering the axes nearly every futures strategy
+keys on: returns at a couple of horizons, volatility (return-based and
+range-based), liquidity / activity normalization, and time-of-day. Beyond
+that, **features are added on demand from hypothesis specs**: a hypothesis
+declares the features its mechanism keys on (`06_hypothesis_system.md`),
+and any feature not already in the registry triggers a registration
+request that goes through the normal admission gates (transform
+implementation, no-lookahead audit, reproducibility check, backfill
+coverage).
+
+This is a hybrid push/pull model:
+
+| | Vital signs (push) | Hypothesis-driven (pull) |
+|---|---|---|
+| **Trigger** | Pre-registered by the platform team | Requested by a hypothesis spec |
+| **Goal** | Bootstrap the strategy/backtest layer with realistic compositional surface | Avoid speculative inventory; let real strategy demand shape the registry |
+| **Gating** | Same admission gates | Same admission gates |
+| **Cap** | ≤10 features; expand only via the pull path | Unbounded but rate-limited by mechanism articulation |
+
+The push/pull distinction is about *who initiates registration*, not about
+gating discipline — both paths run the same audits and produce the same
+backfilled, point-in-time-correct, parity-contract-compliant registry
+entries. Pure pull would lose the validation gates (ad-hoc per-hypothesis
+features bypass the no-lookahead audit and the live/historical parity
+contract); pure push would build inventory no strategy ever uses. The
+hybrid avoids both failure modes.
+
 **Live adapter registry:** Same discipline applies to the live half of the
 parity contract. A `LiveAdapter` (`src/tradegy/live/base.py`) is an async
 class with a small lifecycle (`connect`, `disconnect`, `subscribe(spec) ->
