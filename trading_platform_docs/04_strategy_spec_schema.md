@@ -7,6 +7,41 @@ them, and the selection layer that picks them at runtime.
 
 ---
 
+## Implementation status (2026-04-28)
+
+Phase 2D shipped the human-authored sections plus a loader and validator
+in `src/tradegy/specs/`:
+
+| Section | Status |
+|---|---|
+| `metadata` | implemented |
+| `market_scope` | implemented |
+| `entry` | implemented (registry-resolved class + parameter validation) |
+| `sizing` | implemented |
+| `stops` (initial_stop, adjustment_rules, hard_max, time_stop) | implemented |
+| `exits` (profit_targets, invalidation_conditions, end_of_session) | implemented |
+| `parameter_envelope` | implemented (envelope membership enforced) |
+| `retirement_criteria` | implemented (data only; auto-disable triggers not yet wired into a runtime) |
+| `operational` | implemented (data only; tier gating not yet enforced) |
+| `context_conditions` | NOT implemented — added when the LLM selection layer is built |
+| `backtest_evidence` | NOT implemented — harness-authored, lands when CPCV / signing arrive |
+| `validation_record` | NOT implemented — same |
+| `live_performance` | NOT implemented — written by the live runtime |
+
+Validation invariants enforced at load time: 2 (schema_version), 3
+(registry resolution for entry / sizing / stops / exits / conditions),
+4 (parameter_envelope membership), 5 (hard_max_distance_ticks for stop
+methods that declare `stop_ticks`). Invariants 1 (id uniqueness across
+the library) and 6–10 (live-tier checks, signed evidence) are deferred
+because they need library-wide context or harness output that doesn't
+yet exist.
+
+Concrete spec: `strategies/mes_momentum_breakout.yaml`. Status=draft,
+tier=proposal_only — used to validate the vertical slice end-to-end on
+real MES data, NOT a production-validated strategy.
+
+---
+
 ## Design principles
 
 These shape every field decision below. If a proposed field violates one of these, it

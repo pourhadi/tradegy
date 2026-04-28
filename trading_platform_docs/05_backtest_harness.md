@@ -5,6 +5,47 @@
 
 ---
 
+## Implementation status (2026-04-28)
+
+Phase 3A shipped the MVP single-spec single-window driver in
+`src/tradegy/harness/`:
+
+| Component | Status |
+|---|---|
+| Spec loader / validator | implemented (delegates to `tradegy.specs.loader`) |
+| Bar stream loader | implemented (canonical `{instrument}_1m_bars` feature) |
+| Feature stream loader | implemented (join_asof on `served_at`, honors availability_latency) |
+| Time-controlled clock | implemented as bar iterator (no future-data access by construction) |
+| Strategy state machine driver | implemented |
+| Order lifecycle: market | implemented (next-bar-open + fixed-tick adverse slippage) |
+| Order lifecycle: stop | implemented (fill at stop + adverse slippage when bar trades through) |
+| Order lifecycle: limit | NOT implemented (defer until a strategy spec needs limit entries) |
+| Slippage model | fixed-tick per side (the simple v1 alternative described in the doc) |
+| Commission model | per-contract round-trip, configurable |
+| Margin cost | NOT implemented (no overnight holding cost in v1) |
+| Position tracker | implemented |
+| Per-trade record | implemented (Trade dataclass) |
+| Aggregate stats | implemented: total_trades, expectancy_R, total_pnl, win_rate, avg_win_R, avg_loss_R, profit_factor, avg_holding_bars, per-trade Sharpe, max_drawdown |
+| Regime-stratified stats | NOT implemented |
+| Parameter sensitivity sweep | NOT implemented |
+| Baseline comparisons | NOT implemented |
+| Walk-forward | NOT implemented (mode `single` only) |
+| CPCV | NOT implemented |
+| Stress periods | NOT implemented |
+| Leakage audit (recompute features at sampled T) | covered already by `tradegy validate <feature>` at the feature-pipeline layer; harness-side audit deferred |
+| Evidence signing | NOT implemented |
+| Run modes | `single` only; `walk_forward` / `cpcv` / `sensitivity` / `variant_sweep` / `regression` / `batch` deferred |
+| Multi-strategy simulation | NOT implemented |
+| Live replay drift detection | NOT implemented |
+| Session-aware loop reset | NOT implemented (the whole window is one logical "session" today) |
+
+CLI: `tradegy backtest <spec_id>` runs a `single` mode backtest and
+prints aggregate stats. End-to-end run on `mes_momentum_breakout` over
+the full 2019-05 → 2025-06 MES window (609,923 1m bars) produces 9,719
+trades with the deterministic state-machine path described above.
+
+---
+
 ## Design principles
 
 1. **Bit-exact reproducibility.** Running the same spec against the same data with the same harness version must produce identical results every time. No wall-clock dependencies, no unseeded randomness, no environment leakage.
