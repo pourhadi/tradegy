@@ -48,4 +48,5 @@ from tradegy.strategies.types import (  # noqa: F401
 )
 
 # Concrete implementation modules wire themselves into the registries.
-# (Implementations land in subsequent commits — Phase 2B/2C.)
+from tradegy.strategies import classes  # noqa: E402,F401  — Phase 2B
+
