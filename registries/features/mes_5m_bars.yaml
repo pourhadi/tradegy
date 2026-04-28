@@ -1,0 +1,28 @@
+# 5-minute OHLCV bars for MES, aggregated from the 5-second source bars.
+# Building block for tactical-horizon features (5m returns, etc.).
+
+id: mes_5m_bars
+version: v1
+description: >
+  5-minute OHLCV bars for MES front-month continuous, aggregated from the
+  mes_5s_ohlcv source via resample_ohlcv_bars. Right-labeled close,
+  left-closed window so each bar's ts_utc is the bar-close instant.
+type: derived
+inputs:
+  - source_id: mes_5s_ohlcv
+computation:
+  type: registered_transform
+  transform_id: resample_ohlcv_bars
+  parameters:
+    cadence: 5m
+    bar_close_label: right
+    closed: left
+cadence: 5m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 100000.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

@@ -18,7 +18,7 @@ Output: ts_utc, value (float in [0, 1]).
 """
 from __future__ import annotations
 
-from datetime import timezone
+from datetime import timedelta, timezone
 from typing import Any
 
 import exchange_calendars as xc
@@ -44,8 +44,17 @@ def session_position(
 
     min_ts = bars.select(pl.col("ts_utc").min()).item()
     max_ts = bars.select(pl.col("ts_utc").max()).item()
-    # Pad by a day to catch sessions straddling the window boundaries.
-    sessions = cal.sessions_in_range(min_ts.date().isoformat(), max_ts.date().isoformat())
+    # Pad both ends so a bar near a date boundary still finds its session.
+    # CMES sessions are named by their close date but open 22:00 UTC the
+    # *prior* day — so a bar at 23:00 UTC on date D belongs to session
+    # D+1 and we'd miss it without the +1d pad on the upper end. The -1d
+    # pad on the lower end is symmetric for any calendar with similar
+    # quirks. The audit's no-lookahead check truncates inputs and would
+    # otherwise drop these boundary rows on recompute.
+    sessions = cal.sessions_in_range(
+        (min_ts.date() - timedelta(days=1)).isoformat(),
+        (max_ts.date() + timedelta(days=1)).isoformat(),
+    )
 
     # Build a session lookup: (open_utc, close_utc) sorted by open.
     intervals: list[tuple[int, int]] = []  # nanosecond UTC bounds

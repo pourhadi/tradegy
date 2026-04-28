@@ -1,0 +1,23 @@
+# Vital sign 1: 5-minute log returns over MES.
+# Tactical-horizon return for momentum / mean-reversion mechanisms.
+
+id: mes_5m_log_returns
+version: v1
+description: log(close_t / close_{t-1}) on mes_5m_bars. Tactical-horizon return.
+type: derived
+inputs:
+  - feature_id: mes_5m_bars
+computation:
+  type: registered_transform
+  transform_id: log_return
+  parameters:
+    price_column: close
+cadence: 5m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: -0.5
+  max: 0.5
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

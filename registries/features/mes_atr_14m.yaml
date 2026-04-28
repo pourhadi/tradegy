@@ -1,0 +1,26 @@
+# Vital sign 3: ATR(14) on MES 1-minute bars.
+# Range-based volatility — independent signal from return-based realized vol.
+# Used for stop-distance sizing and breakout-style triggers.
+
+id: mes_atr_14m
+version: v1
+description: >
+  14-bar simple moving average of mes_true_range_1m. Range-based
+  volatility measure; output in MES price units (points).
+type: derived
+inputs:
+  - feature_id: mes_true_range_1m
+computation:
+  type: registered_transform
+  transform_id: rolling_mean
+  parameters:
+    window_bars: 14
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 1000.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

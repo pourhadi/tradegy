@@ -1,0 +1,26 @@
+# Vital sign 4: rolling 20-bar z-score of MES 1m volume.
+# Liquidity / activity normalization — "is this bar unusually busy?"
+
+id: mes_volume_zscore_20m
+version: v1
+description: >
+  20-bar rolling z-score of MES 1-minute volume. Positive values =
+  unusually-high activity for the local context; negative = quiet.
+type: derived
+inputs:
+  - feature_id: mes_1m_bars
+computation:
+  type: registered_transform
+  transform_id: rolling_zscore
+  parameters:
+    column: volume
+    window_bars: 20
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: -10.0
+  max: 50.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development
