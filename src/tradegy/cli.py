@@ -14,7 +14,12 @@ from tradegy import config
 from tradegy.audit.basic import audit_source
 from tradegy.features import transforms  # noqa: F401  — register transforms
 from tradegy.features.engine import compute_feature
-from tradegy.harness import CostModel, run_backtest
+from tradegy.harness import (
+    CostModel,
+    WalkForwardConfig,
+    run_backtest,
+    run_walk_forward,
+)
 from tradegy.ingest.csv_es import ingest_csv
 from tradegy.ingest.csv_sierra import ingest_sierra_csv
 from tradegy.registry.api import find_features, get_feature, value_at
@@ -296,6 +301,97 @@ def backtest(
     table.add_row("per_trade_sharpe", f"{s.sharpe:.3f}")
     table.add_row("max_drawdown", f"{s.max_drawdown:.2f}")
     console.print(table)
+
+
+@app.command("walk-forward")
+def walk_forward_cmd(
+    spec_id: Annotated[str, typer.Argument(help="strategy spec id")],
+    train_years: Annotated[float, typer.Option(help="train window length")] = 3.0,
+    test_years: Annotated[float, typer.Option(help="test (OOS) window length")] = 1.0,
+    roll_years: Annotated[float, typer.Option(help="roll step between windows")] = 1.0,
+    coverage_start: Annotated[Optional[str], typer.Option(help="ISO 8601; defaults to bar feature's first ts")] = None,
+    coverage_end: Annotated[Optional[str], typer.Option(help="ISO 8601; defaults to bar feature's last ts")] = None,
+    tick_size: Annotated[float, typer.Option()] = 0.25,
+    slippage_ticks: Annotated[float, typer.Option()] = 0.5,
+    commission_round_trip: Annotated[float, typer.Option()] = 1.50,
+) -> None:
+    """Run rolling walk-forward validation. Same parameters in both halves
+    of every window — exposes overfitting and regime fragility.
+
+    Gate (per 07_auto_generation.md:171): avg OOS Sharpe must be ≥ 50%
+    of avg in-sample Sharpe, AND in-sample Sharpe must be positive.
+    """
+    spec_path = config.strategy_specs_dir() / f"{spec_id}.yaml"
+    spec = load_spec(spec_path)
+    cost = CostModel(
+        tick_size=tick_size,
+        slippage_ticks_per_side=slippage_ticks,
+        commission_per_contract_round_trip=commission_round_trip,
+    )
+    cfg = WalkForwardConfig(
+        train_years=train_years, test_years=test_years, roll_years=roll_years,
+    )
+
+    # Default coverage to the bar feature's full range when not given.
+    cs = _parse_iso(coverage_start)
+    ce = _parse_iso(coverage_end)
+    if cs is None or ce is None:
+        from tradegy.harness.data import load_bar_stream
+        bars = load_bar_stream(spec.market_scope.instrument)
+        if cs is None:
+            cs = bars.row(0, named=True)["ts_utc"]
+        if ce is None:
+            ce = bars.row(-1, named=True)["ts_utc"]
+
+    summary = run_walk_forward(
+        spec,
+        coverage_start=cs,
+        coverage_end=ce,
+        config=cfg,
+        cost=cost,
+    )
+    console.print(
+        f"[bold]{summary.spec_id}@{summary.spec_version}[/]  "
+        f"windows={len(summary.windows)}  "
+        f"coverage=[{summary.coverage_start} → {summary.coverage_end}]  "
+        f"config={cfg.train_years}y/{cfg.test_years}y/{cfg.roll_years}y"
+    )
+    table = Table(title="walk-forward windows")
+    table.add_column("#")
+    table.add_column("train")
+    table.add_column("test")
+    table.add_column("IS sharpe", justify="right")
+    table.add_column("OOS sharpe", justify="right")
+    table.add_column("IS trades", justify="right")
+    table.add_column("OOS trades", justify="right")
+    for w in summary.windows:
+        is_s = w.in_sample.stats if w.in_sample else None
+        oos_s = w.out_of_sample.stats if w.out_of_sample else None
+        table.add_row(
+            str(w.index),
+            f"{w.train_start.date()}→{w.train_end.date()}",
+            f"{w.test_start.date()}→{w.test_end.date()}",
+            f"{is_s.sharpe:+.3f}" if is_s else "—",
+            f"{oos_s.sharpe:+.3f}" if oos_s else "—",
+            f"{is_s.total_trades}" if is_s else "—",
+            f"{oos_s.total_trades}" if oos_s else "—",
+        )
+    console.print(table)
+    agg = Table(title="aggregate")
+    agg.add_column("metric")
+    agg.add_column("value", justify="right")
+    agg.add_row("avg in-sample sharpe", f"{summary.avg_in_sample_sharpe:+.3f}")
+    agg.add_row("avg OOS sharpe", f"{summary.avg_oos_sharpe:+.3f}")
+    agg.add_row("worst-window OOS sharpe", f"{summary.worst_window_oos_sharpe:+.3f}")
+    agg.add_row("avg in-sample trades", f"{summary.avg_in_sample_trades:.1f}")
+    agg.add_row("avg OOS trades", f"{summary.avg_oos_trades:.1f}")
+    agg.add_row(
+        "gate",
+        ("[green]PASS[/]" if summary.passed else f"[red]FAIL[/] — {summary.fail_reason}"),
+    )
+    console.print(agg)
+    if not summary.passed:
+        raise typer.Exit(code=4)
 
 
 if __name__ == "__main__":
