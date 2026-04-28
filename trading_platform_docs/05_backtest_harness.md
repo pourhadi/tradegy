@@ -30,25 +30,29 @@ Phase 3A shipped the MVP single-spec single-window driver in
 | Regime-stratified stats | NOT implemented |
 | Parameter sensitivity sweep | NOT implemented |
 | Baseline comparisons | NOT implemented |
-| Walk-forward | NOT implemented (mode `single` only) |
+| Walk-forward | **implemented (Phase 5A)** — rolling (train, test) windows; same parameters in both halves; gate per `07_auto_generation.md:171` (avg OOS Sharpe ≥ 50% of avg in-sample, in-sample must be positive) |
+| Walk-forward parameter optimization | NOT implemented (within-envelope grid search; would compound multi-testing problem and needs Deflated Sharpe correction) |
 | CPCV | NOT implemented |
 | Stress periods | NOT implemented |
 | Leakage audit (recompute features at sampled T) | covered already by `tradegy validate <feature>` at the feature-pipeline layer; harness-side audit deferred |
 | Evidence signing | NOT implemented |
-| Run modes | `single` only; `walk_forward` / `cpcv` / `sensitivity` / `variant_sweep` / `regression` / `batch` deferred |
+| Run modes | `single` and `walk_forward` shipped (CLI: `tradegy backtest`, `tradegy walk-forward`); `cpcv` / `sensitivity` / `variant_sweep` / `regression` / `batch` deferred |
 | Multi-strategy simulation | NOT implemented |
 | Live replay drift detection | NOT implemented |
 
 CLI: `tradegy backtest <spec_id>` runs a `single` mode backtest and
-prints aggregate stats. End-to-end runs on real MES data
-(2019-05 → 2025-06, 609,923 1m bars):
+prints aggregate stats. `tradegy walk-forward <spec_id>` runs rolling
+(train, test) walk-forward and prints per-window + aggregate stats.
+End-to-end runs on real MES data (2019-05 → 2025-06, 609,923 1m bars):
 
-| Spec | Trades | Win rate | Expectancy R | Notes |
+| Spec | Single-mode trades | Single-mode expectancy R | Walk-forward (3y/1y/1y) gate | Notes |
 |---|---|---|---|---|
-| `mes_momentum_breakout` | 9,719 | 26.8% | -0.29 | naive momentum continuation |
-| `mes_vwap_reversion` | 1,512 | 25.2% | -0.56 | naive long-only fade; ~1 trade per CMES session via session-aware loop |
+| `mes_momentum_breakout` | 9,719 | -0.29 | FAIL (avg in-sample Sharpe -0.15, OOS -0.18) | naive momentum continuation |
+| `mes_vwap_reversion` | 1,512 | -0.56 | FAIL (avg in-sample Sharpe -0.31, OOS -0.26) | naive long-only fade |
 
-Both strategies are unprofitable post-cost — the expected shape for
+Both strategies fail the walk-forward gate at the "no in-sample edge"
+check — they are unprofitable both in-sample and out-of-sample. The
+expected shape for
 naive entry rules without regime filters / volatility gating /
 time-of-day discipline. Surfacing this honestly is the point of the
 harness; finding a strategy with actual edge is the next iteration's
