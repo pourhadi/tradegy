@@ -86,6 +86,10 @@ def _resolve_inputs(
         "resample_ohlcv_bars": ["bars"],
         "log_return": ["bars"],
         "rolling_realized_vol": ["returns"],
+        "true_range": ["bars"],
+        "rolling_mean": ["series"],
+        "rolling_zscore": ["series"],
+        "session_position": ["bars"],
     }
     transform_id = feature.computation.transform_id
     if transform_id not in slot_name_for_transform:
