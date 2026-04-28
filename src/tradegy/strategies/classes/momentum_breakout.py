@@ -57,7 +57,11 @@ class MomentumBreakout(StrategyClass):
         "max_attempts_per_session": {
             "type": "integer",
             "min": 1,
-            "max": 10,
+            # Until the harness becomes session-aware (Phase 3+), the
+            # whole backtest window is one logical "session", so the
+            # ceiling has to be tall enough for multi-year runs. Real
+            # session-per-day reset will lower this when it lands.
+            "max": 100000,
             "default": 1,
         },
     }

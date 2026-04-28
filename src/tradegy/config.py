@@ -38,3 +38,10 @@ def data_sources_registry_dir() -> Path:
 
 def features_registry_dir() -> Path:
     return registries_dir() / "features"
+
+
+def strategy_specs_dir() -> Path:
+    """Where strategy spec YAMLs live. Separate from the registries/
+    folder because specs reference registry classes, not the other way
+    around."""
+    return repo_root() / "strategies"

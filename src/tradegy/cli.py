@@ -10,13 +10,18 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from tradegy import config
 from tradegy.audit.basic import audit_source
 from tradegy.features import transforms  # noqa: F401  — register transforms
 from tradegy.features.engine import compute_feature
+from tradegy.harness import CostModel, run_backtest
 from tradegy.ingest.csv_es import ingest_csv
 from tradegy.ingest.csv_sierra import ingest_sierra_csv
 from tradegy.registry.api import find_features, get_feature, value_at
 from tradegy.registry.loader import load_data_source, load_feature
+from tradegy.specs import load_spec
+from tradegy.strategies import auxiliary_classes  # noqa: F401  — register
+from tradegy.strategies import classes  # noqa: F401  — register
 from tradegy.validate.no_lookahead import audit_no_lookahead
 from tradegy.validate.reproducibility import check_reproducibility
 
@@ -236,6 +241,61 @@ def live_test_connection(source_id: Annotated[str, typer.Argument()]) -> None:
         console.print(f"[red]connection failed:[/] {exc!r}")
         raise typer.Exit(code=1) from exc
     console.print_json(json.dumps(result, default=str))
+
+
+@app.command()
+def backtest(
+    spec_id: Annotated[str, typer.Argument(help="strategy spec id; resolves to strategies/<id>.yaml")],
+    start: Annotated[Optional[str], typer.Option(help="ISO 8601")] = None,
+    end: Annotated[Optional[str], typer.Option(help="ISO 8601")] = None,
+    tick_size: Annotated[float, typer.Option(help="instrument tick size")] = 0.25,
+    slippage_ticks: Annotated[float, typer.Option(help="adverse slippage per side, in ticks")] = 0.5,
+    commission_round_trip: Annotated[float, typer.Option(help="commission per contract round trip")] = 1.50,
+) -> None:
+    """Run a single-spec single-window backtest (Phase 3A: `single` mode).
+
+    Reads strategies/<spec_id>.yaml, resolves all class references,
+    materializes bars + features for the spec's instrument, and runs the
+    deterministic state-machine driver to produce trades + aggregate
+    stats.
+    """
+    spec_path = config.strategy_specs_dir() / f"{spec_id}.yaml"
+    spec = load_spec(spec_path)
+    cost = CostModel(
+        tick_size=tick_size,
+        slippage_ticks_per_side=slippage_ticks,
+        commission_per_contract_round_trip=commission_round_trip,
+    )
+    result = run_backtest(
+        spec,
+        start=_parse_iso(start),
+        end=_parse_iso(end),
+        cost=cost,
+    )
+    s = result.stats
+    console.print(
+        f"[bold]{result.spec_id}@{result.spec_version}[/]  "
+        f"bars={result.total_bars}  "
+        f"window=[{result.coverage_start} → {result.coverage_end}]"
+    )
+    if s is None or s.total_trades == 0:
+        console.print("[yellow]no trades[/]")
+        return
+    table = Table(title="aggregate stats")
+    table.add_column("metric")
+    table.add_column("value", justify="right")
+    table.add_row("total_trades", f"{s.total_trades}")
+    table.add_row("expectancy_R", f"{s.expectancy_R:+.4f}")
+    table.add_row("total_pnl", f"{s.total_pnl:+.2f}")
+    table.add_row("total_pnl_R", f"{s.total_pnl_R:+.2f}")
+    table.add_row("win_rate", f"{s.win_rate:.1%}")
+    table.add_row("avg_win_R", f"{s.avg_win_R:+.3f}")
+    table.add_row("avg_loss_R", f"{s.avg_loss_R:+.3f}")
+    table.add_row("profit_factor", f"{s.profit_factor:.2f}")
+    table.add_row("avg_holding_bars", f"{s.avg_holding_bars:.1f}")
+    table.add_row("per_trade_sharpe", f"{s.sharpe:.3f}")
+    table.add_row("max_drawdown", f"{s.max_drawdown:.2f}")
+    console.print(table)
 
 
 if __name__ == "__main__":
