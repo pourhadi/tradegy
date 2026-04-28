@@ -90,6 +90,7 @@ def _resolve_inputs(
         "rolling_mean": ["series"],
         "rolling_zscore": ["series"],
         "session_position": ["bars"],
+        "session_vwap": ["bars"],
     }
     transform_id = feature.computation.transform_id
     if transform_id not in slot_name_for_transform:

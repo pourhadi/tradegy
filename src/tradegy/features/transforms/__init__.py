@@ -55,5 +55,6 @@ from tradegy.features.transforms import (  # noqa: E402,F401
     rolling_realized_vol,
     rolling_zscore,
     session_position,
+    session_vwap,
     true_range,
 )
