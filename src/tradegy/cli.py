@@ -23,6 +23,8 @@ from tradegy.validate.reproducibility import check_reproducibility
 app = typer.Typer(help="Tradegy feature pipeline.", no_args_is_help=True)
 registry_app = typer.Typer(help="Registry queries.", no_args_is_help=True)
 app.add_typer(registry_app, name="registry")
+live_app = typer.Typer(help="Live adapters (parity contract).", no_args_is_help=True)
+app.add_typer(live_app, name="live")
 console = Console()
 
 
@@ -194,6 +196,39 @@ def registry_list(
 def registry_show(feature_id: Annotated[str, typer.Argument()]) -> None:
     f = load_feature(feature_id)
     console.print_json(f.model_dump_json())
+
+
+@live_app.command("test-connection")
+def live_test_connection(source_id: Annotated[str, typer.Argument()]) -> None:
+    """Connect via the source's live adapter, qualify the contract, report
+    health. Does NOT subscribe — useful to verify TWS reachability and the
+    contract resolution path without exercising the (currently stubbed)
+    subscribe body.
+    """
+    import asyncio
+
+    from tradegy.live import get_live_adapter
+
+    source = load_data_source(source_id)
+    if source.live is None:
+        console.print(f"[red]source {source_id!r} has no `live` adapter declared[/]")
+        raise typer.Exit(code=2)
+    adapter = get_live_adapter(source.live.adapter)
+
+    async def _run() -> dict:
+        await adapter.connect()
+        try:
+            contract = adapter.qualify(source.live)  # type: ignore[attr-defined]
+            return adapter.health() | {"qualified": str(contract)}
+        finally:
+            await adapter.disconnect()
+
+    try:
+        result = asyncio.run(_run())
+    except Exception as exc:  # noqa: BLE001 — surface the underlying error
+        console.print(f"[red]connection failed:[/] {exc!r}")
+        raise typer.Exit(code=1) from exc
+    console.print_json(json.dumps(result, default=str))
 
 
 if __name__ == "__main__":

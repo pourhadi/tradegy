@@ -14,6 +14,6 @@ from tradegy.live.base import (  # noqa: F401
 )
 
 # Concrete adapter modules wire themselves into the registry via
-# `register_live_adapter`. New adapters add a side-effect import line here.
-# (`tradegy.live.ibkr` is wired in once that module lands — Phase 4 of the
-# parity-contract rollout.)
+# `register_live_adapter`. Each adapter module is imported here for its
+# registration side effect.
+from tradegy.live import ibkr  # noqa: E402,F401
