@@ -1,0 +1,34 @@
+# 5-bar (5-minute) rolling annualized realized volatility of ES 1-min log returns.
+#
+# This is the canonical "first feature" for the vertical slice — chosen
+# because it exercises tick→bar resampling, a windowed rolling transform
+# (where lookahead bugs hide), and availability_latency enforcement.
+#
+# Annualization assumes 252 trading days * 390 minutes per day = 98280 bars/yr.
+# Production specs would derive bars_per_year from the data source's session
+# calendar; that calendar machinery is deferred to a later slice.
+
+id: realized_vol_5m
+version: v1
+description: >
+  Annualized realized volatility of 1-minute ES log returns over a 5-bar
+  rolling window. Output unit: annualized standard deviation in return units
+  (i.e. ~0.15 = 15% vol).
+type: derived
+inputs:
+  - feature_id: es_1m_log_returns
+computation:
+  type: registered_transform
+  transform_id: rolling_realized_vol
+  parameters:
+    window_bars: 5
+    bars_per_year: 98280
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 5.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development
