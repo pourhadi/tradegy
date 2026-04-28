@@ -108,4 +108,35 @@ def is_expected_gap(
     return False
 
 
-__all__ = ["expected_non_session_intervals", "is_expected_gap"]
+def session_intervals(
+    calendar_name: str, start: datetime, end: datetime
+) -> list[tuple[str, datetime, datetime]]:
+    """Return [(session_id, open_utc, close_utc)] for every session that
+    overlaps [start, end].
+
+    ``session_id`` is the calendar's session label (YYYY-MM-DD ISO date),
+    used by the harness to detect session transitions. Sessions for the
+    CME calendars are 23-hour spans named by close date.
+    """
+    cal = xc.get_calendar(calendar_name)
+    pad = timedelta(days=1)
+    sessions = cal.sessions_in_range(
+        (start - pad).date().isoformat(),
+        (end + pad).date().isoformat(),
+    )
+    out: list[tuple[str, datetime, datetime]] = []
+    for sess in sessions:
+        sess_open = cal.session_open(sess).to_pydatetime().astimezone(timezone.utc)
+        sess_close = cal.session_close(sess).to_pydatetime().astimezone(timezone.utc)
+        if sess_close <= start or sess_open >= end:
+            continue
+        out.append((sess.date().isoformat(), sess_open, sess_close))
+    out.sort(key=lambda iv: iv[1])
+    return out
+
+
+__all__ = [
+    "expected_non_session_intervals",
+    "is_expected_gap",
+    "session_intervals",
+]

@@ -1,21 +1,30 @@
-"""Backtest harness runner — single spec, single window.
+"""Backtest harness runner — single spec, single window, session-aware.
 
 Per 05_backtest_harness.md, the runner is the deterministic bar-by-bar
 driver that:
   1. Loads + validates the spec (already done by tradegy.specs.loader).
   2. Builds the bar + feature panel for the spec's instrument and window.
-  3. Initializes the strategy class state machine.
+  3. Initializes the strategy class state machine for the first session.
   4. For each bar:
-     a. Check if a stop was triggered during the bar; if so, emit the
+     a. If the bar belongs to a different session than the previous bar:
+        force-flatten any open position (ExitReason.SESSION_END at the
+        prior bar's close), reinitialize strategy state for the new
+        session — counters like max_attempts_per_session reset.
+     b. Check if a stop was triggered during the bar; if so, emit the
         closing fill at the stop price and record the trade.
-     b. Check the spec's exit blocks (time_stop, invalidation
-        conditions); if they fire, emit a closing market order at the
+     c. Check the spec's exit blocks (time_stop, invalidation
+        conditions); if they fire, queue a closing market order for the
         next bar's open.
-     c. Increment bars_since_entry if in position.
-     d. Call strategy.on_bar; for any returned entry order, emit a
+     d. Increment bars_since_entry if in position.
+     e. Call strategy.on_bar; for any returned entry order, queue a
         market fill at the next bar's open (subject to slippage).
   5. Close any open position on the final bar.
   6. Aggregate trades into the AggregateStats block and return.
+
+Session boundaries come from the CMES exchange_calendars calendar by
+default; override via the ``session_calendar`` argument. Bars that fall
+outside any session (deep weekend, holiday) are skipped — they emit no
+strategy callbacks but are otherwise non-events.
 
 The MVP supports market entries only. Limit-order fills (and the
 "price-must-trade-through" gating) are deferred until a strategy spec
@@ -30,6 +39,7 @@ from pathlib import Path
 
 import polars as pl
 
+from tradegy.calendar import session_intervals
 from tradegy.harness.data import (
     build_feature_panel,
     iter_bars_with_features,
@@ -74,6 +84,7 @@ class BacktestResult:
     coverage_start: datetime
     coverage_end: datetime
     total_bars: int
+    sessions_traversed: int = 0
     trades: list[Trade] = field(default_factory=list)
     stats: AggregateStats | None = None
 
@@ -85,8 +96,16 @@ def run_backtest(
     end: datetime | None = None,
     cost: CostModel | None = None,
     feature_root: Path | None = None,
+    session_calendar: str = "CMES",
 ) -> BacktestResult:
-    """Run a single-spec backtest and return trades + stats."""
+    """Run a single-spec backtest and return trades + stats.
+
+    The driver is session-aware: at every session boundary the harness
+    flattens any open position and reinitializes strategy state, so
+    ``max_attempts_per_session`` counts correctly per real session.
+    Override the calendar via ``session_calendar`` (default CMES, the
+    CME futures calendar).
+    """
     cost = cost or CostModel()
 
     # Resolve the strategy class and auxiliary classes once.
@@ -136,11 +155,17 @@ def run_backtest(
         )
     panel = build_feature_panel(bars, required_features, feature_root=feature_root)
 
-    # Initialize state. session_date is the first bar's date for the MVP;
-    # multi-session looping is deferred (the harness treats the whole
-    # window as one logical "session" for now). The stand_down /
-    # momentum_breakout classes don't depend on session boundaries.
-    first_ts = bars.row(0, named=True)["ts_utc"]
+    # Tag each bar with its session id via asof-join against the
+    # calendar's session intervals. Bars in non-session windows
+    # (weekend / holiday gaps) get session_id=null and are skipped.
+    win_start = bars.row(0, named=True)["ts_utc"]
+    win_end = bars.row(-1, named=True)["ts_utc"]
+    sess_intervals = session_intervals(session_calendar, win_start, win_end)
+    panel = _attach_session_ids(panel, sess_intervals)
+
+    # Initialize state for the first session. We re-initialize at every
+    # subsequent session boundary inside the loop.
+    first_ts = win_start
     state = strategy_class.initialize(
         spec.entry.parameters, instrument, first_ts
     )
@@ -151,10 +176,66 @@ def run_backtest(
 
     last_bar: Bar | None = None
     bar_count = 0
+    current_session_id: str | None = None
+    sessions_traversed = 0
 
     rows = list(iter_bars_with_features(panel, required_features))
+    session_ids = panel.get_column("__session_id").to_list()
     for i, (bar, features) in enumerate(rows):
         bar_count += 1
+        bar_session_id = session_ids[i]
+
+        # Skip bars in non-session windows entirely.
+        if bar_session_id is None:
+            last_bar = bar
+            continue
+
+        # Session transition: flatten + reinit before handling this bar.
+        if current_session_id is None:
+            current_session_id = bar_session_id
+            sessions_traversed = 1
+        elif bar_session_id != current_session_id:
+            if not state.position.is_flat and last_bar is not None:
+                # Close at the prior bar's close — that's the end-of-
+                # session price (no slippage; treat as session-close
+                # auction).
+                closing_side = state.position.side
+                qty = abs(state.position.quantity)
+                entry_px = state.position.avg_entry_price
+                entry_ts = state.position.entry_ts
+                initial_stop = state.position.initial_stop_price
+                holding = state.position.bars_since_entry
+                close_fill = fill_market_order(
+                    Order(
+                        side=Side.SHORT if closing_side == Side.LONG else Side.LONG,
+                        type=OrderType.MARKET,
+                        quantity=qty,
+                        tag=f"session_end:{current_session_id}",
+                    ),
+                    last_bar.close, last_bar.ts_utc, cost,
+                )
+                realized = apply_fill(state.position, close_fill)
+                trades.append(
+                    _build_trade(
+                        spec, instrument, closing_side, qty,
+                        entry_ts, entry_px, initial_stop,
+                        last_bar.ts_utc, close_fill.price, realized,
+                        open_commission=cost.commission_per_side * qty,
+                        close_fill=close_fill,
+                        holding_bars=holding,
+                        exit_reason=ExitReason.SESSION_END,
+                        cost=cost,
+                    )
+                )
+            # Cancel any pending orders / exits at the boundary; the
+            # strategy gets a clean state.
+            pending_orders = []
+            pending_close_reason = None
+            state = strategy_class.initialize(
+                spec.entry.parameters, instrument, bar.ts_utc
+            )
+            current_session_id = bar_session_id
+            sessions_traversed += 1
 
         # 1) Fill any orders queued from the previous bar at this bar's open.
         if pending_orders:
@@ -317,8 +398,56 @@ def run_backtest(
         coverage_start=rows[0][0].ts_utc if rows else first_ts,
         coverage_end=rows[-1][0].ts_utc if rows else first_ts,
         total_bars=bar_count,
+        sessions_traversed=sessions_traversed,
         trades=trades,
         stats=stats,
+    )
+
+
+def _attach_session_ids(
+    panel: pl.DataFrame,
+    intervals: list[tuple[str, datetime, datetime]],
+) -> pl.DataFrame:
+    """Tag each bar with the session id whose [open, close) contains it.
+
+    Uses join_asof on session open + a post-join close-bound check —
+    bars in non-session windows end up with __session_id = null.
+    """
+    if not intervals:
+        return panel.with_columns(
+            pl.lit(None, dtype=pl.Utf8).alias("__session_id")
+        )
+    sess_df = pl.DataFrame(
+        {
+            "__session_id": [iv[0] for iv in intervals],
+            "__sess_open": [iv[1] for iv in intervals],
+            "__sess_close": [iv[2] for iv in intervals],
+        },
+        schema={
+            "__session_id": pl.Utf8,
+            "__sess_open": pl.Datetime("ns", "UTC"),
+            "__sess_close": pl.Datetime("ns", "UTC"),
+        },
+    ).sort("__sess_open")
+    return (
+        panel.sort("ts_utc")
+        .with_columns(pl.col("ts_utc").cast(pl.Datetime("ns", "UTC")))
+        .join_asof(
+            sess_df,
+            left_on="ts_utc",
+            right_on="__sess_open",
+            strategy="backward",
+        )
+        .with_columns(
+            pl.when(
+                pl.col("__sess_close").is_not_null()
+                & (pl.col("ts_utc") < pl.col("__sess_close"))
+            )
+            .then(pl.col("__session_id"))
+            .otherwise(None)
+            .alias("__session_id")
+        )
+        .drop(["__sess_open", "__sess_close"])
     )
 
 

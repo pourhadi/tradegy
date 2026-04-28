@@ -196,6 +196,78 @@ def test_runner_time_stop_caps_holding(tmp_path: Path) -> None:
         assert t.holding_bars <= 11, f"trade held {t.holding_bars} bars (>= time stop)"
 
 
+def test_session_boundary_resets_state(tmp_path: Path) -> None:
+    """A bar series that spans two CMES sessions: max_attempts_per_session=1
+    should permit one entry per session, not one across the whole window.
+    """
+    feat_root = tmp_path / "features"
+    bars_dir = feat_root / "feature=mes_1m_bars" / "version=v1"
+    rets_dir = feat_root / "feature=mes_5m_log_returns" / "version=v1"
+
+    # Place bars on either side of the CMES session boundary at
+    # 2024-06-04 22:00 UTC (Tue session close / Wed session open).
+    # Session N runs 2024-06-03 22:00 UTC → 2024-06-04 22:00 UTC.
+    # Session N+1 runs 2024-06-04 22:00 UTC → 2024-06-05 22:00 UTC.
+    sess_n_close = datetime(2024, 6, 4, 22, 0, tzinfo=timezone.utc)
+    rows: list[dict] = []
+    rets: list[dict] = []
+    for offset_min in range(-30, 30):
+        ts = sess_n_close + timedelta(minutes=offset_min)
+        # Always-positive return → strategy fires every bar where attempts
+        # remain. With the cap at 1 per session and two sessions in this
+        # data, we expect at most 2 entries.
+        rets.append({"ts_utc": ts, "value": 0.005})
+        rows.append({
+            "ts_utc": ts,
+            "open": 5000.0, "high": 5000.5, "low": 4999.5, "close": 5000.0,
+            "volume": 100, "num_trades": 50, "bid_volume": 60, "ask_volume": 40,
+        })
+
+    # Partition by date.
+    bars_df = pl.DataFrame(rows, schema={
+        "ts_utc": pl.Datetime("ns", "UTC"),
+        "open": pl.Float64, "high": pl.Float64, "low": pl.Float64,
+        "close": pl.Float64,
+        "volume": pl.Int64, "num_trades": pl.Int64,
+        "bid_volume": pl.Int64, "ask_volume": pl.Int64,
+    })
+    rets_df = pl.DataFrame(rets, schema={
+        "ts_utc": pl.Datetime("ns", "UTC"), "value": pl.Float64,
+    })
+    for d, sub in bars_df.with_columns(pl.col("ts_utc").dt.date().alias("__d")).group_by("__d"):
+        date = d[0]
+        part = bars_dir / f"date={date.isoformat()}"
+        part.mkdir(parents=True)
+        sub.drop("__d").write_parquet(part / "data.parquet")
+    for d, sub in rets_df.with_columns(pl.col("ts_utc").dt.date().alias("__d")).group_by("__d"):
+        date = d[0]
+        part = rets_dir / f"date={date.isoformat()}"
+        part.mkdir(parents=True)
+        sub.drop("__d").write_parquet(part / "data.parquet")
+
+    spec = _build_spec()
+    spec.entry.parameters["max_attempts_per_session"] = 1
+    # Disable the time stop and widen the stop so the entry from the
+    # first session is still open when the boundary arrives — that's the
+    # case session-aware looping is supposed to handle.
+    spec.stops.time_stop.enabled = False
+    spec.stops.initial_stop["stop_ticks"] = 80
+    result = run_backtest(spec, feature_root=feat_root)
+
+    assert result.sessions_traversed >= 2
+    # The held position from the first session is force-closed at the
+    # boundary; we expect at least one SESSION_END trade.
+    session_end_trades = [t for t in result.trades if t.exit_reason.value == "session_end"]
+    assert session_end_trades, (
+        f"expected at least one session_end-flagged trade; got "
+        f"{[(t.entry_ts, t.exit_ts, t.exit_reason.value) for t in result.trades]}"
+    )
+    # And the second session should also have triggered an entry (the
+    # max_attempts counter reset at the boundary).
+    second_session_entries = [t for t in result.trades if t.entry_ts >= sess_n_close]
+    assert second_session_entries, "second-session entry expected after counter reset"
+
+
 def test_runner_no_trades_on_flat_data(tmp_path: Path) -> None:
     """Feature stream with all zeros — no entries should fire."""
     feat_root = tmp_path / "features"
