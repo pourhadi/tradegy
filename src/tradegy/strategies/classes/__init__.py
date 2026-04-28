@@ -9,4 +9,5 @@ from __future__ import annotations
 from tradegy.strategies.classes import (  # noqa: F401
     momentum_breakout,
     stand_down,
+    vwap_reversion,
 )
