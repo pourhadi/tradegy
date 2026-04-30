@@ -1,8 +1,8 @@
-# 1-minute log returns over ES front-month bars.
+# 1-minute log returns over ES 1m bars.
 
 id: es_1m_log_returns
 version: v1
-description: log(close_t / close_{t-1}) computed on 1-minute ES bars.
+description: log(close_t / close_{t-1}) on es_1m_bars.
 type: derived
 inputs:
   - feature_id: es_1m_bars

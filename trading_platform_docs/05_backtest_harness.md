@@ -5,6 +5,61 @@
 
 ---
 
+## Implementation status (2026-04-28)
+
+Phase 3A shipped the MVP single-spec single-window driver in
+`src/tradegy/harness/`:
+
+| Component | Status |
+|---|---|
+| Spec loader / validator | implemented (delegates to `tradegy.specs.loader`) |
+| Bar stream loader | implemented (canonical `{instrument}_1m_bars` feature) |
+| Feature stream loader | implemented (join_asof on `served_at`, honors availability_latency) |
+| Time-controlled clock | implemented as bar iterator (no future-data access by construction) |
+| Session-aware loop reset | **implemented (Phase 4A)** — bars tagged with CMES session id; force-flatten with ExitReason.SESSION_END at each boundary; strategy state reinitialized so per-session counters reset; bars outside any session skipped |
+| Strategy state machine driver | implemented |
+| Order lifecycle: market | implemented (next-bar-open + fixed-tick adverse slippage) |
+| Order lifecycle: stop | implemented (fill at stop + adverse slippage when bar trades through) |
+| Order lifecycle: limit | NOT implemented (defer until a strategy spec needs limit entries) |
+| Slippage model | fixed-tick per side (the simple v1 alternative described in the doc) |
+| Commission model | per-contract round-trip, configurable |
+| Margin cost | NOT implemented (no overnight holding cost in v1) |
+| Position tracker | implemented |
+| Per-trade record | implemented (Trade dataclass) |
+| Aggregate stats | implemented: total_trades, expectancy_R, total_pnl, win_rate, avg_win_R, avg_loss_R, profit_factor, avg_holding_bars, per-trade Sharpe, max_drawdown |
+| Regime-stratified stats | NOT implemented |
+| Parameter sensitivity sweep | NOT implemented |
+| Baseline comparisons | NOT implemented |
+| Walk-forward | **implemented (Phase 5A)** — rolling (train, test) windows; same parameters in both halves; gate per `07_auto_generation.md:171` (avg OOS Sharpe ≥ 50% of avg in-sample, in-sample must be positive) |
+| Walk-forward parameter optimization | NOT implemented (within-envelope grid search; would compound multi-testing problem and needs Deflated Sharpe correction) |
+| CPCV | NOT implemented |
+| Stress periods | NOT implemented |
+| Leakage audit (recompute features at sampled T) | covered already by `tradegy validate <feature>` at the feature-pipeline layer; harness-side audit deferred |
+| Evidence signing | NOT implemented |
+| Run modes | `single` and `walk_forward` shipped (CLI: `tradegy backtest`, `tradegy walk-forward`); `cpcv` / `sensitivity` / `variant_sweep` / `regression` / `batch` deferred |
+| Multi-strategy simulation | NOT implemented |
+| Live replay drift detection | NOT implemented |
+
+CLI: `tradegy backtest <spec_id>` runs a `single` mode backtest and
+prints aggregate stats. `tradegy walk-forward <spec_id>` runs rolling
+(train, test) walk-forward and prints per-window + aggregate stats.
+End-to-end runs on real MES data (2019-05 → 2025-06, 609,923 1m bars):
+
+| Spec | Single-mode trades | Single-mode expectancy R | Walk-forward (3y/1y/1y) gate | Notes |
+|---|---|---|---|---|
+| `mes_momentum_breakout` | 9,719 | -0.29 | FAIL (avg in-sample Sharpe -0.15, OOS -0.18) | naive momentum continuation |
+| `mes_vwap_reversion` | 1,512 | -0.56 | FAIL (avg in-sample Sharpe -0.31, OOS -0.26) | naive long-only fade |
+
+Both strategies fail the walk-forward gate at the "no in-sample edge"
+check — they are unprofitable both in-sample and out-of-sample. The
+expected shape for
+naive entry rules without regime filters / volatility gating /
+time-of-day discipline. Surfacing this honestly is the point of the
+harness; finding a strategy with actual edge is the next iteration's
+work.
+
+---
+
 ## Design principles
 
 1. **Bit-exact reproducibility.** Running the same spec against the same data with the same harness version must produce identical results every time. No wall-clock dependencies, no unseeded randomness, no environment leakage.

@@ -1,0 +1,25 @@
+# 5-bar (5-minute) rolling annualized realized volatility of ES 1m log returns.
+
+id: es_realized_vol_5m
+version: v1
+description: >
+  Annualized realized volatility of es_1m_log_returns over a 5-bar rolling
+  window. Output unit: annualized return-space std dev (~0.15 = 15% vol).
+type: derived
+inputs:
+  - feature_id: es_1m_log_returns
+computation:
+  type: registered_transform
+  transform_id: rolling_realized_vol
+  parameters:
+    window_bars: 5
+    bars_per_year: 98280
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 5.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

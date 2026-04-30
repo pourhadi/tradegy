@@ -1,0 +1,38 @@
+# Test-only synthetic tick source. NOT a parity-contract source — it has no
+# live adapter declared because it is generated in-process from a seeded
+# random walk for unit tests. Production sources MUST declare a `live` block.
+
+id: synth_ticks
+version: v1
+description: >
+  Synthetic ts/price/size tick stream used by the unit/integration test
+  suite to exercise the generic_csv ingest, the resample_ohlcv tick
+  transform, and the downstream feature chain. Not for any non-test use.
+type: market_data
+provider: in_test_synthetic
+revisable: false
+revision_policy: never_revised
+admission_rationale: test fixture only.
+coverage:
+  start_date: 2024-01-02
+  end_date: 2024-01-03
+  gaps: []
+cadence: tick
+fields:
+  - {name: ts, type: timestamp}
+  - {name: price, type: float}
+  - {name: size, type: int}
+timestamp_column: ts
+availability_latency:
+  median_seconds: 0.0
+  p99_seconds: 0.0
+  notes: synthetic; no real latency.
+licensing:
+  live_use: false
+  backtest_use: true
+  redistribution: false
+known_issues:
+  - >
+    Synthetic test fixture; absence of `live` block is deliberate — the
+    parity contract does not apply to test-only sources.
+audit_history: []

@@ -1,0 +1,24 @@
+# Building block for ATR. Per-bar true range on MES 1m bars.
+
+id: mes_true_range_1m
+version: v1
+description: >
+  Wilder true range per 1-minute MES bar:
+  max(high - low, |high - prev_close|, |low - prev_close|).
+  Captures range-based volatility independent of return magnitude.
+type: derived
+inputs:
+  - feature_id: mes_1m_bars
+computation:
+  type: registered_transform
+  transform_id: true_range
+  parameters: {}
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 1000.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

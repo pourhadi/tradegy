@@ -1,0 +1,26 @@
+# Vital sign 2: 30-minute realized volatility on MES.
+# Slower-horizon vol for regime detection and position-sizing baselines.
+
+id: mes_realized_vol_30m
+version: v1
+description: >
+  Annualized realized volatility of mes_1m_log_returns over a 30-bar
+  rolling window. Output unit: annualized return-space std dev.
+type: derived
+inputs:
+  - feature_id: mes_1m_log_returns
+computation:
+  type: registered_transform
+  transform_id: rolling_realized_vol
+  parameters:
+    window_bars: 30
+    bars_per_year: 98280
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 5.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

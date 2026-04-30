@@ -1,19 +1,26 @@
 """Pytest fixtures for the feature pipeline tests.
 
-We generate a synthetic ES-shaped tick CSV (timestamp, price, size) covering
-two trading sessions. Synthetic, but the schema and timezone semantics match
-what real ES tick CSVs look like, so the same code paths run end-to-end. A
-real CSV can be dropped into data/raw_csv/ for manual end-to-end testing.
+We generate a synthetic ts/price/size tick CSV covering two short sessions
+and point the registry loaders at tests/fixtures/registry/ so the tests
+exercise the real loader/engine code paths against a controlled,
+test-only DataSource (`synth_ticks`) and feature chain (`synth_*`).
+
+The production registry under registries/ holds only parity-contract
+sources (mes_5s_ohlcv, es_1s_ohlcv); deliberately keeping test fixtures
+out of it.
 """
 from __future__ import annotations
 
-import math
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import polars as pl
 import pytest
 
-import polars as pl
+from tradegy import config
+
+
+_TESTS_REGISTRY_ROOT = Path(__file__).parent / "fixtures" / "registry"
 
 
 def _generate_es_ticks(
@@ -78,3 +85,18 @@ def workspace(tmp_path: Path) -> dict[str, Path]:
     for p in (raw, feats, audits):
         p.mkdir(parents=True)
     return {"raw": raw, "features": feats, "audits": audits, "root": tmp_path}
+
+
+@pytest.fixture(autouse=True)
+def _redirect_registry_to_test_fixtures(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the registry loaders at tests/fixtures/registry/ for the test
+    session so the production registries/ stay parity-contract-only.
+
+    The synth_* registry entries here mirror the legacy es_* feature chain
+    (tick → 1m bars → log returns → realized vol) but explicitly mark
+    `synth_ticks` as a test-only source with no `live` block.
+    """
+    ds_dir = _TESTS_REGISTRY_ROOT / "data_sources"
+    feat_dir = _TESTS_REGISTRY_ROOT / "features"
+    monkeypatch.setattr(config, "data_sources_registry_dir", lambda: ds_dir)
+    monkeypatch.setattr(config, "features_registry_dir", lambda: feat_dir)

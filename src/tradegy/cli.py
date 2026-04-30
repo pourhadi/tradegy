@@ -10,18 +10,31 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from tradegy import config
 from tradegy.audit.basic import audit_source
 from tradegy.features import transforms  # noqa: F401  — register transforms
 from tradegy.features.engine import compute_feature
+from tradegy.harness import (
+    CostModel,
+    WalkForwardConfig,
+    run_backtest,
+    run_walk_forward,
+)
 from tradegy.ingest.csv_es import ingest_csv
+from tradegy.ingest.csv_sierra import ingest_sierra_csv
 from tradegy.registry.api import find_features, get_feature, value_at
 from tradegy.registry.loader import load_data_source, load_feature
+from tradegy.specs import load_spec
+from tradegy.strategies import auxiliary_classes  # noqa: F401  — register
+from tradegy.strategies import classes  # noqa: F401  — register
 from tradegy.validate.no_lookahead import audit_no_lookahead
 from tradegy.validate.reproducibility import check_reproducibility
 
 app = typer.Typer(help="Tradegy feature pipeline.", no_args_is_help=True)
 registry_app = typer.Typer(help="Registry queries.", no_args_is_help=True)
 app.add_typer(registry_app, name="registry")
+live_app = typer.Typer(help="Live adapters (parity contract).", no_args_is_help=True)
+app.add_typer(live_app, name="live")
 console = Console()
 
 
@@ -31,9 +44,20 @@ def ingest(
     source_id: Annotated[str, typer.Option(help="data source id")],
     input_tz: Annotated[str, typer.Option(help="IANA tz of CSV timestamps")] = "UTC",
 ) -> None:
-    """Ingest a CSV for an admitted data source (Stage 1)."""
+    """Ingest a CSV for an admitted data source (Stage 1).
+
+    Dispatches on `source.ingest.format`:
+      * sierra_chart_csv → ingest_sierra_csv (multi-column timestamp, OHLCV).
+      * generic_csv (or omitted ingest spec) → ingest_csv (ts/price/size).
+    """
     source = load_data_source(source_id)
-    result = ingest_csv(csv_path, source, input_tz=input_tz)
+    fmt = source.ingest.format if source.ingest is not None else "generic_csv"
+    if fmt == "sierra_chart_csv":
+        result = ingest_sierra_csv(csv_path, source, input_tz=input_tz)
+    elif fmt == "generic_csv":
+        result = ingest_csv(csv_path, source, input_tz=input_tz)
+    else:
+        raise typer.BadParameter(f"unknown ingest format {fmt!r}")
     console.print(
         f"[green]ingested[/] {result.rows_in} rows ({result.duplicates_dropped} dedup'd) "
         f"into {len(result.partitions_written)} partitions"
@@ -45,9 +69,16 @@ def ingest(
 @app.command()
 def audit(
     source_id: Annotated[str, typer.Argument()],
-    max_gap_seconds: Annotated[float, typer.Option()] = 60.0,
+    max_gap_seconds: Annotated[Optional[float], typer.Option(
+        help="override the source's max_inactivity_seconds (default: per-source)"
+    )] = None,
 ) -> None:
-    """Run Stage 2 (basic) audit for an ingested source."""
+    """Run Stage 2 (basic) audit for an ingested source.
+
+    The gap-tolerance threshold is read from the source registry's
+    `max_inactivity_seconds` field; pass `--max-gap-seconds` to override
+    for one run. Falls back to 60s if neither is set.
+    """
     source = load_data_source(source_id)
     report = audit_source(source, max_gap_seconds=max_gap_seconds)
     console.print(
@@ -182,6 +213,185 @@ def registry_list(
 def registry_show(feature_id: Annotated[str, typer.Argument()]) -> None:
     f = load_feature(feature_id)
     console.print_json(f.model_dump_json())
+
+
+@live_app.command("test-connection")
+def live_test_connection(source_id: Annotated[str, typer.Argument()]) -> None:
+    """Connect via the source's live adapter, qualify the contract, report
+    health. Does NOT subscribe — useful to verify TWS reachability and the
+    contract resolution path without exercising the (currently stubbed)
+    subscribe body.
+    """
+    import asyncio
+
+    from tradegy.live import get_live_adapter
+
+    source = load_data_source(source_id)
+    if source.live is None:
+        console.print(f"[red]source {source_id!r} has no `live` adapter declared[/]")
+        raise typer.Exit(code=2)
+    adapter = get_live_adapter(source.live.adapter)
+
+    async def _run() -> dict:
+        await adapter.connect()
+        try:
+            contract = adapter.qualify(source.live)  # type: ignore[attr-defined]
+            return adapter.health() | {"qualified": str(contract)}
+        finally:
+            await adapter.disconnect()
+
+    try:
+        result = asyncio.run(_run())
+    except Exception as exc:  # noqa: BLE001 — surface the underlying error
+        console.print(f"[red]connection failed:[/] {exc!r}")
+        raise typer.Exit(code=1) from exc
+    console.print_json(json.dumps(result, default=str))
+
+
+@app.command()
+def backtest(
+    spec_id: Annotated[str, typer.Argument(help="strategy spec id; resolves to strategies/<id>.yaml")],
+    start: Annotated[Optional[str], typer.Option(help="ISO 8601")] = None,
+    end: Annotated[Optional[str], typer.Option(help="ISO 8601")] = None,
+    tick_size: Annotated[float, typer.Option(help="instrument tick size")] = 0.25,
+    slippage_ticks: Annotated[float, typer.Option(help="adverse slippage per side, in ticks")] = 0.5,
+    commission_round_trip: Annotated[float, typer.Option(help="commission per contract round trip")] = 1.50,
+) -> None:
+    """Run a single-spec single-window backtest (Phase 3A: `single` mode).
+
+    Reads strategies/<spec_id>.yaml, resolves all class references,
+    materializes bars + features for the spec's instrument, and runs the
+    deterministic state-machine driver to produce trades + aggregate
+    stats.
+    """
+    spec_path = config.strategy_specs_dir() / f"{spec_id}.yaml"
+    spec = load_spec(spec_path)
+    cost = CostModel(
+        tick_size=tick_size,
+        slippage_ticks_per_side=slippage_ticks,
+        commission_per_contract_round_trip=commission_round_trip,
+    )
+    result = run_backtest(
+        spec,
+        start=_parse_iso(start),
+        end=_parse_iso(end),
+        cost=cost,
+    )
+    s = result.stats
+    console.print(
+        f"[bold]{result.spec_id}@{result.spec_version}[/]  "
+        f"bars={result.total_bars}  "
+        f"window=[{result.coverage_start} → {result.coverage_end}]"
+    )
+    if s is None or s.total_trades == 0:
+        console.print("[yellow]no trades[/]")
+        return
+    table = Table(title="aggregate stats")
+    table.add_column("metric")
+    table.add_column("value", justify="right")
+    table.add_row("total_trades", f"{s.total_trades}")
+    table.add_row("expectancy_R", f"{s.expectancy_R:+.4f}")
+    table.add_row("total_pnl", f"{s.total_pnl:+.2f}")
+    table.add_row("total_pnl_R", f"{s.total_pnl_R:+.2f}")
+    table.add_row("win_rate", f"{s.win_rate:.1%}")
+    table.add_row("avg_win_R", f"{s.avg_win_R:+.3f}")
+    table.add_row("avg_loss_R", f"{s.avg_loss_R:+.3f}")
+    table.add_row("profit_factor", f"{s.profit_factor:.2f}")
+    table.add_row("avg_holding_bars", f"{s.avg_holding_bars:.1f}")
+    table.add_row("per_trade_sharpe", f"{s.sharpe:.3f}")
+    table.add_row("max_drawdown", f"{s.max_drawdown:.2f}")
+    console.print(table)
+
+
+@app.command("walk-forward")
+def walk_forward_cmd(
+    spec_id: Annotated[str, typer.Argument(help="strategy spec id")],
+    train_years: Annotated[float, typer.Option(help="train window length")] = 3.0,
+    test_years: Annotated[float, typer.Option(help="test (OOS) window length")] = 1.0,
+    roll_years: Annotated[float, typer.Option(help="roll step between windows")] = 1.0,
+    coverage_start: Annotated[Optional[str], typer.Option(help="ISO 8601; defaults to bar feature's first ts")] = None,
+    coverage_end: Annotated[Optional[str], typer.Option(help="ISO 8601; defaults to bar feature's last ts")] = None,
+    tick_size: Annotated[float, typer.Option()] = 0.25,
+    slippage_ticks: Annotated[float, typer.Option()] = 0.5,
+    commission_round_trip: Annotated[float, typer.Option()] = 1.50,
+) -> None:
+    """Run rolling walk-forward validation. Same parameters in both halves
+    of every window — exposes overfitting and regime fragility.
+
+    Gate (per 07_auto_generation.md:171): avg OOS Sharpe must be ≥ 50%
+    of avg in-sample Sharpe, AND in-sample Sharpe must be positive.
+    """
+    spec_path = config.strategy_specs_dir() / f"{spec_id}.yaml"
+    spec = load_spec(spec_path)
+    cost = CostModel(
+        tick_size=tick_size,
+        slippage_ticks_per_side=slippage_ticks,
+        commission_per_contract_round_trip=commission_round_trip,
+    )
+    cfg = WalkForwardConfig(
+        train_years=train_years, test_years=test_years, roll_years=roll_years,
+    )
+
+    # Default coverage to the bar feature's full range when not given.
+    cs = _parse_iso(coverage_start)
+    ce = _parse_iso(coverage_end)
+    if cs is None or ce is None:
+        from tradegy.harness.data import load_bar_stream
+        bars = load_bar_stream(spec.market_scope.instrument)
+        if cs is None:
+            cs = bars.row(0, named=True)["ts_utc"]
+        if ce is None:
+            ce = bars.row(-1, named=True)["ts_utc"]
+
+    summary = run_walk_forward(
+        spec,
+        coverage_start=cs,
+        coverage_end=ce,
+        config=cfg,
+        cost=cost,
+    )
+    console.print(
+        f"[bold]{summary.spec_id}@{summary.spec_version}[/]  "
+        f"windows={len(summary.windows)}  "
+        f"coverage=[{summary.coverage_start} → {summary.coverage_end}]  "
+        f"config={cfg.train_years}y/{cfg.test_years}y/{cfg.roll_years}y"
+    )
+    table = Table(title="walk-forward windows")
+    table.add_column("#")
+    table.add_column("train")
+    table.add_column("test")
+    table.add_column("IS sharpe", justify="right")
+    table.add_column("OOS sharpe", justify="right")
+    table.add_column("IS trades", justify="right")
+    table.add_column("OOS trades", justify="right")
+    for w in summary.windows:
+        is_s = w.in_sample.stats if w.in_sample else None
+        oos_s = w.out_of_sample.stats if w.out_of_sample else None
+        table.add_row(
+            str(w.index),
+            f"{w.train_start.date()}→{w.train_end.date()}",
+            f"{w.test_start.date()}→{w.test_end.date()}",
+            f"{is_s.sharpe:+.3f}" if is_s else "—",
+            f"{oos_s.sharpe:+.3f}" if oos_s else "—",
+            f"{is_s.total_trades}" if is_s else "—",
+            f"{oos_s.total_trades}" if oos_s else "—",
+        )
+    console.print(table)
+    agg = Table(title="aggregate")
+    agg.add_column("metric")
+    agg.add_column("value", justify="right")
+    agg.add_row("avg in-sample sharpe", f"{summary.avg_in_sample_sharpe:+.3f}")
+    agg.add_row("avg OOS sharpe", f"{summary.avg_oos_sharpe:+.3f}")
+    agg.add_row("worst-window OOS sharpe", f"{summary.worst_window_oos_sharpe:+.3f}")
+    agg.add_row("avg in-sample trades", f"{summary.avg_in_sample_trades:.1f}")
+    agg.add_row("avg OOS trades", f"{summary.avg_oos_trades:.1f}")
+    agg.add_row(
+        "gate",
+        ("[green]PASS[/]" if summary.passed else f"[red]FAIL[/] — {summary.fail_reason}"),
+    )
+    console.print(agg)
+    if not summary.passed:
+        raise typer.Exit(code=4)
 
 
 if __name__ == "__main__":

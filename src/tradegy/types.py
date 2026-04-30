@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 RevisionPolicy = Literal["never_revised", "revised_with_vintages", "not_admitted"]
 Derivation = Literal["raw", "transform", "model"]
@@ -53,6 +53,37 @@ class AuditEntry(_Strict):
     notes: str = ""
 
 
+IngestFormat = Literal["generic_csv", "sierra_chart_csv"]
+
+
+class IngestSpec(_Strict):
+    """How a historical CSV (or future bulk file) maps onto the canonical
+    raw schema for a source.
+
+    A `format` discriminator picks the parser; the remaining fields
+    parameterize that parser. Per 02_feature_pipeline.md, each source must
+    declare a format explicitly — formats are not inferred from headers.
+    """
+
+    format: IngestFormat
+    timestamp_columns: list[str] | None = None
+    timestamp_format: str | None = None
+    column_remap: dict[str, str] = Field(default_factory=dict)
+
+
+class LiveSpec(_Strict):
+    """Binding to a registered live adapter that produces the same canonical
+    row schema as the historical ingest path.
+
+    `adapter` is the name a live adapter is registered under via
+    `register_live_adapter`. `params` is forwarded to the adapter at
+    `subscribe(...)` time (e.g., contract specifier, useRTH).
+    """
+
+    adapter: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
 class DataSource(_Strict):
     id: str
     version: str
@@ -65,11 +96,34 @@ class DataSource(_Strict):
     coverage: Coverage
     cadence: str
     fields: list[FieldSpec]
-    timestamp_column: str
+    timestamp_column: str | None = None
     availability_latency: AvailabilityLatency
     licensing: Licensing = Field(default_factory=Licensing)
     known_issues: list[str] = Field(default_factory=list)
     audit_history: list[AuditEntry] = Field(default_factory=list)
+    ingest: IngestSpec | None = None
+    live: LiveSpec | None = None
+    session_calendar: str | None = None
+    max_inactivity_seconds: float | None = None
+
+    @model_validator(mode="after")
+    def _check_timestamp_declaration(self) -> "DataSource":
+        # Exactly one of timestamp_column or ingest.timestamp_columns must be set.
+        has_single = self.timestamp_column is not None
+        has_multi = (
+            self.ingest is not None and self.ingest.timestamp_columns is not None
+        )
+        if has_single and has_multi:
+            raise ValueError(
+                f"source {self.id!r}: declare either timestamp_column or "
+                "ingest.timestamp_columns, not both"
+            )
+        if not (has_single or has_multi):
+            raise ValueError(
+                f"source {self.id!r}: must declare timestamp_column "
+                "(generic) or ingest.timestamp_columns (multi-column)"
+            )
+        return self
 
 
 class FeatureInput(_Strict):

@@ -7,7 +7,7 @@ from tradegy.registry.loader import load_data_source
 
 
 def test_ingest_writes_partitioned_parquet_and_normalizes_tz(synthetic_csv, workspace):
-    source = load_data_source("es_ticks")
+    source = load_data_source("synth_ticks")
     result = ingest_csv(
         synthetic_csv, source, input_tz="UTC", out_dir=workspace["raw"]
     )
@@ -31,6 +31,6 @@ def test_ingest_drops_exact_duplicates(synthetic_csv, workspace, tmp_path):
     body = rows[1:]
     dup_path.write_text("\n".join([rows[0], *body, *body[:5]]))
 
-    source = load_data_source("es_ticks")
+    source = load_data_source("synth_ticks")
     result = ingest_csv(dup_path, source, input_tz="UTC", out_dir=workspace["raw"])
     assert result.duplicates_dropped >= 5

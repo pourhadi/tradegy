@@ -17,7 +17,7 @@ from tradegy.validate.reproducibility import check_reproducibility
 
 
 def test_full_pipeline(synthetic_csv, workspace):
-    source = load_data_source("es_ticks")
+    source = load_data_source("synth_ticks")
 
     ingest_csv(synthetic_csv, source, input_tz="UTC", out_dir=workspace["raw"])
 
@@ -26,13 +26,13 @@ def test_full_pipeline(synthetic_csv, workspace):
     )
     assert not audit.has_critical
 
-    for fid in ("es_1m_bars", "es_1m_log_returns", "realized_vol_5m"):
+    for fid in ("synth_1m_bars", "synth_1m_log_returns", "synth_realized_vol_5m"):
         compute_feature(
             fid, raw_root=workspace["raw"], feature_root=workspace["features"]
         )
 
     nl = audit_no_lookahead(
-        "realized_vol_5m",
+        "synth_realized_vol_5m",
         samples=10,
         seed=7,
         raw_root=workspace["raw"],
@@ -41,12 +41,12 @@ def test_full_pipeline(synthetic_csv, workspace):
     assert nl.passed
 
     rep = check_reproducibility(
-        "realized_vol_5m",
+        "synth_realized_vol_5m",
         raw_root=workspace["raw"],
         feature_root=workspace["features"],
     )
     assert rep.passed
 
-    df = get_feature("realized_vol_5m", feature_root=workspace["features"])
+    df = get_feature("synth_realized_vol_5m", feature_root=workspace["features"])
     assert df.height > 0
     assert (df.get_column("value") >= 0).all()

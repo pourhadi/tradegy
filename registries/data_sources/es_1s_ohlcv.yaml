@@ -1,0 +1,86 @@
+# Data source registry entry for ES (E-mini S&P 500) 1-second OHLCV bars.
+#
+# Schema follows trading_platform_docs/02_feature_pipeline.md. Paired live
+# adapter aggregates IBKR tick-by-tick prints into 1s bars (IBKR has no
+# native 1s bar feed; ib_async.reqRealTimeBars is hard-coded at 5s).
+
+id: es_1s_ohlcv
+version: v1
+description: >
+  E-mini S&P 500 (ES) continuous front-month 1-second OHLCV bars with
+  signed-flow proxies (NumberOfTrades, BidVolume, AskVolume).
+  Historical: Sierra Chart export. Live: IBKR reqTickByTickData(Last)
+  aggregated locally to 1-second bars.
+type: market_data
+provider: sierra_chart_then_ibkr
+revisable: false
+revision_policy: never_revised
+admission_rationale: >
+  OHLCV bars from Sierra Chart are append-only; venue-published flow
+  metadata is not retroactively revised. Live aggregation runs the same
+  bar-edge close logic that the historical bars use (label=right,
+  closed=left), so live and historical produce the same canonical schema
+  under the parity contract.
+coverage:
+  start_date: 2015-12-31   # populated from ingestion receipt after first ingest
+  end_date: 2023-08-14
+  gaps: []
+cadence: 1s
+fields:
+  - {name: ts_utc, type: timestamp}
+  - {name: open, type: float}
+  - {name: high, type: float}
+  - {name: low, type: float}
+  - {name: close, type: float}
+  - {name: volume, type: int}
+  - {name: num_trades, type: int}
+  - {name: bid_volume, type: int}
+  - {name: ask_volume, type: int}
+ingest:
+  format: sierra_chart_csv
+  timestamp_columns: [Date, Time]
+  column_remap:
+    Open: open
+    High: high
+    Low: low
+    Last: close
+    Volume: volume
+    NumberOfTrades: num_trades
+    BidVolume: bid_volume
+    AskVolume: ask_volume
+live:
+  adapter: ibkr_tick_aggregator_1s
+  params:
+    symbol: ES
+    exchange: CME
+    currency: USD
+    useRTH: false
+session_calendar: CMES
+# ES is the deeper-liquidity contract but Sierra Chart still gates emission
+# on print activity. Same 1-week in-session anomaly ceiling as MES; major
+# holiday closures (Christmas/New Year/Good Friday) span up to ~91h and
+# are not fully modeled by exchange_calendars CMES.
+max_inactivity_seconds: 604800
+availability_latency:
+  median_seconds: 0.0
+  p99_seconds: 1.0
+  notes: >
+    Historical CSV has zero replay latency. Live tick aggregation has a
+    bounded 1s emit cadence — values are emitted at the bar-close edge,
+    which is +1s past the bar's nominal start.
+licensing:
+  live_use: true
+  backtest_use: true
+  redistribution: false
+known_issues:
+  - >
+    Back-adjusted continuous (verified 2026-04-28 by inspecting session-
+    boundary close-to-close changes at suspected roll dates: 30 quarterly
+    rolls show mean signed change ~0 with no contango-shaped jump,
+    indistinguishable from non-roll session opens). Historical absolute
+    price levels are synthetic; returns / volatility / relative-move
+    features are accurate. Features that depend on absolute price
+    levels (round-number trigger levels, fixed-dollar stops referenced
+    to historical bars, percentile-of-historical-price thresholds)
+    inherit synthetic levels and should be flagged.
+audit_history: []

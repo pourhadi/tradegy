@@ -1,0 +1,33 @@
+# Hypothesis-driven feature: session VWAP for MES.
+#
+# Added because the vwap_reversion strategy class needs it. First
+# concrete example of the pull-driven feature growth principle in
+# 02_feature_pipeline.md "Feature inventory growth": a hypothesis spec
+# named a feature, the feature went through the same admission gates
+# (transform implementation, no-lookahead audit, reproducibility check),
+# and is now registered for any other strategy to consume.
+
+id: mes_vwap
+version: v1
+description: >
+  Session-VWAP for MES front-month continuous, computed as cumulative
+  (typical_price * volume) / cumulative volume within each CMES
+  session. Typical price = (high + low + close) / 3. Resets at every
+  session open (22:00 UTC during DST, 23:00 UTC otherwise).
+type: derived
+inputs:
+  - feature_id: mes_1m_bars
+computation:
+  type: registered_transform
+  transform_id: session_vwap
+  parameters:
+    session_calendar: CMES
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 100000.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

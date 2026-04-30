@@ -5,6 +5,57 @@
 
 ---
 
+## Implementation status (2026-04-28)
+
+The Phase 2A–C vertical slice has shipped:
+
+- **Strategy class ABC + registry mechanics** — `src/tradegy/strategies/base.py`.
+  Mirrors the transform / live-adapter pattern (decorator + lookup, fresh
+  instance per call). Registered classes:
+  - `stand_down` — the trivial first-class option per the section below.
+  - `momentum_breakout` — long-only continuation entry on a return-horizon
+    feature crossing a threshold.
+  - `vwap_reversion` — long-only fade of intraday extension below session
+    VWAP. Added in Phase 4 alongside the session-aware harness loop and
+    the `mes_vwap` feature it depends on (the hypothesis-driven feature
+    addition path documented in `02_feature_pipeline.md` "Feature
+    inventory growth").
+- **Five auxiliary registries** — `src/tradegy/strategies/auxiliary.py`.
+  Each axis has its own ABC + registry generic. Registered classes:
+  - Sizing: `fixed_contracts`
+  - Stop: `fixed_ticks`
+  - Stop adjustment: *(none yet — ABC only; nothing in the MVP spec uses one)*
+  - Exit: `time_stop`
+  - Condition evaluator: `feature_threshold`
+
+What the docs called for that has NOT been implemented yet (filed as
+deferred work, prioritized when a hypothesis spec genuinely needs it —
+see the "vital signs vs hypothesis-driven" principle in
+`02_feature_pipeline.md`):
+
+- Strategy classes: `range_break_fade`, `range_break_continuation`.
+  (Adding either requires range-defining features — range_high/low or
+  similar — to be built in the feature pipeline first via the same
+  hypothesis-driven path that brought `mes_vwap` in for `vwap_reversion`.)
+- Sizing classes: `fixed_fractional_risk`, `volatility_scaled`,
+  `kelly_fraction`.
+- Stop classes: `opposite_range_extreme`, `atr_multiple`,
+  `structural_swing`.
+- Stop adjustments: `move_to_breakeven`, `trail_by_atr`,
+  `tighten_to_distance`, `step_to_level`.
+- Exit classes: `r_multiple_target`, `price_level_target`,
+  `invalidation_condition` (general), `end_of_session_flatten`.
+- Condition evaluators: `feature_range`, `feature_delta`,
+  `calendar_event`, `regime_probability`,
+  `no_major_macro_event_within`, `position_pnl_threshold`,
+  `bars_since_entry`, `price_returns_to_level`,
+  `opposite_direction_break`, `sentiment_shock`.
+
+The contract surface (ABCs, parameter_schema, validate_parameters,
+registration) is stable; new entries are mechanical.
+
+---
+
 ## What a strategy class is
 
 A **strategy class** is a code-level implementation that:

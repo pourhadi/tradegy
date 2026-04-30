@@ -1,0 +1,21 @@
+id: synth_realized_vol_5m
+version: v1
+description: 5-bar rolling annualized realized vol of synth_1m_log_returns.
+type: derived
+inputs:
+  - feature_id: synth_1m_log_returns
+computation:
+  type: registered_transform
+  transform_id: rolling_realized_vol
+  parameters:
+    window_bars: 5
+    bars_per_year: 98280
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 5.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

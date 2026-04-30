@@ -15,7 +15,7 @@ A single-instrument (ES) futures trading platform built around a three-layer arc
 
 - **Capital:** $10k starting account. Dictates instrument selection (MES over ES in most cases) and position sizing.
 - **Market:** ES only. Soybeans dropped from the original plan. Future expansion considered NQ/RTY before returning to agricultural products.
-- **Data:** Several years of tick-level ES data available. Additional data sources onboarded through the feature pipeline's admission process (each source must meet the universal bar: point-in-time queryable, deterministic, declared availability latency, explicit revision policy, sufficient coverage).
+- **Data:** Several years of 1-second OHLCV ES bars (Sierra Chart export, 2015–2023) and 5-second OHLCV MES bars (2019–2025) on hand. Both ingested as parity-contract sources (`es_1s_ohlcv`, `mes_5s_ohlcv`) with paired live IBKR adapters. Additional data sources onboarded through the feature pipeline's admission process (each source must meet the universal bar: point-in-time queryable, deterministic, declared availability latency, explicit revision policy, sufficient coverage, paired live adapter producing the canonical schema).
 - **Broker:** Interactive Brokers via their trading API.
 - **Latency stance:** LLM-driven decision cycles are 2–5 seconds. The architecture assumes this is fine because strategic reasoning is not on the critical path of any trade execution. We do not compete on speed.
 
@@ -232,7 +232,7 @@ Expected future additions: execution layer spec, live monitoring spec, governanc
 
 Critical path, earliest to latest:
 
-1. Feature pipeline Phase 1 (ES tick ingestion, canonical feature battery, registry API)
+1. Feature pipeline Phase 1 (MES + ES OHLCV ingestion under the live/historical parity contract — paired Sierra Chart historical adapter and IBKR live adapter per source — vital-signs feature set per `02_feature_pipeline.md` "Feature inventory growth", registry API). Further features are added on demand from hypothesis specs, not speculatively pre-registered.
 2. Strategy class registry + initial 3–5 classes
 3. Backtest harness MVP
 4. Strategy spec schema validator

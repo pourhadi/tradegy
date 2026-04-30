@@ -1,19 +1,21 @@
-# Intermediate feature: 1-minute OHLCV bars resampled from ES tick prints.
-#
-# Schema mirrors trading_platform_docs/02_feature_pipeline.md:362-406.
+# 1-minute OHLCV bars for ES, aggregated from the 1-second source bars.
 
 id: es_1m_bars
 version: v1
-description: 1-minute OHLCV bars from ES tick prints, right-labeled bar close.
+description: >
+  1-minute OHLCV bars for ES front-month continuous, aggregated from the
+  es_1s_ohlcv source via resample_ohlcv_bars. Right-labeled close,
+  left-closed window so each bar's ts_utc is the bar-close instant.
 type: derived
 inputs:
-  - source_id: es_ticks
+  - source_id: es_1s_ohlcv
 computation:
   type: registered_transform
-  transform_id: resample_ohlcv
+  transform_id: resample_ohlcv_bars
   parameters:
     cadence: 1m
     bar_close_label: right
+    closed: left
 cadence: 1m
 availability_latency_seconds: 1
 derivation: transform

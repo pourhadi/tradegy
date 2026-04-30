@@ -45,6 +45,52 @@ trading — every downstream stage depends on its output.
 
 ---
 
+## Live/historical parity contract
+
+Principle 7 above is enforced at the source-registration boundary, not just at
+the transform layer. **Every registered DataSource pairs two adapters:**
+
+- A **historical** adapter (declared via `ingest:` in the registry YAML) that
+  parses bulk files (e.g., Sierra Chart CSV, vendor dumps) and writes rows to
+  `data/raw/source=<id>/date=YYYY-MM-DD/data.parquet` in the source's
+  canonical schema.
+- A **live** adapter (declared via `live:` in the registry YAML, named against
+  a registered `LiveAdapter` implementation) that subscribes to the upstream
+  real-time feed (e.g., IBKR `reqRealTimeBars` or `reqTickByTickData`
+  aggregation) and yields rows in the **same canonical schema**.
+
+The schema (column names, dtypes, units, UTC timezone) is declared by the
+DataSource registry entry and is the single source of truth for both
+adapters. Downstream readers — feature transforms, the registry API,
+backtest harness, live execution — see one shape regardless of which adapter
+populated the rows.
+
+**Why this matters:** if the live and historical adapters can drift from
+each other in column naming, dtype, or unit conventions, then a feature
+computed identically on both will silently produce different values in
+backtest vs production — defeating principle 7 at the data layer rather
+than the transform layer. The parity contract makes that drift impossible
+without breaking a test.
+
+**Enforcement:**
+- The `DataSource` schema requires both `ingest` and `live` blocks for any
+  source intended for live use. A source that legitimately cannot have a
+  live counterpart (test fixtures, archived datasets) declares
+  `licensing.live_use: false` with explicit rationale and is excluded from
+  live execution at the registry-query layer.
+- Parity tests (`tests/integration/test_live_historical_parity.py`)
+  capture a small live sample for each parity source and assert column
+  parity, dtype parity, and value parity (within tolerance) against the
+  historical store. These tests gate the merge that activates a live
+  adapter body.
+
+The `LiveAdapter` protocol lives in `src/tradegy/live/base.py` and follows
+the same registration discipline as feature transforms (`register_live_adapter`
+decorator + lookup table). New venues or alternative-data feeds add a new
+adapter as a code change with tests, not a YAML change.
+
+---
+
 ## Pipeline stages
 
 Seven stages. Each has defined inputs, outputs, gates, and failure modes.
@@ -118,6 +164,13 @@ on.
   rejected; we do not admit sources that would contaminate historical replay.
 - **Sufficient coverage.** Continuous series across the window any intended
   consumer needs, with gaps catalogued and bounded.
+- **Registered live adapter producing the canonical schema.** A source
+  intended for live use must declare a `live:` adapter binding (see the
+  Live/historical parity contract section above). A source that
+  legitimately cannot have a live counterpart (test fixture, archived
+  dataset) must declare `licensing.live_use: false` with explicit
+  rationale; it is excluded from live execution at the registry-query
+  layer.
 
 A source that fails any check is not admitted. There is no "admit with
 caveats" path.
@@ -135,7 +188,8 @@ storage and versioning):**
   triggers).
 
 **Outputs:** Data source registry entry with admission evidence, revisability
-flag, availability-latency characterization, and coverage record.
+flag, availability-latency characterization, coverage record, and the bound
+live-adapter id satisfying the parity contract.
 
 **Gate:** Human review and sign-off on admission. Not automated. An admission
 error ships corrupted inputs into every downstream backtest and live decision.
@@ -191,6 +245,60 @@ feature:
 implementations. Common transforms (rolling_mean, rolling_std, ratio, zscore,
 rank, percentile, ewma, etc.) implemented once, unit-tested, referenced by ID.
 Adding a new transform type is a code change with tests, not a YAML change.
+
+**Feature inventory growth: vital signs first, hypothesis-driven thereafter.**
+
+*First concrete pull-driven addition (Phase 4): `mes_vwap` was registered
+because the `vwap_reversion` strategy class needed it. The feature went
+through identical admission gates as the vital-signs set — transform
+implementation (`session_vwap`, with unit tests covering per-session
+reset and the weighted-mean math), feature YAML, materialize,
+no-lookahead audit, reproducibility check. End-to-end backtest of the
+strategy then ran successfully against the new feature, demonstrating
+the hybrid push/pull model in operation.*
+
+
+
+The registry is *not* meant to be a speculatively-pre-populated catalog of
+every feature anyone might ever want. We bootstrap it with a thin **vital-
+signs** set (≤10 features) covering the axes nearly every futures strategy
+keys on: returns at a couple of horizons, volatility (return-based and
+range-based), liquidity / activity normalization, and time-of-day. Beyond
+that, **features are added on demand from hypothesis specs**: a hypothesis
+declares the features its mechanism keys on (`06_hypothesis_system.md`),
+and any feature not already in the registry triggers a registration
+request that goes through the normal admission gates (transform
+implementation, no-lookahead audit, reproducibility check, backfill
+coverage).
+
+This is a hybrid push/pull model:
+
+| | Vital signs (push) | Hypothesis-driven (pull) |
+|---|---|---|
+| **Trigger** | Pre-registered by the platform team | Requested by a hypothesis spec |
+| **Goal** | Bootstrap the strategy/backtest layer with realistic compositional surface | Avoid speculative inventory; let real strategy demand shape the registry |
+| **Gating** | Same admission gates | Same admission gates |
+| **Cap** | ≤10 features; expand only via the pull path | Unbounded but rate-limited by mechanism articulation |
+
+The push/pull distinction is about *who initiates registration*, not about
+gating discipline — both paths run the same audits and produce the same
+backfilled, point-in-time-correct, parity-contract-compliant registry
+entries. Pure pull would lose the validation gates (ad-hoc per-hypothesis
+features bypass the no-lookahead audit and the live/historical parity
+contract); pure push would build inventory no strategy ever uses. The
+hybrid avoids both failure modes.
+
+**Live adapter registry:** Same discipline applies to the live half of the
+parity contract. A `LiveAdapter` (`src/tradegy/live/base.py`) is an async
+class with a small lifecycle (`connect`, `disconnect`, `subscribe(spec) ->
+AsyncIterator[BarRow]`, `health`). Each implementation registers under a
+string name via the `register_live_adapter` decorator; YAML registry
+entries name adapters via that string in the `live.adapter` field. The
+`BarRow` dataclass declares the canonical row shape (`ts_utc`, `open`,
+`high`, `low`, `close`, `volume`, plus optional `num_trades`,
+`bid_volume`, `ask_volume`); historical and live both produce rows
+matching this shape. New venues or alternative-data feeds add an adapter
+as a code change with tests, not a YAML change.
 
 **Outputs:** Historical feature series stored with version metadata.
 
@@ -314,50 +422,82 @@ Automated registration acceptable only for features remaining in the
 
 ## Data source registry schema
 
+A registered source pairs an `ingest:` block (the historical adapter — how
+to parse the bulk file) with a `live:` block (the live adapter binding) and
+declares the canonical row schema both adapters must produce. This example
+matches the shape of `registries/data_sources/mes_5s_ohlcv.yaml`.
+
 ```yaml
 data_source:
-  id: "ib_es_ticks"
-  version: "1.0.0"
-  description: "ES continuous front-month tick data from Interactive Brokers"
+  id: "mes_5s_ohlcv"
+  version: "v1"
+  description: "MES continuous front-month 5-second OHLCV bars with signed-flow proxies"
   type: "market_data"  # market_data | economic | news | alternative | derived
-  provider: "interactive_brokers"
+  provider: "sierra_chart_then_ibkr"
   revisable: false
+  revision_policy: "never_revised"
   admission_rationale: |
-    Captured directly from IB live feed at receipt time. No revisions. Timestamps
-    applied at receipt with NTP-synced system clock. Meets point-in-time,
-    determinism, availability-latency, and coverage bars.
+    OHLCV bars from Sierra Chart are append-only; venue-published flow
+    metadata is not retroactively revised. Live and historical are produced
+    under the same canonical schema by paired adapters; the parity contract
+    is enforced at registration time.
   coverage:
-    start_date: "2020-01-06"
-    end_date: "current"
+    start_date: "2019-05-06"
+    end_date: "2025-08-13"
     gaps: []
-  cadence: "tick"
+  cadence: "5s"
   fields:
-    - name: "timestamp"
-      type: "datetime_utc_nanosecond"
-    - name: "price"
-      type: "float64"
-    - name: "volume"
-      type: "int64"
-    - name: "side"
-      type: "enum[buy,sell,unknown]"
+    - {name: ts_utc, type: timestamp}
+    - {name: open, type: float}
+    - {name: high, type: float}
+    - {name: low, type: float}
+    - {name: close, type: float}
+    - {name: volume, type: int}
+    - {name: num_trades, type: int}
+    - {name: bid_volume, type: int}
+    - {name: ask_volume, type: int}
+  ingest:
+    format: sierra_chart_csv         # generic_csv | sierra_chart_csv
+    timestamp_columns: [Date, Time]  # multi-column for Sierra
+    column_remap:
+      Last: close
+      NumberOfTrades: num_trades
+      BidVolume: bid_volume
+      AskVolume: ask_volume
+  live:
+    adapter: ibkr_realtime_bars_5s   # registered LiveAdapter id
+    params:
+      symbol: MES
+      exchange: CME
+      currency: USD
+      useRTH: false
+  session_calendar: CMES             # exchange_calendars name; gates excessive_gap audit
   availability_latency:
-    median_seconds: 0.05
+    median_seconds: 0.0
     p99_seconds: 0.5
-    notes: "Network and IB feed latency. Not the same as when a strategy can act on it."
+    notes: "Historical CSV has zero replay latency; live reqRealTimeBars sub-second."
   licensing:
     live_use: true
     backtest_use: true
     redistribution: false
-  revision_policy: "never_revised"
   known_issues:
-    - "DST transitions: October 2022 had 15min gap (documented)"
-    - "IB outage 2023-03-14 14:22-14:31 UTC: no data during window"
-  audit_history:
-    - date: "2024-11-01"
-      auditor: "dan"
-      result: "passed"
-      notes: "Full reconciliation against alternate broker data showed exact match."
+    - "Continuous-contract roll method TBD; verify by inspecting price gaps near quarterly expiries."
+  audit_history: []
 ```
+
+Notes:
+
+- `ingest.format` is a discriminator the CLI dispatches on. `generic_csv`
+  retains the legacy single-`timestamp_column` path; `sierra_chart_csv`
+  uses the multi-column timestamp parsing and column remap shown above.
+- `live.adapter` must name a `LiveAdapter` registered via
+  `register_live_adapter(...)`. Adapter parameters that vary per source
+  (contract specifier, useRTH, exchange) live in `live.params`; connection
+  parameters (host/port/clientId) live in env vars (e.g., `IBKR_HOST`)
+  rather than YAML so registry entries stay portable across machines.
+- `session_calendar` opts the source into session-aware audit gating —
+  `excessive_gap` will not fire on overnight maintenance halts, weekends,
+  or holidays for the named calendar (`CMES` for CME futures).
 
 ## Feature registry schema
 

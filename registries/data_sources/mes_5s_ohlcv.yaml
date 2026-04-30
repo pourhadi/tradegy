@@ -1,0 +1,87 @@
+# Data source registry entry for MES (Micro E-mini S&P 500) 5-second OHLCV bars.
+#
+# Schema follows trading_platform_docs/02_feature_pipeline.md. This source is
+# paired with a live IBKR adapter under the live/historical parity contract:
+# the same canonical row schema is produced by the historical Sierra Chart
+# CSV ingest AND by ib.reqRealTimeBars at runtime.
+
+id: mes_5s_ohlcv
+version: v1
+description: >
+  Micro E-mini S&P 500 (MES) continuous front-month 5-second OHLCV bars
+  with signed-flow proxies (NumberOfTrades, BidVolume, AskVolume).
+  Historical: Sierra Chart export. Live: IBKR reqRealTimeBars (native 5s).
+type: market_data
+provider: sierra_chart_then_ibkr
+revisable: false
+revision_policy: never_revised
+admission_rationale: >
+  OHLCV bars from Sierra Chart are append-only; venue-published flow
+  metadata is not retroactively revised. Determinism is provided by the
+  CSV checksum (historical) and IB's RTH/ETH receipt timestamps (live).
+  Live and historical are produced under the same canonical schema by
+  paired adapters; the parity contract is enforced at registration time.
+coverage:
+  start_date: 2019-05-06   # populated from ingestion receipt after first ingest
+  end_date: 2025-08-13
+  gaps: []
+cadence: 5s
+fields:
+  - {name: ts_utc, type: timestamp}
+  - {name: open, type: float}
+  - {name: high, type: float}
+  - {name: low, type: float}
+  - {name: close, type: float}
+  - {name: volume, type: int}
+  - {name: num_trades, type: int}
+  - {name: bid_volume, type: int}
+  - {name: ask_volume, type: int}
+ingest:
+  format: sierra_chart_csv
+  timestamp_columns: [Date, Time]
+  column_remap:
+    Open: open
+    High: high
+    Low: low
+    Last: close
+    Volume: volume
+    NumberOfTrades: num_trades
+    BidVolume: bid_volume
+    AskVolume: ask_volume
+live:
+  adapter: ibkr_realtime_bars_5s
+  params:
+    symbol: MES
+    exchange: CME
+    currency: USD
+    useRTH: false
+session_calendar: CMES
+# MES has thin overnight liquidity; Sierra Chart only emits a bar when a
+# trade prints, so periods of low activity look like multi-minute gaps.
+# 1 week is the in-session anomaly ceiling — Christmas/New Year/Good
+# Friday combine into ~89-91h closures that exchange_calendars CMES
+# does not fully model. Anything beyond a week with no print is
+# genuinely anomalous and worth investigating.
+max_inactivity_seconds: 604800
+availability_latency:
+  median_seconds: 0.0
+  p99_seconds: 0.5
+  notes: >
+    Historical CSV has zero replay latency; live reqRealTimeBars is bounded
+    by network + IB feed latency (sub-second).
+licensing:
+  live_use: true
+  backtest_use: true
+  redistribution: false
+known_issues:
+  - >
+    Back-adjusted continuous (verified 2026-04-28 by inspecting session-
+    boundary close-to-close changes at suspected roll dates: mean signed
+    change is +/- noise across 25 quarterly rolls, no contango-shaped
+    jump visible). Historical absolute price levels are synthetic;
+    returns / volatility / relative-move features are accurate.
+    Features that depend on absolute price levels (round-number trigger
+    levels, fixed-dollar stops referenced to historical bars,
+    percentile-of-historical-price thresholds) inherit synthetic levels
+    and should be flagged.
+audit_history: []
