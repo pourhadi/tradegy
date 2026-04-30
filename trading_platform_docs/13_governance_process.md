@@ -444,27 +444,61 @@ Post-session review is a `R/A` for `Operator` daily and `R/A` for
 
 ---
 
-## Open design decisions
+## Resolved decisions
 
-1. **Reviewer independence in single-operator v1.** Is 24-hour cool-
-   off sufficient as an integrity mechanism, or do we need a second
-   human before any live trading at all?
-2. **Audit-log hash chain.** Required from v1, or deferred until
-   multi-operator? Trade-off: cost of implementation now vs evidentiary
-   strength later.
-3. **Approval-packet TTL.** 14 days as default — too short for slow
-   markets, too long for fast-moving regime change?
-4. **Auto-graduation discipline.** Is "minimum N live trades" enough,
-   or should graduation also require time-in-tier (e.g., 30 days
-   minimum) regardless of trade count?
-5. **Evidence-packet schema.** Should be versioned and validated like
-   the strategy spec schema; do we add it to `tradegy validate`?
-6. **Selection-override budget.** Should the system enforce a maximum
-   override rate per operator per session, with anomalies escalated to
-   Owner?
-7. **Retirement reversal.** Once retired-then-revalidated, is the
-   strategy treated as "new" for kill-rate accounting, or as a
-   continuation of the previous version's track record?
-8. **Multi-operator transition.** What's the smallest set of
-   procedural changes needed when adding the second human, and which
-   audit fields gain meaning at that point?
+These were open at draft time and are now resolved. Each carries a
+short rationale; the chosen behavior is binding for v1.
+
+1. **Reviewer independence in single-operator v1 — cool-off plus tier
+   ceiling.** The 24-hour cool-off plus a written self-review template
+   (stored at `governance/templates/self_review.md` when first used)
+   IS sufficient procedural integrity for promotion to
+   `proposal_only` and `confirm_then_execute`. **Promotion to
+   `auto_execute` is blocked entirely until a second human is
+   available** as `Reviewer`. This is a hard ceiling, enforced by the
+   tier-graduation check in this doc's RACI matrix.
+2. **Audit-log hash chain — deferred to multi-operator.** Append-only
+   by convention is sufficient for v1. The hash chain becomes a hard
+   prerequisite for the second-operator transition (tracked in this
+   doc's "Multi-operator transition" entry).
+3. **Approval-packet TTL — 14 days for promotion, 30 days for
+   revision.** Promotion expiry is conservative (the strategy hasn't
+   been live yet). Revision expiry is longer because revision packets
+   are scoped to specific changes that don't decay as quickly as
+   "fresh data" assumptions.
+4. **Auto-graduation discipline — N AND time-in-tier.** Graduation
+   from `confirm_then_execute` to `auto_execute` requires **both**
+   minimum 30 live trades AND minimum 30 days time-in-tier. Either
+   alone is gameable — N alone allows fast-trading strategies to
+   graduate before market regimes shift; time alone allows
+   low-activity strategies to graduate without enough evidence.
+5. **Evidence-packet schema — versioned and validated.** A new CLI
+   subcommand `tradegy validate-evidence` mirrors the spec-validator
+   pattern. Schema lives alongside the spec schema. Required before
+   any promotion review accepts the packet.
+6. **Selection-override budget — soft, alert at >20%.** No hard
+   block. The system tracks per-operator, per-session override rate
+   and emits a WARNING (per `12_live_monitoring_spec.md`) when it
+   exceeds 20%. Operators sometimes legitimately need to override
+   beyond 20% (rare events, system catching up to context); a hard
+   cap would force the wrong tradeoff.
+7. **Retirement reversal — re-validated retired strategies count as
+   new.** Kill-rate accounting (per
+   `08_development_pipeline.md:283-296`) treats them as fresh entries
+   to the pipeline. The retired version stays in the historical
+   record at its retired status.
+8. **Multi-operator transition — deferred to a dedicated mini-spec.**
+   Tracked here as a known prerequisite. Hard prerequisites for that
+   transition: audit-log hash chain (this doc, item 2), PagerDuty-
+   equivalent on-call rotation (`12_live_monitoring_spec.md`,
+   resolved item 1), `client_order_id` namespace partition documented
+   in `11_execution_layer_spec.md`, and the `auto_execute` tier
+   ceiling lifted (this doc, item 1).
+
+## Still open
+
+- The multi-operator transition mini-spec itself. Drafted when a
+  second operator is on the horizon.
+- LLM cost-budget governance — flagged as P2 in
+  `10_review_gap_analysis.md:102-106`. Out of scope for this doc;
+  needs its own treatment.

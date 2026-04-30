@@ -428,29 +428,51 @@ rather than aspirational.
 
 ---
 
-## Open design decisions
+## Resolved decisions
 
-1. **Bracket order primitive.** Should the execution layer expose a
-   bracket primitive (entry + stop + target submitted atomically) or
-   keep the current pattern (strategy emits separate orders)? Bracket
-   reduces race-condition exposure but adds a new contract.
-2. **Local-vs-broker truth on fill price.** When the broker reports a
-   fill price that disagrees with our locally-modeled execution by more
-   than tolerance, do we ever reject the fill, or always accept and log
-   the divergence?
-3. **GTC re-enablement criteria.** Under what governance review can
-   `GTC` be allowed for a specific spec? Likely needs cross-session
-   risk model.
-4. **Reconciliation cadence under low-volume MES.** The 1 s open-order
-   diff might be too frequent during quiet hours. Adaptive cadence?
-5. **Kill-switch granularity.** Is one global switch enough, or do we
-   need per-strategy kill that doesn't take down the whole book?
-6. **Margin estimate confidence.** When the broker's initial-margin
-   read is stale (e.g., contract roll), do we estimate from spec
-   metadata or hard-reject?
-7. **Order-id collision across IBKR client IDs.** If we ever run two
-   `IBKR_CLIENT_ID`s simultaneously (e.g., live + paper validation),
-   how do we partition the `client_order_id` namespace?
-8. **Replay parity tolerance.** What's the acceptable divergence
-   threshold between `fills.jsonl` and the harness re-run? Per-trade
-   ticks, distribution-level, or both?
+These were open at draft time and are now resolved. Each carries a
+short rationale; the chosen behavior is binding for v1.
+
+1. **Bracket order primitive — NO.** Strategies continue to emit entry
+   and protective stop as separate `Order`s. The orphan-stop
+   auto-cancel-within-1s rule (above) covers the race-condition
+   exposure that a bracket would otherwise mitigate; adding a bracket
+   primitive would introduce a new contract surface for marginal
+   benefit.
+2. **Local-vs-broker truth on fill price — broker always wins.** When
+   the broker reports a fill price that disagrees with the locally
+   modeled execution beyond tolerance, the fill is accepted and the
+   divergence is logged at WARNING. The execution layer never rejects
+   a confirmed broker fill.
+3. **GTC time-in-force — disallowed in v1.** No spec may declare
+   `GTC`. Re-enabling requires a cross-session risk model that does
+   not yet exist; revisit when overnight margin and roll handling are
+   in scope.
+4. **Reconciliation cadence — fixed at 1 s / 5 s / 30 s / 60 s.** No
+   adaptive cadence in v1. Quiet-hours optimization is premature; the
+   constant cadence is simpler to verify and reason about.
+5. **Kill-switch granularity — two surfaces.** Global kill-switch
+   (this doc) for hard halts; per-strategy halt via the
+   `12_live_monitoring_spec.md` auto-disable path. No third tier.
+6. **Margin estimate when stale — hard-reject.** When the broker's
+   initial-margin read fails or is stale, the order is rejected. The
+   layer does not trade on guessed margin.
+7. **Order-id collision across IBKR client IDs — namespace suffix.**
+   When `IBKR_CLIENT_ID` is non-default, the `client_order_id` format
+   becomes `{strategy_id}:{session_date}:{intent_seq}:{role}:c{id}`.
+   Default deployment uses one client ID and the suffix is omitted.
+8. **Replay parity tolerance — dual-threshold.** A live day's
+   `fills.jsonl` is considered parity-consistent with the harness
+   re-run when **both** hold:
+   - Per-trade fill-price divergence ≤ 1 tick.
+   - Distribution-level Wasserstein distance over per-trade R ≤ the
+     spec's declared `replay_tolerance_R` (default 0.1).
+   This is the same value referenced from
+   `12_live_monitoring_spec.md`.
+
+## Still open
+
+- Future re-evaluation of GTC support when a cross-session risk
+  model exists.
+- Bracket primitive may be revisited if a strategy class arrives
+  whose fill semantics genuinely require atomic submission.

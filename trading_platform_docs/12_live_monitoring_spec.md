@@ -380,28 +380,48 @@ adjacent to this spec for operator quick-reference.
 
 ---
 
-## Open design decisions
+## Resolved decisions
 
-1. **Notification transport.** Push + SMS for CRITICAL is fine for
-   single-operator v1, but a multi-operator setup needs a real on-call
-   rotation system (PagerDuty-equivalent). When does that become a
-   blocker?
-2. **Drift method choice.** KS + median + tail is reasonable but ad
-   hoc. Should we move to a single calibrated divergence metric per
-   feature class (e.g., Wasserstein for continuous, JS for categorical)?
-3. **Reference window staleness.** 30-day rolling reference may itself
-   drift in slow regime change. Anchor to longer horizons or accept the
-   tradeoff?
-4. **Auto-restart authority.** Should some auto-halts auto-restart
-   when the trigger clears (e.g., transient feature staleness lasting
-   < 5 minutes), or should every restart require a human?
-5. **Per-strategy loss-cap default.** Is 10-trade rolling the right
-   window? Too short for noisy strategies; too long for fast-failing
-   ones.
-6. **Replay tolerance.** Same open decision as
-   `11_execution_layer_spec.md`. Resolve once and reference from both.
-7. **Quiet-hours suppression.** Should INFO/WARNING dashboards
-   suppress between sessions, or stay live for after-hours review?
-8. **Backtest-side monitoring.** Do we surface monitoring during
-   backtest runs (e.g., stress-period replay surfaces would-be alerts)
-   or treat backtest as monitoring-free?
+These were open at draft time and are now resolved. Each carries a
+short rationale; the chosen behavior is binding for v1.
+
+1. **Notification transport — push + SMS for v1.** Single-operator
+   deployment uses push + SMS for CRITICAL and a 1-hour digest for
+   WARNING. PagerDuty-equivalent rotation is a hard prerequisite for
+   the multi-operator transition, not for v1.
+2. **Drift method — KS + median + tail in v1.** Refactor to a unified
+   per-feature-class metric (Wasserstein for continuous, JS for
+   categorical) is deferred until the first model-backed feature
+   ships, at which point a single calibrated metric becomes more
+   valuable.
+3. **Reference window — 30-day rolling plus quarterly anchor
+   snapshot.** The rolling window catches fast drift; the anchor
+   snapshot (refreshed once per quarter from the same offline pipeline)
+   catches slow regime drift the rolling window would itself absorb.
+   Both are compared on every drift check.
+4. **Auto-restart authority — none.** No silent auto-restart. Every
+   halt clears via human acknowledgment, even when the underlying
+   trigger has already returned to `green`. Acknowledgment is cheap;
+   silently re-arming after a flap is the higher risk.
+5. **Per-strategy loss-cap — both windows.** The cap trips when
+   either: 10-trade rolling realized R or 5-session rolling realized R
+   exceeds the declared envelope floor. Whichever fires first
+   triggers the strategy-level halt.
+6. **Replay tolerance.** Resolved in
+   `11_execution_layer_spec.md` "Resolved decisions" item 8.
+   Per-trade ≤ 1 tick AND Wasserstein ≤ declared
+   `replay_tolerance_R` (default 0.1). Re-stated here for parity.
+7. **Quiet-hours suppression — none.** Dashboards stay live
+   between sessions. Off-session anomalies (data-feed issues,
+   reconciliation drift, registry-health regressions) still need to
+   surface immediately. Daily digests summarize the session for
+   review.
+8. **Backtest-side monitoring — stress replay only.** Sanity-check and
+   walk-forward backtests stay alert-free. Stress-period replay
+   (deferred per `05_backtest_harness.md:36`) DOES surface would-be
+   alerts so degraded-mode behavior gets exercised before live.
+
+## Still open
+
+- Single-metric drift refactor — re-evaluate when the first
+  model-backed feature is registered.
