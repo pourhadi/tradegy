@@ -15,6 +15,9 @@ A document set defining the architecture, components, and processes for an ES-on
 9. [`08_development_pipeline.md`](08_development_pipeline.md) — 10-stage process from hypothesis to retirement.
 10. [`09_selection_layer.md`](09_selection_layer.md) — runtime LLM decision logic.
 11. [`10_review_gap_analysis.md`](10_review_gap_analysis.md) — independent review of gaps, feasibility, and recommended approach improvements.
+12. [`11_execution_layer_spec.md`](11_execution_layer_spec.md) — order lifecycle, broker reconciliation, and deterministic replay contract.
+13. [`12_live_monitoring_spec.md`](12_live_monitoring_spec.md) — health checks, SLOs, alert severity matrix, and auto-halt policies.
+14. [`13_governance_process.md`](13_governance_process.md) — RACI, evidence packages, checklist templates, audit trail.
 
 ## Status
 
@@ -22,8 +25,5 @@ All documents are drafts. Each doc has an "Open design decisions" section at the
 
 ## Not yet documented
 
-- Execution layer spec (IB API integration)
-- Live monitoring spec
-- Governance process doc
 - Infrastructure/ops spec
 - Example library entries (4–6 fully filled-in starter strategies)

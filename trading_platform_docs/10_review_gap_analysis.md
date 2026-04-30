@@ -27,6 +27,9 @@ That said, the docs are still missing several v1-critical contracts that current
 
 #### 1) Missing execution-layer specification
 
+**Status (2026-04-30): closed by [`11_execution_layer_spec.md`](11_execution_layer_spec.md).**
+The original gap is preserved below as historical record.
+
 The architecture depends on an execution layer for order lifecycle, broker reconciliation, and hard risk enforcement, but this is listed as “not yet documented.” Without this spec, all upstream guarantees are non-binding in production.
 
 **Why this blocks feasibility:**
@@ -42,6 +45,9 @@ The architecture depends on an execution layer for order lifecycle, broker recon
 
 #### 2) Missing live monitoring and alerting spec
 
+**Status (2026-04-30): closed by [`12_live_monitoring_spec.md`](12_live_monitoring_spec.md).**
+The original gap is preserved below as historical record.
+
 Multiple docs assume auto-disable, drift detection, and operational intervention, but alert thresholds, ownership, and escalation paths are undefined.
 
 **Why this blocks feasibility:**
@@ -54,6 +60,9 @@ Multiple docs assume auto-disable, drift detection, and operational intervention
 - Auto-halt triggers with explicit cooldown/restart conditions.
 
 #### 3) Missing concrete governance process document
+
+**Status (2026-04-30): closed by [`13_governance_process.md`](13_governance_process.md).**
+The original gap is preserved below as historical record.
 
 Governance is articulated in principles/tables, but not in procedure.
 

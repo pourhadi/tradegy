@@ -223,8 +223,12 @@ Tier is a spec field, operator-mutable without version bump, logged in ops audit
 | 07 | Auto-generation spec | draft |
 | 08 | Development pipeline | draft |
 | 09 | Selection layer spec | draft |
+| 10 | Review gap analysis | draft |
+| 11 | Execution layer spec | draft |
+| 12 | Live monitoring spec | draft |
+| 13 | Governance process | draft |
 
-Expected future additions: execution layer spec, live monitoring spec, governance process doc, infrastructure/ops spec.
+Expected future additions: infrastructure/ops spec.
 
 ---
 
