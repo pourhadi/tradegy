@@ -20,10 +20,11 @@ What this MVP does NOT do (filed as known-deferred):
   - Parameter optimization within the train window (within-envelope
     grid search). Would compound the multiple-testing problem and
     needs Deflated Sharpe correction to be meaningful.
-  - Combinatorial Purged Cross-Validation (CPCV) — different fold
-    generation entirely, with purging + embargo. Phase 5+.
   - Deflated Sharpe Ratio — auto-generation prerequisite, not strictly
     needed for single-spec walk-forward.
+
+CPCV is its own run mode, not a deferral from this module — see
+``tradegy.harness.cpcv``.
 """
 from __future__ import annotations
 
