@@ -377,6 +377,22 @@ If queue is growing unboundedly, either triage capacity is insufficient or inges
 
 ---
 
+## Named hypotheses under investigation
+
+The full hypothesis DB schema (above) is the durable home for this. Until the queue + UI is built, this table is the working ledger for hypotheses currently in flight or recently killed in the strategy-class pipeline (downstream of triage, since all entries here have already been promoted to development).
+
+Each row records the kill stage and reason per the kill-reason taxonomy in §Kill-reason tracking.
+
+| ID | Mechanism (one line) | Strategy class / spec id | Status | Stage of death | Kill reason / current state |
+|---|---|---|---|---|---|
+| H2 | VWAP fade gated by realized-vol mid-band + time-of-session window — gates fix the failure modes of the un-gated `mes_vwap_reversion` (regime-symmetric firing, last-30-min entries with no time to revert). | `vwap_reversion` / `mes_vwap_reversion_gated` | killed | walk-forward | Avg IS Sharpe +0.007, avg OOS Sharpe -0.019, gate ratio -2.58 (need ≥ 0.50). Gates lifted IS Sharpe from -0.31 → +0.007 (real but insufficient effect); OOS turned slightly negative. Mechanism is essentially zero-edge under these gates; no parameter tuning permitted (sprint anti-overfitting rules). 2026-04-30. |
+| H1 | Opening-range failed-breakout fade — price extension beyond the first-30-min RTH range that returns inside the range within K bars indicates the breakout lacked institutional commitment; fade back to mid-range. Event-anchored (fires once per session at most), distinct from the always-on momentum failure mode. | `range_break_fade` (new) / `mes_orb_failure_fade` | pending | — | Round 2 of signal-hunt sprint. |
+| H3 | Opening-range continuation — confirmed range break with above-average volume in the first hour, expecting follow-through. Range-anchored (event-localized), distinct from `momentum_breakout`'s "fires constantly" failure mode. | `range_break_continuation` (new) / `mes_orb_continuation` | pending | — | Round 3 of signal-hunt sprint, gated on Round 2 budget. |
+
+Sprint guardrails ([signal-hunt plan](../.claude/plans/pull-latest-main-review-rippling-unicorn.md)): per-hypothesis variant cap 5; per-sprint cap 3 hypotheses / 12 variants; no parameter tuning after gate failure (the killed-then-tuned anti-pattern from `07_auto_generation.md:194-205`).
+
+---
+
 ## Build sequencing (MVP)
 
 Phase 1 (minimum viable):

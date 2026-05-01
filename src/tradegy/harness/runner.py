@@ -136,11 +136,37 @@ def run_backtest(
         for c in spec.exits.invalidation_conditions
     ]
 
+    # Entry gating conditions resolved once. ALL must evaluate True at
+    # the candidate entry bar for `strategy_class.on_bar` to be invoked.
+    # Empty list => no gate (legacy behavior).
+    gates = [
+        (get_condition_evaluator(g.condition), g.parameters)
+        for g in spec.entry.gating_conditions
+    ]
+
     # Build the panel.
     instrument = spec.market_scope.instrument
     bar_cadence = "1m"  # MVP convention
     bar_feature_id = f"{instrument.lower()}_{bar_cadence}_bars"
-    required_features = required_feature_ids_for_strategy(spec.entry.strategy_class)
+    required_features = list(
+        required_feature_ids_for_strategy(spec.entry.strategy_class)
+    )
+    # Gating + invalidation evaluators reference features by id in their
+    # parameters; the panel needs those joined in too. Common keys are
+    # `feature_id` and `session_position_feature_id`.
+    _COND_FEATURE_KEYS = ("feature_id", "session_position_feature_id")
+    for g in spec.entry.gating_conditions:
+        for k in _COND_FEATURE_KEYS:
+            if k in g.parameters:
+                fid = g.parameters[k]
+                if fid not in required_features:
+                    required_features.append(fid)
+    for c in spec.exits.invalidation_conditions:
+        for k in _COND_FEATURE_KEYS:
+            if k in c.parameters:
+                fid = c.parameters[k]
+                if fid not in required_features:
+                    required_features.append(fid)
 
     bars = load_bar_stream(
         instrument,
@@ -328,7 +354,16 @@ def run_backtest(
                     break
 
         # 4) Strategy on_bar — entry orders queued for next-bar-open fill.
+        #    Gating conditions act as a hard pre-filter: if any returns
+        #    False, the strategy doesn't see this bar at all (no entry
+        #    attempt counter is incremented).
         if state.position.is_flat and pending_close_reason is None:
+            if gates and not all(
+                ev.evaluate(params, bar, features, state.position)
+                for ev, params in gates
+            ):
+                last_bar = bar
+                continue
             new_orders = strategy_class.on_bar(state, bar, features)
             for o in new_orders:
                 # Apply sizing if the strategy emitted quantity 0/1.

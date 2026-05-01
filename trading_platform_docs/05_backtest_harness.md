@@ -52,14 +52,9 @@ plus the distribution gate. End-to-end runs on real MES data (2019-05
 |---|---|---|---|---|
 | `mes_momentum_breakout` | 9,719 | -0.29 | FAIL (avg in-sample Sharpe -0.15, OOS -0.18) | naive momentum continuation |
 | `mes_vwap_reversion` | 1,512 | -0.56 | FAIL (avg in-sample Sharpe -0.31, OOS -0.26) | naive long-only fade |
+| `mes_vwap_reversion_gated` | 565 | +0.0513 | FAIL (avg in-sample Sharpe +0.007, OOS -0.019; gate ratio -2.58) | H2 of signal-hunt sprint; vol-band + time-of-session gates raise IS Sharpe but OOS still negative |
 
-Both strategies fail the walk-forward gate at the "no in-sample edge"
-check — they are unprofitable both in-sample and out-of-sample. The
-expected shape for
-naive entry rules without regime filters / volatility gating /
-time-of-day discipline. Surfacing this honestly is the point of the
-harness; finding a strategy with actual edge is the next iteration's
-work.
+The first two strategies fail the walk-forward gate at the "no in-sample edge" check — unprofitable both in-sample and out-of-sample. The expected shape for naive entry rules without regime filters / volatility gating / time-of-day discipline. `mes_vwap_reversion_gated` (added 2026-04-30) tests whether mechanical gates fix those failure modes for VWAP reversion specifically; gates lift IS Sharpe materially (-0.31 → +0.007) but the strategy is essentially zero-edge under them, OOS turns slightly negative, and per the sprint's anti-overfitting rules the hypothesis is killed (no parameter tuning of failed variants). Round 2 introduces a mechanistically distinct hypothesis (`range_break_fade`).
 
 ---
 

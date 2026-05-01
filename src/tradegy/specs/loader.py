@@ -100,6 +100,15 @@ def _validate_registry_refs(spec: StrategySpec) -> list[str]:
     except KeyError as exc:
         errors.append(f"entry.strategy_class: {exc}")
 
+    # entry.gating_conditions[].condition
+    for i, gate in enumerate(spec.entry.gating_conditions):
+        try:
+            ev = get_condition_evaluator(gate.condition)
+            errs = ev.validate_parameters(gate.parameters)
+            errors.extend([f"entry.gating_conditions[{i}].{e}" for e in errs])
+        except KeyError as exc:
+            errors.append(f"entry.gating_conditions[{i}].condition: {exc}")
+
     # sizing.method
     try:
         sizing = get_sizing_class(spec.sizing.method)

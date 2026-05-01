@@ -92,12 +92,16 @@ def build_feature_panel(
         }
         feat = feat.rename(rename_map).drop("ts_utc")
         # join_asof on ts_utc (left) → served_at (right), backward strategy.
+        # Drop `served_at` after each join — it stays attached to `out`
+        # otherwise and collides on the next feature's join (DuplicateError).
         out = out.join_asof(
             feat.sort("served_at"),
             left_on="ts_utc",
             right_on="served_at",
             strategy="backward",
         )
+        if "served_at" in out.columns:
+            out = out.drop("served_at")
     return out
 
 

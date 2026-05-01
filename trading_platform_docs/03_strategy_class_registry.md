@@ -246,12 +246,13 @@ Initial entries:
 
 ### Condition evaluator registry
 
-Registered, composable conditions referenced in `context_conditions.structured` and `exits.invalidation_conditions`. Conditions evaluate against the feature stream and return boolean.
+Registered, composable conditions referenced in `entry.gating_conditions` (harness-enforced pre-entry gates), `context_conditions.structured` (LLM-readable prose), and `exits.invalidation_conditions` (post-entry flatten triggers). Conditions evaluate against the feature stream and return boolean.
 
-Initial entries:
+Initial entries (✅ implemented, otherwise planned):
 
-- **`feature_threshold`** — `feature X > threshold Y`
-- **`feature_range`** — `feature X in [min, max]`
+- ✅ **`feature_threshold`** — `feature X > threshold Y` (operators: gt | gte | lt | lte | eq)
+- ✅ **`feature_range`** — `feature X in [lo, hi]` (inclusive bounds; either lo, hi, or both)
+- ✅ **`time_of_session`** — `session_position in [lo, hi]` (canonical time-of-day gate, sugar over `feature_range` keyed on `mes_session_position`)
 - **`feature_delta`** — change in feature X over window Y > threshold Z
 - **`calendar_event`** — within N minutes of declared event type
 - **`regime_probability`** — regime probability > threshold
@@ -262,7 +263,7 @@ Initial entries:
 - **`opposite_direction_break`** — price has broken specified level in opposite direction with volume
 - **`sentiment_shock`** — sentiment feature delta exceeds threshold (only usable once a sentiment source has been admitted against the universal bar in the feature pipeline)
 
-Conditions can be composed with `and`, `or`, `not` in the spec.
+Conditions can be composed with `and`, `or`, `not` in the spec. The harness applies `entry.gating_conditions[]` as an implicit AND — all must be True for the strategy class's `on_bar` to be invoked.
 
 ---
 

@@ -1,0 +1,99 @@
+# MES VWAP Reversion (gated) — H2 from the signal-hunt sprint.
+#
+# Hypothesis (H2): VWAP fade only works when (a) intraday vol sits in
+# the mid-band of its distribution (no regime-shift) and (b) we're
+# outside the opening drive and the last 30 min of session (no time for
+# reversion to play out before close). The base `mes_vwap_reversion`
+# spec failed walk-forward (avg Sharpe -0.31) precisely because it
+# fired symmetrically into trending high-vol regimes and into the last
+# 30 min where reversion can't complete. This variant adds two gating
+# conditions; everything else mirrors the base spec.
+#
+# Status=draft, tier=proposal_only — under H2 of round 1, awaiting
+# walk-forward + CPCV results.
+
+metadata:
+  id: mes_vwap_reversion_gated
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES VWAP Reversion (regime + time-of-session gated)
+  status: draft
+  created_date: 2026-04-30
+  last_modified_date: 2026-04-30
+  author: dan
+  reviewers: []
+  parent_strategy_id: mes_vwap_reversion
+  description: >
+    Long-only VWAP fade on MES with two hard entry gates: realized 30m
+    annualized vol must lie in [0.08, 0.22] (mid-band of historical MES
+    distribution), and session_position must lie in [0.10, 0.85] (skip
+    opening drive and last 30 min). All other parameters mirror the
+    base mes_vwap_reversion spec to isolate the gating effect.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: vwap_reversion
+  parameters:
+    vwap_feature_id: mes_vwap
+    deviation_threshold_ticks: 8
+    tick_size: 0.25
+    max_attempts_per_session: 1
+  direction: long
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    - condition: feature_range
+      parameters:
+        feature_id: mes_realized_vol_30m
+        lo: 0.08
+        hi: 0.22
+    - condition: time_of_session
+      parameters:
+        session_position_feature_id: mes_session_position
+        lo: 0.10
+        hi: 0.85
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: fixed_ticks
+    stop_ticks: 12
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 100
+  time_stop:
+    enabled: true
+    max_holding_bars: 30
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only
