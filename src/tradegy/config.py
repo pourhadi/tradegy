@@ -28,6 +28,10 @@ def audits_dir() -> Path:
     return data_dir() / "audits"
 
 
+def evidence_dir() -> Path:
+    return data_dir() / "evidence"
+
+
 def registries_dir() -> Path:
     return repo_root() / "registries"
 

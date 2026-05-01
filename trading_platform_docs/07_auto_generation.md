@@ -154,6 +154,8 @@ Holdout access is strictly controlled:
 
 Holdout refresh policy: rotate the 6-month window annually. Each hypothesis gets one shot at the holdout.
 
+**Implementation (2026-05-01):** `tradegy walk-forward` and `tradegy cpcv` accept `--holdout-months N`. When set, the trailing N months are reserved from all walk-forward folds / CPCV paths; after the primary gate passes, a single backtest runs on the held-out window and is gated at `0.5× reference_sharpe` (avg OOS Sharpe for walk-forward; median CPCV Sharpe for cpcv). Failure exits with code 5 (walk-forward) or 6 (cpcv). The held-out window is point-in-time correct: no fold or path ever sees data inside the holdout.
+
 ---
 
 ## Gates

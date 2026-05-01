@@ -125,6 +125,7 @@ declared tolerance; receipt metadata complete.
 
 **Activities:**
 - **Gap detection** — compare observed timestamps to expected cadence; catalog gaps
+- **Coverage-by-hour** — calendar-aware tally of UTC-hour-of-day distribution; flag any in-session hour with zero rows or with density < 5% of the median in-session hour. Catches the silent partial-day-export failure that bypassed gap detection in 2026-04 (Sierra Chart MES had only ~14:00–20:00 ET coverage but `coverage.gaps:[]` reported no anomaly because intraday gaps fit inside `max_inactivity_seconds`). Implemented in `src/tradegy/audit/basic.py` as `_check_coverage_by_hour`.
 - **Revision detection** — if updating prior data, identify changed historical values; flag sources that revise
 - **Latency characterization** — measure (receipt_time − observation_time); build distribution
 - **Cross-source reconciliation** — if multiple sources cover same signal, check consistency
@@ -141,6 +142,7 @@ acceptance before source can be used for live trading.
 - Revisions going undetected (silent contamination of historical features)
 - Latency assumed constant when actually variable
 - Missing data forward-filled without audit trail
+- **Silent partial-day exports** — caught by coverage-by-hour as of 2026-05-01.
 
 ### Stage 3: Source admission
 

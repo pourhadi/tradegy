@@ -7,11 +7,19 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
+from dateutil.relativedelta import relativedelta
 from rich.console import Console
 from rich.table import Table
 
 from tradegy import config
 from tradegy.audit.basic import audit_source
+from tradegy.evidence import (
+    build_packet,
+    read_packet,
+    signing_mode,
+    write_packet,
+)
+from tradegy.evidence.packet import verify_packet
 from tradegy.features import transforms  # noqa: F401  — register transforms
 from tradegy.features.engine import compute_feature
 from tradegy.harness import (
@@ -308,6 +316,109 @@ def backtest(
     table.add_row("per_trade_sharpe", f"{s.sharpe:.3f}")
     table.add_row("max_drawdown", f"{s.max_drawdown:.2f}")
     console.print(table)
+    _write_run_evidence(
+        spec=spec,
+        spec_id=spec_id,
+        run_type="backtest",
+        cost=cost,
+        coverage_start=result.coverage_start,
+        coverage_end=result.coverage_end,
+        payload={
+            "stats": {
+                "total_trades": s.total_trades,
+                "expectancy_R": s.expectancy_R,
+                "total_pnl": s.total_pnl,
+                "total_pnl_R": s.total_pnl_R,
+                "win_rate": s.win_rate,
+                "avg_win_R": s.avg_win_R,
+                "avg_loss_R": s.avg_loss_R,
+                "profit_factor": s.profit_factor,
+                "avg_holding_bars": s.avg_holding_bars,
+                "sharpe": s.sharpe,
+                "max_drawdown": s.max_drawdown,
+            },
+            "total_bars": result.total_bars,
+            "sessions_traversed": result.sessions_traversed,
+        },
+    )
+
+
+def _cost_model_dict(cost: CostModel) -> dict[str, float]:
+    return {
+        "tick_size": float(cost.tick_size),
+        "slippage_ticks_per_side": float(cost.slippage_ticks_per_side),
+        "commission_per_contract_round_trip": float(
+            cost.commission_per_contract_round_trip
+        ),
+    }
+
+
+def _write_run_evidence(
+    *,
+    spec,
+    spec_id: str,
+    run_type: str,
+    cost: CostModel,
+    coverage_start: datetime,
+    coverage_end: datetime,
+    payload: dict,
+) -> None:
+    """Build, sign, and persist the evidence packet for a harness run."""
+    spec_path = config.strategy_specs_dir() / f"{spec_id}.yaml"
+    packet = build_packet(
+        spec_id=spec.metadata.id,
+        spec_version=spec.metadata.version,
+        spec_path=spec_path,
+        run_type=run_type,  # type: ignore[arg-type]
+        cost_model=_cost_model_dict(cost),
+        coverage_start=coverage_start,
+        coverage_end=coverage_end,
+        payload=payload,
+    )
+    out_path = write_packet(packet)
+    mode = signing_mode()
+    style = "green" if mode == "HMAC-SHA256" else "yellow"
+    console.print(
+        f"[{style}]evidence[/] {mode}  → {out_path.relative_to(config.repo_root())}"
+    )
+
+
+def _evaluate_holdout(
+    spec,
+    *,
+    holdout_start: datetime,
+    holdout_end: datetime,
+    reference_sharpe: float,
+    cost: CostModel,
+) -> tuple[bool, str, float]:
+    """Run a single backtest over the held-out trailing window and return
+    (passed, message, holdout_sharpe).
+
+    Holdout gate per `07_auto_generation.md:165`: holdout Sharpe must be
+    ≥ 0.5 × the reference (walk-forward / CPCV) Sharpe.
+    """
+    result = run_backtest(
+        spec,
+        start=holdout_start,
+        end=holdout_end,
+        cost=cost,
+    )
+    holdout_sharpe = result.stats.sharpe if result.stats is not None else 0.0
+    threshold = 0.5 * reference_sharpe
+    if reference_sharpe <= 0:
+        passed = False
+        msg = (
+            f"reference sharpe {reference_sharpe:+.3f} is ≤ 0; holdout "
+            "gate cannot pass without prior-stage edge"
+        )
+    else:
+        passed = holdout_sharpe >= threshold
+        msg = (
+            f"holdout sharpe {holdout_sharpe:+.3f} "
+            f"{'≥' if passed else '<'} 0.5 × reference "
+            f"({reference_sharpe:+.3f}) = {threshold:+.3f}"
+        )
+    return passed, msg, holdout_sharpe
 
 
 @app.command("walk-forward")
@@ -318,6 +429,13 @@ def walk_forward_cmd(
     roll_years: Annotated[float, typer.Option(help="roll step between windows")] = 1.0,
     coverage_start: Annotated[Optional[str], typer.Option(help="ISO 8601; defaults to bar feature's first ts")] = None,
     coverage_end: Annotated[Optional[str], typer.Option(help="ISO 8601; defaults to bar feature's last ts")] = None,
+    holdout_months: Annotated[int, typer.Option(
+        help="trailing months reserved untouched as holdout. After "
+             "walk-forward completes on [coverage_start, coverage_end - "
+             "holdout_months), a single backtest runs on the held-out "
+             "window and is gated at 0.5× the avg OOS Sharpe per "
+             "07_auto_generation.md:165. 0 disables holdout."
+    )] = 0,
     tick_size: Annotated[float, typer.Option()] = 0.25,
     slippage_ticks: Annotated[float, typer.Option()] = 0.5,
     commission_round_trip: Annotated[float, typer.Option()] = 1.50,
@@ -327,6 +445,12 @@ def walk_forward_cmd(
 
     Gate (per 07_auto_generation.md:171): avg OOS Sharpe must be ≥ 50%
     of avg in-sample Sharpe, AND in-sample Sharpe must be positive.
+
+    With --holdout-months > 0, after the walk-forward gate, a separate
+    backtest runs on the trailing held-out window and is gated at 0.5×
+    the avg OOS Sharpe per 07_auto_generation.md:165. The held-out
+    window is reserved from all walk-forward folds (point-in-time
+    correct: no fold ever sees data inside the holdout).
     """
     spec_path = config.strategy_specs_dir() / f"{spec_id}.yaml"
     spec = load_spec(spec_path)
@@ -349,6 +473,16 @@ def walk_forward_cmd(
             cs = bars.row(0, named=True)["ts_utc"]
         if ce is None:
             ce = bars.row(-1, named=True)["ts_utc"]
+
+    # Reserve the trailing N months as the holdout window. The walk-
+    # forward gate runs on [cs, ce - N months); the holdout backtest
+    # runs on [ce - N months, ce] AFTER the gate decision.
+    holdout_start: Optional[datetime] = None
+    holdout_end: Optional[datetime] = None
+    if holdout_months > 0:
+        holdout_end = ce
+        holdout_start = ce - relativedelta(months=holdout_months)
+        ce = holdout_start
 
     summary = run_walk_forward(
         spec,
@@ -397,8 +531,90 @@ def walk_forward_cmd(
         ("[green]PASS[/]" if summary.passed else f"[red]FAIL[/] — {summary.fail_reason}"),
     )
     console.print(agg)
+
+    holdout_payload: dict | None = None
+    holdout_passed: bool | None = None
+    if holdout_start is not None and holdout_end is not None and summary.passed:
+        console.print(
+            f"\n[bold]Holdout backtest[/]  window=[{holdout_start} → "
+            f"{holdout_end}]  reference avg OOS sharpe="
+            f"{summary.avg_oos_sharpe:+.3f}"
+        )
+        holdout_passed, msg, holdout_sharpe = _evaluate_holdout(
+            spec,
+            holdout_start=holdout_start,
+            holdout_end=holdout_end,
+            reference_sharpe=summary.avg_oos_sharpe,
+            cost=cost,
+        )
+        ho = Table(title="holdout gate")
+        ho.add_column("metric")
+        ho.add_column("value", justify="right")
+        ho.add_row("holdout sharpe", f"{holdout_sharpe:+.3f}")
+        ho.add_row("reference (avg OOS) sharpe", f"{summary.avg_oos_sharpe:+.3f}")
+        ho.add_row(
+            "gate",
+            "[green]PASS[/]" if holdout_passed else f"[red]FAIL[/] — {msg}",
+        )
+        console.print(ho)
+        holdout_payload = {
+            "window_start": holdout_start.isoformat(),
+            "window_end": holdout_end.isoformat(),
+            "sharpe": holdout_sharpe,
+            "reference_sharpe": summary.avg_oos_sharpe,
+            "passed": holdout_passed,
+            "message": msg,
+        }
+
+    _write_run_evidence(
+        spec=spec,
+        spec_id=spec_id,
+        run_type="walk_forward",
+        cost=cost,
+        coverage_start=summary.coverage_start,
+        coverage_end=holdout_end if holdout_end is not None else summary.coverage_end,
+        payload={
+            "config": {
+                "train_years": cfg.train_years,
+                "test_years": cfg.test_years,
+                "roll_years": cfg.roll_years,
+            },
+            "windows": [
+                {
+                    "index": w.index,
+                    "train_start": w.train_start.isoformat(),
+                    "train_end": w.train_end.isoformat(),
+                    "test_start": w.test_start.isoformat(),
+                    "test_end": w.test_end.isoformat(),
+                    "in_sample_sharpe": (
+                        w.in_sample.stats.sharpe if w.in_sample else None
+                    ),
+                    "in_sample_trades": (
+                        w.in_sample.stats.total_trades if w.in_sample else 0
+                    ),
+                    "oos_sharpe": (
+                        w.out_of_sample.stats.sharpe if w.out_of_sample else None
+                    ),
+                    "oos_trades": (
+                        w.out_of_sample.stats.total_trades if w.out_of_sample else 0
+                    ),
+                }
+                for w in summary.windows
+            ],
+            "avg_in_sample_sharpe": summary.avg_in_sample_sharpe,
+            "avg_oos_sharpe": summary.avg_oos_sharpe,
+            "worst_window_oos_sharpe": summary.worst_window_oos_sharpe,
+            "wf_gate_passed": summary.passed,
+            "wf_gate_fail_reason": summary.fail_reason,
+            "holdout": holdout_payload,
+            "holdout_gate_passed": holdout_passed,
+        },
+    )
+
     if not summary.passed:
         raise typer.Exit(code=4)
+    if holdout_passed is False:
+        raise typer.Exit(code=5)
 
 
 @app.command("cpcv")
@@ -412,6 +628,13 @@ def cpcv_cmd(
     max_pct_paths_negative: Annotated[float, typer.Option(help="gate threshold per doc 05:343")] = 0.20,
     coverage_start: Annotated[Optional[str], typer.Option(help="ISO 8601; defaults to bar feature's first ts")] = None,
     coverage_end: Annotated[Optional[str], typer.Option(help="ISO 8601; defaults to bar feature's last ts")] = None,
+    holdout_months: Annotated[int, typer.Option(
+        help="trailing months reserved untouched as holdout. After CPCV "
+             "completes on [coverage_start, coverage_end - holdout_months), "
+             "a single backtest runs on the held-out window and is gated "
+             "at 0.5× the CPCV median Sharpe per "
+             "07_auto_generation.md:165. 0 disables holdout."
+    )] = 0,
     tick_size: Annotated[float, typer.Option()] = 0.25,
     slippage_ticks: Annotated[float, typer.Option()] = 0.5,
     commission_round_trip: Annotated[float, typer.Option()] = 1.50,
@@ -423,6 +646,10 @@ def cpcv_cmd(
     path, and reports the cross-path Sharpe distribution. Gate per
     doc 05:343 (median Sharpe ≥ threshold AND pct paths negative ≤
     max).
+
+    With --holdout-months > 0, after the CPCV gate, a separate backtest
+    runs on the trailing held-out window. The held-out window is
+    excluded from all CPCV folds (point-in-time correct).
     """
     spec_path = config.strategy_specs_dir() / f"{spec_id}.yaml"
     spec = load_spec(spec_path)
@@ -448,6 +675,13 @@ def cpcv_cmd(
             cs = bars.row(0, named=True)["ts_utc"]
         if ce is None:
             ce = bars.row(-1, named=True)["ts_utc"]
+
+    holdout_start: Optional[datetime] = None
+    holdout_end: Optional[datetime] = None
+    if holdout_months > 0:
+        holdout_end = ce
+        holdout_start = ce - relativedelta(months=holdout_months)
+        ce = holdout_start
 
     summary = run_cpcv(
         spec,
@@ -490,8 +724,113 @@ def cpcv_cmd(
         ("[green]PASS[/]" if summary.passed else f"[red]FAIL[/] — {summary.fail_reason}"),
     )
     console.print(agg)
+
+    holdout_payload: dict | None = None
+    holdout_passed: bool | None = None
+    if holdout_start is not None and holdout_end is not None and summary.passed:
+        console.print(
+            f"\n[bold]Holdout backtest[/]  window=[{holdout_start} → "
+            f"{holdout_end}]  reference (median CPCV) sharpe="
+            f"{summary.median_sharpe:+.3f}"
+        )
+        holdout_passed, msg, holdout_sharpe = _evaluate_holdout(
+            spec,
+            holdout_start=holdout_start,
+            holdout_end=holdout_end,
+            reference_sharpe=summary.median_sharpe,
+            cost=cost,
+        )
+        ho = Table(title="holdout gate")
+        ho.add_column("metric")
+        ho.add_column("value", justify="right")
+        ho.add_row("holdout sharpe", f"{holdout_sharpe:+.3f}")
+        ho.add_row("reference (median CPCV) sharpe", f"{summary.median_sharpe:+.3f}")
+        ho.add_row(
+            "gate",
+            "[green]PASS[/]" if holdout_passed else f"[red]FAIL[/] — {msg}",
+        )
+        console.print(ho)
+        holdout_payload = {
+            "window_start": holdout_start.isoformat(),
+            "window_end": holdout_end.isoformat(),
+            "sharpe": holdout_sharpe,
+            "reference_sharpe": summary.median_sharpe,
+            "passed": holdout_passed,
+            "message": msg,
+        }
+
+    _write_run_evidence(
+        spec=spec,
+        spec_id=spec_id,
+        run_type="cpcv",
+        cost=cost,
+        coverage_start=summary.coverage_start,
+        coverage_end=holdout_end if holdout_end is not None else summary.coverage_end,
+        payload={
+            "config": {
+                "n_folds": cfg.n_folds,
+                "k_test_folds": cfg.k_test_folds,
+                "purge_days": cfg.purge_days,
+                "embargo_days": cfg.embargo_days,
+                "median_sharpe_threshold": cfg.median_sharpe_threshold,
+                "max_pct_paths_negative": cfg.max_pct_paths_negative,
+            },
+            "paths": [
+                {
+                    "index": p.index,
+                    "test_fold_indices": list(p.test_fold_indices),
+                    "trades": p.stats.total_trades if p.stats else 0,
+                    "sharpe": p.stats.sharpe if p.stats else None,
+                    "expectancy_R": p.stats.expectancy_R if p.stats else None,
+                }
+                for p in summary.paths
+            ],
+            "median_sharpe": summary.median_sharpe,
+            "iqr_sharpe": summary.iqr_sharpe,
+            "pct_paths_negative": summary.pct_paths_negative,
+            "paths_with_trades": summary.paths_with_trades,
+            "cpcv_gate_passed": summary.passed,
+            "cpcv_gate_fail_reason": summary.fail_reason,
+            "holdout": holdout_payload,
+            "holdout_gate_passed": holdout_passed,
+        },
+    )
+
     if not summary.passed:
         raise typer.Exit(code=5)
+    if holdout_passed is False:
+        raise typer.Exit(code=6)
+
+
+@app.command("validate-evidence")
+def validate_evidence_cmd(
+    path: Annotated[Path, typer.Argument(
+        help="evidence packet path (data/evidence/*.json)",
+        exists=True, dir_okay=False,
+    )],
+) -> None:
+    """Verify the signature on an evidence packet.
+
+    Per `13_governance_process.md`: promotion to `live` tier requires
+    HMAC-signed evidence (TRADEGY_EVIDENCE_KEY set when the harness
+    generated the packet). SHA256-only packets are reported as
+    tamper-evident-only and rejected for governance-grade decisions.
+    """
+    packet = read_packet(path)
+    passed, msg = verify_packet(packet)
+    sig = packet.signature
+    algo = sig.get("algorithm", "?")
+    console.print(
+        f"[bold]{packet.spec_id}@{packet.spec_version}[/]  "
+        f"run={packet.run_type}  algo={algo}  generated_at={packet.generated_at}"
+    )
+    if "warning" in sig:
+        console.print(f"[yellow]warning:[/] {sig['warning']}")
+    if passed:
+        console.print(f"[green]PASS[/] — {msg}")
+    else:
+        console.print(f"[red]FAIL[/] — {msg}")
+        raise typer.Exit(code=7)
 
 
 if __name__ == "__main__":

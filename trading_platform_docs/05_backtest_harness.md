@@ -35,7 +35,8 @@ Phase 3A shipped the MVP single-spec single-window driver in
 | CPCV | **implemented (Phase 6A)** — combinatorial paths over `N` equal-width folds with `k` test folds per path (`C(N, k)` paths); per-path trades concatenated and aggregated; cross-path distribution reports median Sharpe, IQR, pct-paths-negative; gate per doc 05:343 (configurable). `purge_days` / `embargo_days` are accepted but no-op in this MVP — they activate when within-train fitting is added |
 | Stress periods | NOT implemented |
 | Leakage audit (recompute features at sampled T) | covered already by `tradegy validate <feature>` at the feature-pipeline layer; harness-side audit deferred |
-| Evidence signing | NOT implemented |
+| Evidence signing | **implemented (2026-05-01)** — every `backtest` / `walk-forward` / `cpcv` run writes a signed packet to `data/evidence/`. HMAC-SHA256 when `TRADEGY_EVIDENCE_KEY` is set (governance-grade, unforgeable); plain SHA256 otherwise (tamper-evident, with a recorded warning). `tradegy validate-evidence <packet.json>` re-signs and constant-time-compares; mismatched packets exit code 7. See `src/tradegy/evidence/` |
+| Holdout window (CLI) | **implemented (2026-05-01)** — `--holdout-months N` on `walk-forward` and `cpcv` reserves the trailing N months from all folds, then runs a single backtest on the held-out window. Gates at 0.5× the avg OOS Sharpe (walk-forward) or median CPCV Sharpe per `07_auto_generation.md:165` |
 | Run modes | `single`, `walk_forward`, and `cpcv` shipped (CLI: `tradegy backtest`, `tradegy walk-forward`, `tradegy cpcv`); `sensitivity` / `variant_sweep` / `regression` / `batch` deferred |
 | Multi-strategy simulation | NOT implemented |
 | Live replay drift detection | NOT implemented |
@@ -385,13 +386,17 @@ Each harness run produces an evidence packet. The packet is deterministic in:
 - Input data versions (hash)
 - Random seed (where applicable)
 
-The packet is signed via:
+The packet is signed via (implemented 2026-05-01 — see `src/tradegy/evidence/`):
 
 ```
-signature = sha256(harness_version || spec_hash || data_versions_hash || seed || stats_canonical_json)
+canonical = canonical_json(packet_envelope_minus_signature)
+signature = HMAC-SHA256(TRADEGY_EVIDENCE_KEY, canonical)   # governance-grade
+       OR = SHA256(canonical)                              # tamper-evident, with warning
 ```
 
-The `backtest_evidence.harness_signature` field in the strategy spec is this signature. Any human edit to the stats breaks the signature. The spec loader refuses to load specs whose signatures don't verify.
+When `TRADEGY_EVIDENCE_KEY` is set, the harness signs with HMAC — unforgeable without the key, required for promotion to `live` tier per `13_governance_process.md`. Without the key, it falls back to plain SHA256: any post-hoc edit invalidates the digest, but the digest is recomputable, so it's tamper-*evident*, not unforgeable. The packet records `algorithm` so downstream tools can reject unauthenticated packets at governance gates.
+
+`tradegy validate-evidence <packet.json>` performs constant-time signature comparison; mismatch exits with code 7. The full backtest_evidence section in the strategy spec is rebuilt from the packet at promotion time; the live spec stores the packet's signature in `backtest_evidence.harness_signature`. The spec loader refuses to load specs whose signatures don't verify.
 
 ---
 
