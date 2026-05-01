@@ -18,18 +18,36 @@ in `00_master_architecture.md:65-71` into an enforceable contract.
 | Pre-flight risk-cap gate | ✅ implemented (Phase 2, 2026-05-01) | `src/tradegy/execution/risk_caps.py` |
 | Global kill-switch | ✅ implemented (Phase 2) — trip / clear / mark_reconciled lifecycle with audit history | `src/tradegy/execution/kill_switch.py` |
 | Session-boundary flatten plan | ✅ implemented (Phase 2) — pure-function plan builder; orchestration deferred to Phase 3 | `src/tradegy/execution/session_flatten.py` |
-| Broker reconciliation loop | ⚠️ spec only | (Phase 3) |
-| Margin / heartbeat live wiring | ⚠️ pre-flight slots wired but inputs come from broker (Phase 3) | `risk_caps.RiskState` |
-| IBKR adapter wiring | ⚠️ adapter stub exists; lifecycle not wired | `src/tradegy/live/ibkr.py` (Phase 3) |
+| Broker-agnostic order router (ABC) | ✅ implemented (Phase 3A, 2026-05-01) | `src/tradegy/execution/router.py` |
+| IBKR order router (place / cancel / query) | ✅ implemented (Phase 3A) — drives FSM via ib_async statusEvent / fillEvent; dependency-injected IB client for testability | `src/tradegy/execution/ibkr_router.py` |
+| IBKR status string → OrderState mapping | ✅ implemented (Phase 3A) — defensive (unknown→UNKNOWN) | `src/tradegy/execution/ibkr_status.py` |
+| Broker reconciliation loop | ⚠️ spec only — query_* methods on the router exist; periodic divergence detector deferred | (Phase 3B) |
+| Margin / heartbeat live wiring | ⚠️ pre-flight slots wired but inputs come from broker (Phase 3B) | `risk_caps.RiskState` |
+| Paper-account integration test | ⚠️ not wired — Phase 3A unit-tests use a `MockIB`; live paper test requires TWS/Gateway running | (deferred to user-run) |
 
-Phase 1 shipped the broker-agnostic FSM core. Phase 2 adds the
+Phase 1 shipped the broker-agnostic FSM core. Phase 2 added the
 deterministic enforcement gates that sit on top of it: pre-flight risk
 caps (the doc 11 §263-273 checklist in order), the kill-switch with the
 restart contract from §306-313, and the session-flatten plan builder
 from §264-281. All Phase 2 modules are pure functions or pure-state
-classes — no broker required, fully testable. Phase 3 wires these to
-the live IBKR adapter and the reconciliation loop. **74 tests** cover
-the execution layer total (33 Phase 1 + 41 Phase 2).
+classes — no broker required, fully testable.
+
+Phase 3A adds the IBKR-specific order router (`ibkr_router.py`) and the
+broker-agnostic `BrokerRouter` ABC. The router drives the FSM in
+response to ib_async `statusEvent` / `fillEvent` callbacks; the IBKR
+status mapping is centralised in `ibkr_status.py` so future broker
+ports only re-implement that table. The IB client is dependency-
+injected so unit tests can use a `MockIB` without a real TWS connection
+(33 Phase 3A tests cover happy path, partial fills, terminal-state
+ignore, idempotent re-emission, query_* methods, and handler
+exception isolation). **107 execution-layer tests total** (33 Phase 1
++ 41 Phase 2 + 33 Phase 3A).
+
+Phase 3B wires the reconciliation loop (periodic `query_*` calls →
+divergence detection → `apply_transition` with
+`source=RECONCILIATION`), the margin / heartbeat live inputs into
+`RiskState`, and the actual paper-account integration test against
+TWS/Gateway. None of those require changes to Phase 1-3A code.
 
 ---
 
