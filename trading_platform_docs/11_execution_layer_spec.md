@@ -1,12 +1,31 @@
 # Execution Layer Spec
 
-**Status:** Draft for review
+**Status:** Draft for review (Phase 1 implemented 2026-05-01)
 **Purpose:** Define the deterministic broker-facing execution layer that
 sits between the tactical layer and Interactive Brokers. The execution
 layer owns the order lifecycle, broker reconciliation, account state, and
 hard risk enforcement. It contains no intelligence — every decision about
 *whether* to trade lives upstream. This spec turns the intent statements
 in `00_master_architecture.md:65-71` into an enforceable contract.
+
+## Implementation status
+
+| Section | Status | Code path |
+|---|---|---|
+| Order lifecycle FSM (states + transitions) | ✅ implemented (Phase 1, 2026-05-01) | `src/tradegy/execution/lifecycle.py` |
+| Idempotency keys + dedup window | ✅ implemented (Phase 1) | `src/tradegy/execution/idempotency.py` |
+| Append-only transition log | ✅ implemented (Phase 1) | `src/tradegy/execution/log.py` |
+| Broker reconciliation loop | ⚠️ spec only | (Phase 2) |
+| Account state / margin pre-flight | ⚠️ spec only | (Phase 2) |
+| Session-boundary flatten | ⚠️ spec only | (Phase 3) |
+| Global kill-switch | ⚠️ spec only | (Phase 3) |
+| IBKR adapter wiring | ⚠️ adapter stub exists; lifecycle not wired | `src/tradegy/live/ibkr.py` (Phase 2) |
+
+Phase 1 ships the broker-agnostic core: the FSM is a pure-function state
+machine; idempotency keys are deterministic per the format below; the
+transition log persists every change. Subsequent phases layer on the
+live integration without changing the Phase 1 contract. 33 tests cover
+the legal/illegal transition surface, ID format, and log round-trip.
 
 ---
 
