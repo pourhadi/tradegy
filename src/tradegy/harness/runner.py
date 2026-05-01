@@ -36,6 +36,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 
@@ -151,22 +152,27 @@ def run_backtest(
     required_features = list(
         required_feature_ids_for_strategy(spec.entry.strategy_class)
     )
-    # Gating + invalidation evaluators reference features by id in their
-    # parameters; the panel needs those joined in too. Common keys are
-    # `feature_id` and `session_position_feature_id`.
-    _COND_FEATURE_KEYS = ("feature_id", "session_position_feature_id")
+    # Gating + invalidation evaluators and the initial stop class can each
+    # reference features by id in their parameters; the panel needs those
+    # joined in too. Common keys harvested across all of them.
+    _COND_FEATURE_KEYS = (
+        "feature_id",
+        "session_position_feature_id",
+        "atr_feature_id",
+    )
+
+    def _harvest(params: dict[str, Any]) -> None:
+        for k in _COND_FEATURE_KEYS:
+            if k in params:
+                fid = params[k]
+                if fid not in required_features:
+                    required_features.append(fid)
+
     for g in spec.entry.gating_conditions:
-        for k in _COND_FEATURE_KEYS:
-            if k in g.parameters:
-                fid = g.parameters[k]
-                if fid not in required_features:
-                    required_features.append(fid)
+        _harvest(g.parameters)
     for c in spec.exits.invalidation_conditions:
-        for k in _COND_FEATURE_KEYS:
-            if k in c.parameters:
-                fid = c.parameters[k]
-                if fid not in required_features:
-                    required_features.append(fid)
+        _harvest(c.parameters)
+    _harvest(initial_stop_params)
 
     bars = load_bar_stream(
         instrument,

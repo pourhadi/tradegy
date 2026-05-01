@@ -1,0 +1,91 @@
+# N3 / variant a — volume-spike fade at z>=2.0 + 2.0×ATR stop.
+#
+# Pre-registered 2026-05-01 as part of round 3's 9-spec batch.
+#
+# Variant axis: zscore_threshold (volume z-score that arms the spike).
+#   * a: 2.0
+#   * b: 2.5
+#   * c: 3.0
+
+metadata:
+  id: mes_volume_spike_fade_a
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES Volume Spike Fade (z>=2.0)
+  status: draft
+  created_date: 2026-05-01
+  last_modified_date: 2026-05-01
+  author: dan
+  reviewers: []
+  parent_strategy_id: null
+  description: >
+    Fade an extreme single-bar volume z-score (mes_volume_zscore_20m
+    >= 2.0) on MES when the next bar fails to extend the spike's
+    direction (no follow-through). ATR-multiple stop (2.0× mes_atr_14m),
+    60-bar time-stop, 1 attempt per direction per session.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: volume_spike_fade
+  parameters:
+    volume_zscore_feature_id: mes_volume_zscore_20m
+    zscore_threshold: 2.0
+    directional_close_pct: 0.75
+    max_attempts_per_session: 1
+    direction_mode: both
+  direction: both
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    - condition: time_of_session
+      parameters:
+        session_position_feature_id: mes_session_position
+        lo: 0.10
+        hi: 0.90
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: atr_multiple
+    atr_feature_id: mes_atr_14m
+    multiplier: 2.0
+    max_distance_ticks: 200
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 200
+  time_stop:
+    enabled: true
+    max_holding_bars: 60
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only

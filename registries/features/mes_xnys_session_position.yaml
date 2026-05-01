@@ -1,0 +1,35 @@
+# Hypothesis-driven feature (round 3 of signal-hunt sprint, 2026-05-01):
+# fraction-through-current-XNYS-session for MES bars.
+#
+# Mirror of mes_session_position (which is CMES-aligned, i.e. 23h
+# globex session) but anchored on XNYS regular trading hours
+# (09:30-16:00 ET). Used by gap_fill_fade to gate entries to the early
+# RTH window.
+#
+# Bars outside any XNYS session emit no value, so XNYS-anchored gates
+# automatically restrict entries to RTH.
+
+id: mes_xnys_session_position
+version: v1
+description: >
+  Fraction through the current XNYS session at each MES 1-minute bar:
+  0.0 at XNYS open (09:30 ET), 1.0 at XNYS close (16:00 ET). Bars
+  outside any XNYS session (overnight, weekends, holidays) emit no
+  value.
+type: derived
+inputs:
+  - feature_id: mes_1m_bars
+computation:
+  type: registered_transform
+  transform_id: session_position
+  parameters:
+    session_calendar: XNYS
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 1.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

@@ -57,7 +57,21 @@ plus the distribution gate. End-to-end runs on real MES data (2019-05
 | `mes_orb_failure_fade` (H1) | mes_1m_ohlcv (24h) | 2,718 | -0.526 | n/a (FAIL sanity, IS Sharpe -0.238) | range-break fade with 12-tick fixed stop; trigger fires too easily on minor wicks |
 | `mes_orb_continuation` (H3) | mes_1m_ohlcv (24h) | 3,000 | -0.598 | n/a (FAIL sanity, IS Sharpe -0.386) | inverse mechanism of H1; volume-confirmed range break + 12-tick fixed stop |
 
-**Signal-hunt sprint outcome (2026-04-30):** All three pre-registered hypotheses (H1, H2 re-test, H3) failed the sanity gate (raw IS Sharpe ≤ 0). Hypothesis budget exhausted (3/3). Common failure mode: ~20-23% win rate with avg_loss near full stop, indicating the fixed-tick stop framework + ~2.2-tick cost overhead per round trip eats the asymmetric R/R distribution. The 12-tick stop is too tight relative to MES intraday true-range. Per sprint anti-overfitting rules, no parameter tuning permitted. See `06_hypothesis_system.md` § Named hypotheses under investigation for the full kill record and implications for the next sprint.
+**Round-2 sprint outcome (2026-04-30):** All three pre-registered hypotheses (H1, H2 re-test, H3) failed the sanity gate (raw IS Sharpe ≤ 0). Hypothesis budget exhausted (3/3). Common failure mode: ~20-23% win rate with avg_loss near full stop, indicating the fixed-tick stop framework + ~2.2-tick cost overhead per round trip eats the asymmetric R/R distribution. The 12-tick stop is too tight relative to MES intraday true-range. Per sprint anti-overfitting rules, no parameter tuning permitted.
+
+**Round-3 sprint outcome (2026-05-01):** Three new hypotheses (gap-fill fade, compression breakout, volume-spike fade) with 3 pre-registered variants each (9 total, within the 12-variant budget). All used the new `atr_multiple` stop class to test whether wider ATR-scaled stops fix the round-2 failure mode. **All 9/9 variants killed at sanity.** Best raw result: `mes_gap_fill_a` at -0.174 Sharpe. The compression and volume-spike variants fired 3500-3600 times each over 7 years, indicating selectivity — not stop sizing — is the binding constraint. ATR-multiple stops shifted avg_loss from ~-1.3R (round 2) to ~-2.0R (round 3) without lifting win rates. See `06_hypothesis_system.md` § Cross-sprint synthesis for the full record.
+
+| Round 3 spec | Trades | IS Sharpe | Sanity |
+|---|---|---|---|
+| `mes_gap_fill_a` (0.3% gap) | 1453 | -0.174 | FAIL |
+| `mes_gap_fill_b` (0.5%) | 1080 | -0.205 | FAIL |
+| `mes_gap_fill_c` (1.0%) | 481 | -0.329 | FAIL |
+| `mes_compression_breakout_a` (TR<0.3×ATR) | — | ERROR | ATR cap exceeded 2020-03-16 (peak COVID vol) |
+| `mes_compression_breakout_b` (TR<0.4) | 3602 | -0.691 | FAIL |
+| `mes_compression_breakout_c` (TR<0.5) | 3604 | -0.661 | FAIL |
+| `mes_volume_spike_fade_a` (z≥2.0) | 3593 | -0.658 | FAIL |
+| `mes_volume_spike_fade_b` (z≥2.5) | 3537 | -0.633 | FAIL |
+| `mes_volume_spike_fade_c` (z≥3.0) | 3261 | -0.622 | FAIL |
 
 ---
 

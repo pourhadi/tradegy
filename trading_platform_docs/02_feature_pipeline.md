@@ -268,6 +268,22 @@ of the session, used by the `range_break_fade` (H1) and
 Both features pass no-lookahead and reproducibility audits. They are
 non-null only for post-OR RTH bars (~628k of the 2.46M-bar series).*
 
+*Round 3 of the signal-hunt sprint (2026-05-01) added two more pull-
+driven features under the same gates:*
+*  - `mes_prior_rth_close` — close price of the prior XNYS session,
+    carried forward across the next session (transform
+    `prior_session_close`). 681k rows, no-lookahead PASS,
+    reproducibility PASS.*
+*  - `mes_xnys_session_position` — fraction-through-current-XNYS-session
+    (mirror of the existing CMES-aligned `mes_session_position`, swapped
+    calendar to `XNYS`). 681k rows, no-lookahead PASS, reproducibility
+    PASS.*
+*Both feed the round-3 hypotheses (gap_fill_fade, compression_breakout,
+volume_spike_fade), all of which were killed at sanity — see
+`06_hypothesis_system.md`. The features themselves are correct and
+remain available to any future strategy that keys on inter-session
+reference levels or RTH time-of-day.*
+
 *The same Round 2 work also surfaced and fixed a major data gap:
 `mes_5s_ohlcv` (Sierra Chart export) covers only the ~14:00–20:00 ET
 window each session day, missing the RTH morning open. The basic-

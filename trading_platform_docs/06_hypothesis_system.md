@@ -391,6 +391,36 @@ Each row records the kill stage and reason per the kill-reason taxonomy in §Kil
 
 **Sprint outcome (2026-04-30):** All three hypotheses killed at sanity (H1, H3) or sanity-on-re-test (H2). Hypothesis budget exhausted (3/3 hypotheses, 4/12 variants used). Common failure mode across all three: ~20-23% win rate with avg_loss near full stop, indicating the fixed-tick stop + cost-overhead structure (1.2 ticks commission + 1 tick slippage per round trip = 2.2 ticks ≈ 18% of a 12-tick R) consistently eats the asymmetric win/loss distribution. The 12-tick fixed stop is too tight relative to MES intraday true-range (`mes_atr_14m`), so most exits hit the stop before the strategy's mean-reversion / continuation thesis has time to play out.
 
+### Round 3 (2026-05-01) — ATR-stop hypothesis batch
+
+Three new hypotheses, each with 3 pre-registered variants (9 specs total, within the 12-variant budget). The structural change vs. round 2 was a new `atr_multiple` stop class replacing `fixed_ticks`, with stop = entry ± multiplier × `mes_atr_14m`. Hypothesis selection per the rule "different mechanism, not tweaked parameters": none of the round-2 mechanisms were carried over.
+
+| ID | Mechanism (one line) | Strategy class / spec id | Variant axis | Status | Stage of death | Kill reason |
+|---|---|---|---|---|---|---|
+| N1 | RTH-open gap fill — fade gaps from prior XNYS-session close back toward that close. Inter-session reference, distinct from any intra-session anchor in rounds 1/2. | `gap_fill_fade` (new) / `mes_gap_fill_{a,b,c}` | gap_threshold_pct ∈ {0.3, 0.5, 1.0}% | killed | sanity | All three variants negative Sharpe (best -0.17, worst -0.33). 1080-1453 trades on 0.3-0.5% thresholds; 1.0% threshold drops to 481 trades but Sharpe drops further. Mechanism is closest to working of the round-3 batch but still no edge after costs. |
+| N2 | Volatility-compression breakout — when current bar TR < f × ATR_14m, the next bar's break of the compressed bar continues. Local/dynamic range, distinct from session-anchored OR. | `compression_breakout` (new) / `mes_compression_breakout_{a,b,c}` | compression_ratio ∈ {0.3, 0.4, 0.5} | killed | sanity / error | Variant `a` (0.3) errored mid-run on 2020-03-16: at peak COVID volatility, 2×ATR exceeded the 200-tick max_distance_ticks cap. Variants `b` (0.4) and `c` (0.5) ran to completion but fired 3600+ times each over 7 years (≥1.4 trades/day) and posted -0.66 and -0.69 Sharpe. The trigger captures noise more than information. |
+| N3 | Volume-spike fade — fade an extreme single-bar volume z-score (≥ threshold) when the next bar fails to extend the spike's direction. Flow-event reference, no price-level anchor. | `volume_spike_fade` (new) / `mes_volume_spike_fade_{a,b,c}` | zscore_threshold ∈ {2.0, 2.5, 3.0} | killed | sanity | Even at z≥3.0 (most selective variant) the strategy fires 3261 times with -0.62 Sharpe. Fading isolated volume spikes does not have edge on MES; the spike-then-no-followthrough condition is too easy to satisfy on a 1m bar series. |
+
+**Round 3 outcome:** 9/9 variants killed at sanity. Hypothesis budget for round 3 fully consumed. The structural switch to ATR-multiple stops did not produce edge — wider stops shifted avg_loss from ~-1.3R (round 2 fixed-tick) to ~-2.0R (round 3 ATR), but win rates stayed in the 17-26% band, so larger losses dominated. **The conclusion is not "ATR stops don't work"; it is "stop sizing isn't the binding constraint when triggers fire 1000-3500 times over 7 years."**
+
+### Cross-sprint synthesis (rounds 1-3, MES, 12 variants total)
+
+What we've now ruled out, with evidence:
+- Fixed-tick stops on triggers that fire 100s-1000s of times: 18% cost-overhead eats edge.
+- ATR-multiple stops on the same noisy triggers: bigger losses, same edge problem.
+- All five tested mechanisms — VWAP fade gated, OR fade, OR continuation, gap fill, compression breakout, volume-spike fade — fail sanity on MES 1m bars when the entry trigger is a single-feature threshold.
+
+What this implies for the next sprint:
+1. **Selectivity is the binding constraint, not stop sizing.** A trigger that fires <100 times over 7 years (≤14/year) — by chaining 2-3 conditions — is the structural change worth testing. Until selectivity rises, no risk-frame change will produce edge.
+2. **Multi-condition triggers as the new structural axis.** Pre-register hypotheses where entry requires ≥2 independent confirmations (e.g. gap AND volume, compression AND time-of-day, level break AND prior-trend regime).
+3. **Gap fill is the closest-to-edge mechanism to date** (round 3 N1 best at -0.17 Sharpe). A revisit with stricter selectivity (e.g. gap-fill only on Mondays after weekend, or only when overnight VIX rose) could test whether the mechanism needs co-conditioning rather than abandonment. This would be a NEW hypothesis (different mechanism = different conditioning), not a tuning of N1.
+4. **Coverage-by-hour audit still needed.** Round 2's data discovery (mes_5s_ohlcv only had 14:00-20:00 ET) was almost a sprint-killer. A coverage-by-hour audit at source admission would catch this class of issue.
+
+**Sprint guardrails that worked:**
+- Pre-registration of all variants before any backtest run (round 3 batch authored before the first run).
+- No parameter tuning after seeing results (none attempted across all 12 variants).
+- Honest kill recording — including the ATR-cap error in N2-a.
+
 **Implications for next sprint:**
 1. **Stop sizing is load-bearing.** The same hypotheses with ATR-multiple stops (e.g. 1.5–2.5× ATR_14m) might survive — but per anti-overfitting rules, that is a NEW hypothesis batch, not a tweak of these.
 2. **Cost-overhead floor.** With current commission + slippage, any strategy with R < 20 ticks pays > 11% of R per round trip. Hypotheses keying on tighter stops are penalized; the harness's CostModel is a hard lower bound.

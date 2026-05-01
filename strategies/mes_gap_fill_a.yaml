@@ -1,0 +1,97 @@
+# N1 / variant a — gap-fill fade with 0.3% gap threshold + 2.0×ATR stop.
+#
+# Pre-registered 2026-05-01 as part of the 9-spec batch for round 3 of
+# the signal-hunt sprint. All 9 specs were authored before any backtest
+# was run, per the project's anti-overfitting rule against the
+# killed-then-tuned anti-pattern (07_auto_generation.md:194-205).
+#
+# Variant axis for N1: gap_threshold_pct.
+#   * a: 0.003 (0.3%)
+#   * b: 0.005 (0.5%)
+#   * c: 0.010 (1.0%)
+
+metadata:
+  id: mes_gap_fill_a
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES Gap-Fill Fade (0.3% threshold)
+  status: draft
+  created_date: 2026-05-01
+  last_modified_date: 2026-05-01
+  author: dan
+  reviewers: []
+  parent_strategy_id: null
+  description: >
+    Fade RTH-open gaps toward prior-XNYS-session close on MES. Long when
+    open gaps down ≥0.3% from prior close; short when up. ATR-multiple
+    stop (2.0× mes_atr_14m), 60-bar time-stop, 1 attempt per session.
+    Both directions armed.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: gap_fill_fade
+  parameters:
+    prior_close_feature_id: mes_prior_rth_close
+    gap_threshold_pct: 0.003
+    max_attempts_per_session: 1
+    direction_mode: both
+  direction: both
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    # Only fire in the first 90 min of XNYS session (09:30-11:00 ET).
+    # XNYS session is 6.5h, so 90 min = 0.231 of session.
+    # Skip the very first 5 minutes (high volatility, wide spreads)
+    # via lo=0.013.
+    - condition: time_of_session
+      parameters:
+        session_position_feature_id: mes_xnys_session_position
+        lo: 0.013
+        hi: 0.231
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: atr_multiple
+    atr_feature_id: mes_atr_14m
+    multiplier: 2.0
+    max_distance_ticks: 200
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 200
+  time_stop:
+    enabled: true
+    max_holding_bars: 60
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only

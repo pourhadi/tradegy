@@ -287,15 +287,18 @@ For the starting library of 4–6 strategies, the minimum set of classes to impl
 
 **Strategy classes (Phase 1):**
 
-- ✅ `range_break_fade` — fades failed breakouts of a defined range (implemented 2026-04-30; H1 of signal-hunt sprint, killed at sanity — see `06_hypothesis_system.md`)
-- ✅ `range_break_continuation` — enters on confirmed range break with volume (implemented 2026-04-30; H3, killed at sanity)
+- ✅ `range_break_fade` — fades failed breakouts of a defined range (implemented 2026-04-30; round-2 H1, killed at sanity)
+- ✅ `range_break_continuation` — enters on confirmed range break with volume (implemented 2026-04-30; round-2 H3, killed at sanity)
 - ✅ `vwap_reversion` — fades deviations from VWAP in range-bound sessions
 - ✅ `momentum_breakout` — long-only continuation entry on positive momentum (added during Phase 2B, not in original catalog)
+- ✅ `gap_fill_fade` — fades RTH-open gaps toward prior-session close (implemented 2026-05-01; round-3 N1, killed at sanity — best of the round-3 batch at -0.17 Sharpe)
+- ✅ `compression_breakout` — enters on the next bar's break of a volatility-compressed bar (implemented 2026-05-01; round-3 N2, killed at sanity)
+- ✅ `volume_spike_fade` — fades extreme single-bar volume z-scores when follow-through fails (implemented 2026-05-01; round-3 N3, killed at sanity)
 - ✅ `stand_down` — trivial "do nothing" class; first-class selectable option for the LLM
 
 **Sizing classes:** `fixed_contracts`, `fixed_fractional_risk`
 
-**Stop classes:** `fixed_ticks`, `opposite_range_extreme`, `atr_multiple`
+**Stop classes:** ✅ `fixed_ticks`, ✅ `atr_multiple` (implemented 2026-05-01 with ATR-feature read from FeatureSnapshot at entry bar + max_distance_ticks runtime cap), `opposite_range_extreme`
 
 **Stop adjustments:** `move_to_breakeven`, `trail_by_atr`
 
