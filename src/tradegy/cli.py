@@ -15,9 +15,11 @@ from tradegy.audit.basic import audit_source
 from tradegy.features import transforms  # noqa: F401  — register transforms
 from tradegy.features.engine import compute_feature
 from tradegy.harness import (
+    CPCVConfig,
     CostModel,
     WalkForwardConfig,
     run_backtest,
+    run_cpcv,
     run_walk_forward,
 )
 from tradegy.ingest.csv_es import ingest_csv
@@ -392,6 +394,99 @@ def walk_forward_cmd(
     console.print(agg)
     if not summary.passed:
         raise typer.Exit(code=4)
+
+
+@app.command("cpcv")
+def cpcv_cmd(
+    spec_id: Annotated[str, typer.Argument(help="strategy spec id")],
+    n_folds: Annotated[int, typer.Option(help="equal-width folds over coverage")] = 10,
+    k_test_folds: Annotated[int, typer.Option(help="test folds per path; total paths = C(N, k)")] = 2,
+    purge_days: Annotated[float, typer.Option(help="forward-compatible; no-op until fitting is added")] = 0.0,
+    embargo_days: Annotated[float, typer.Option(help="forward-compatible; no-op until fitting is added")] = 0.0,
+    median_sharpe_threshold: Annotated[float, typer.Option(help="gate threshold per doc 05:343")] = 0.8,
+    max_pct_paths_negative: Annotated[float, typer.Option(help="gate threshold per doc 05:343")] = 0.20,
+    coverage_start: Annotated[Optional[str], typer.Option(help="ISO 8601; defaults to bar feature's first ts")] = None,
+    coverage_end: Annotated[Optional[str], typer.Option(help="ISO 8601; defaults to bar feature's last ts")] = None,
+    tick_size: Annotated[float, typer.Option()] = 0.25,
+    slippage_ticks: Annotated[float, typer.Option()] = 0.5,
+    commission_round_trip: Annotated[float, typer.Option()] = 1.50,
+) -> None:
+    """Run combinatorial purged cross-validation on a spec.
+
+    Builds C(n_folds, k_test_folds) paths, runs the strategy on each
+    path's test folds with frozen parameters, concatenates trades per
+    path, and reports the cross-path Sharpe distribution. Gate per
+    doc 05:343 (median Sharpe ≥ threshold AND pct paths negative ≤
+    max).
+    """
+    spec_path = config.strategy_specs_dir() / f"{spec_id}.yaml"
+    spec = load_spec(spec_path)
+    cost = CostModel(
+        tick_size=tick_size,
+        slippage_ticks_per_side=slippage_ticks,
+        commission_per_contract_round_trip=commission_round_trip,
+    )
+    cfg = CPCVConfig(
+        n_folds=n_folds,
+        k_test_folds=k_test_folds,
+        purge_days=purge_days,
+        embargo_days=embargo_days,
+        median_sharpe_threshold=median_sharpe_threshold,
+        max_pct_paths_negative=max_pct_paths_negative,
+    )
+    cs = _parse_iso(coverage_start)
+    ce = _parse_iso(coverage_end)
+    if cs is None or ce is None:
+        from tradegy.harness.data import load_bar_stream
+        bars = load_bar_stream(spec.market_scope.instrument)
+        if cs is None:
+            cs = bars.row(0, named=True)["ts_utc"]
+        if ce is None:
+            ce = bars.row(-1, named=True)["ts_utc"]
+
+    summary = run_cpcv(
+        spec,
+        coverage_start=cs,
+        coverage_end=ce,
+        config=cfg,
+        cost=cost,
+    )
+    console.print(
+        f"[bold]{summary.spec_id}@{summary.spec_version}[/]  "
+        f"folds={cfg.n_folds}  k_test={cfg.k_test_folds}  "
+        f"paths={len(summary.paths)}  "
+        f"coverage=[{summary.coverage_start} → {summary.coverage_end}]"
+    )
+    table = Table(title="CPCV path Sharpes")
+    table.add_column("#")
+    table.add_column("test folds")
+    table.add_column("trades", justify="right")
+    table.add_column("sharpe", justify="right")
+    table.add_column("expectancy_R", justify="right")
+    for p in summary.paths:
+        s = p.stats
+        table.add_row(
+            str(p.index),
+            ",".join(str(i) for i in p.test_fold_indices),
+            f"{s.total_trades}" if s else "—",
+            f"{s.sharpe:+.3f}" if s else "—",
+            f"{s.expectancy_R:+.3f}" if s else "—",
+        )
+    console.print(table)
+    agg = Table(title="aggregate")
+    agg.add_column("metric")
+    agg.add_column("value", justify="right")
+    agg.add_row("paths with trades", f"{summary.paths_with_trades}/{len(summary.paths)}")
+    agg.add_row("median Sharpe", f"{summary.median_sharpe:+.3f}")
+    agg.add_row("IQR Sharpe", f"{summary.iqr_sharpe:.3f}")
+    agg.add_row("pct paths negative", f"{summary.pct_paths_negative:.1%}")
+    agg.add_row(
+        "gate",
+        ("[green]PASS[/]" if summary.passed else f"[red]FAIL[/] — {summary.fail_reason}"),
+    )
+    console.print(agg)
+    if not summary.passed:
+        raise typer.Exit(code=5)
 
 
 if __name__ == "__main__":

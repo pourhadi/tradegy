@@ -5,7 +5,7 @@
 
 ---
 
-## Implementation status (2026-04-28)
+## Implementation status (2026-04-30)
 
 Phase 3A shipped the MVP single-spec single-window driver in
 `src/tradegy/harness/`:
@@ -32,18 +32,21 @@ Phase 3A shipped the MVP single-spec single-window driver in
 | Baseline comparisons | NOT implemented |
 | Walk-forward | **implemented (Phase 5A)** — rolling (train, test) windows; same parameters in both halves; gate per `07_auto_generation.md:171` (avg OOS Sharpe ≥ 50% of avg in-sample, in-sample must be positive) |
 | Walk-forward parameter optimization | NOT implemented (within-envelope grid search; would compound multi-testing problem and needs Deflated Sharpe correction) |
-| CPCV | NOT implemented |
+| CPCV | **implemented (Phase 6A)** — combinatorial paths over `N` equal-width folds with `k` test folds per path (`C(N, k)` paths); per-path trades concatenated and aggregated; cross-path distribution reports median Sharpe, IQR, pct-paths-negative; gate per doc 05:343 (configurable). `purge_days` / `embargo_days` are accepted but no-op in this MVP — they activate when within-train fitting is added |
 | Stress periods | NOT implemented |
 | Leakage audit (recompute features at sampled T) | covered already by `tradegy validate <feature>` at the feature-pipeline layer; harness-side audit deferred |
 | Evidence signing | NOT implemented |
-| Run modes | `single` and `walk_forward` shipped (CLI: `tradegy backtest`, `tradegy walk-forward`); `cpcv` / `sensitivity` / `variant_sweep` / `regression` / `batch` deferred |
+| Run modes | `single`, `walk_forward`, and `cpcv` shipped (CLI: `tradegy backtest`, `tradegy walk-forward`, `tradegy cpcv`); `sensitivity` / `variant_sweep` / `regression` / `batch` deferred |
 | Multi-strategy simulation | NOT implemented |
 | Live replay drift detection | NOT implemented |
 
 CLI: `tradegy backtest <spec_id>` runs a `single` mode backtest and
 prints aggregate stats. `tradegy walk-forward <spec_id>` runs rolling
 (train, test) walk-forward and prints per-window + aggregate stats.
-End-to-end runs on real MES data (2019-05 → 2025-06, 609,923 1m bars):
+`tradegy cpcv <spec_id>` runs combinatorial purged CV with configurable
+`--n-folds` / `--k-test-folds` and prints the per-path Sharpe table
+plus the distribution gate. End-to-end runs on real MES data (2019-05
+→ 2025-06, 609,923 1m bars):
 
 | Spec | Single-mode trades | Single-mode expectancy R | Walk-forward (3y/1y/1y) gate | Notes |
 |---|---|---|---|---|
