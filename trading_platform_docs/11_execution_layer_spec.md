@@ -22,9 +22,9 @@ in `00_master_architecture.md:65-71` into an enforceable contract.
 | IBKR order router (place / cancel / query) | ✅ implemented (Phase 3A) — drives FSM via ib_async statusEvent / fillEvent; dependency-injected IB client for testability | `src/tradegy/execution/ibkr_router.py` |
 | IBKR status string → OrderState mapping | ✅ implemented (Phase 3A) — defensive (unknown→UNKNOWN) | `src/tradegy/execution/ibkr_status.py` |
 | Broker reconciliation: divergence detector | ✅ implemented (Phase 3B, 2026-05-01) — pure-function detector covering all 5 divergence types from §227-237 | `src/tradegy/execution/divergence.py` |
-| Broker reconciliation: async orchestration loop | ⚠️ deferred — periodic-cadence call orchestration on top of the detector | (Phase 3C) |
-| Margin / heartbeat live wiring | ⚠️ pre-flight slots wired but inputs come from broker (Phase 3C) | `risk_caps.RiskState` |
-| Paper-account integration test | ⚠️ not wired — Phase 3A/3B unit-tests use a `MockIB`; live paper test requires TWS/Gateway running | (deferred to user-run) |
+| Broker reconciliation: async orchestration loop | ✅ implemented (Phase 3C, 2026-05-01) — cadence-driven `tick(now)` + `run_forever()`; cadences match §218-223 | `src/tradegy/execution/reconciliation.py` |
+| Margin / heartbeat live wiring | ⚠️ pre-flight slots wired; live inputs piped via the orchestration handler in production | (paper-account test) |
+| Paper-account integration test | ⚠️ not wired — Phase 3A/3B/3C unit-tests use a `MockIB`; live paper test requires TWS/Gateway running | (deferred to user-run) |
 
 Phase 1 shipped the broker-agnostic FSM core. Phase 2 added the
 deterministic enforcement gates that sit on top of it: pre-flight risk
@@ -53,15 +53,27 @@ position with broker flat, local flat with broker position, signed
 quantity mismatch, plus margin breach at the account level. 17 Phase
 3B tests cover every row of the resolution table including the
 "local terminal not in broker.openTrades" non-divergence case.
-**124 execution-layer tests total** (33 Phase 1 + 41 Phase 2 + 33
-Phase 3A + 17 Phase 3B).
+Phase 3C closes the execution layer's broker-agnostic surface area
+with `ReconciliationLoop` (`reconciliation.py`). The loop's `tick(now)`
+method inspects last-run timestamps against configurable cadences
+(`DEFAULT_CADENCES`: 1s open-orders, 5s positions, 30s account, 60s
+PnL — exactly the table in §218-223), runs whichever checks are due,
+and dispatches every detected divergence to two registered handlers:
+a `divergence_handler` for every event (logging / governance audit)
+and an `escalation_handler` for CRITICAL events only (kill-switch
+trip / session-flatten). The `tick(now)` / `run_forever(sleep_s)`
+split keeps real-time scheduling out of unit tests — tests advance
+`now` by hand. 14 Phase 3C tests cover first-tick fan-out, cadence
+respect, custom cadences, dispatch routing, handler-exception
+isolation, and the `run_forever` continues-through-error behaviour.
 
-Phase 3C wires the async reconciliation orchestration on top of the
-detector (periodic `query_*` calls at the cadences in §218-223,
-dispatching detected divergences to the kill-switch / handler / log
-layer), the margin / heartbeat live inputs into
-`RiskState`, and the actual paper-account integration test against
-TWS/Gateway. None of those require changes to Phase 1-3A code.
+**138 execution-layer tests total** (33 Phase 1 + 41 Phase 2 + 33
+Phase 3A + 17 Phase 3B + 14 Phase 3C). The execution layer's
+broker-agnostic core is now feature-complete; the only outstanding
+work is the live paper-account integration test against TWS/Gateway,
+which is deferred to user-run (a real IBKR paper account requires
+the TWS or IB Gateway running locally and is intentionally out of
+the unit-test path).
 
 ---
 
