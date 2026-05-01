@@ -28,6 +28,18 @@ This package ships the framework (schemas, ABCs, orchestrator,
 storage) with stub LLM implementations for tests. The Anthropic SDK
 integrations live in `tradegy.auto_generation.anthropic_*` modules.
 """
+from tradegy.auto_generation.anthropic_generators import (
+    AnthropicHypothesisGenerator,
+    AnthropicVariantGenerator,
+    HypothesisDraft,
+    HypothesisDraftBatch,
+    StrategySpecBatch,
+)
+from tradegy.auto_generation.cost import (
+    CostEstimate,
+    cost_for_usage,
+    format_cost_line,
+)
 from tradegy.auto_generation.generators import (
     HypothesisGenerator,
     StubHypothesisGenerator,
@@ -37,6 +49,7 @@ from tradegy.auto_generation.generators import (
 from tradegy.auto_generation.hypothesis import (
     Hypothesis,
     HypothesisStatus,
+    list_hypotheses,
     load_hypothesis,
 )
 from tradegy.auto_generation.orchestrator import (
@@ -52,18 +65,27 @@ from tradegy.auto_generation.records import (
 )
 
 __all__ = [
+    "AnthropicHypothesisGenerator",
+    "AnthropicVariantGenerator",
     "AutoTestOrchestrator",
     "AutoTestSummary",
+    "CostEstimate",
     "GateOutcome",
     "Hypothesis",
+    "HypothesisDraft",
+    "HypothesisDraftBatch",
     "HypothesisGenerator",
     "HypothesisStatus",
+    "StrategySpecBatch",
     "StubHypothesisGenerator",
     "StubVariantGenerator",
     "VariantGenerator",
     "VariantOutcome",
     "VariantRecord",
     "append_record",
+    "cost_for_usage",
+    "format_cost_line",
+    "list_hypotheses",
     "load_hypothesis",
     "read_records",
 ]

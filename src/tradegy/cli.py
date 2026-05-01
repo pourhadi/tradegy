@@ -13,6 +13,18 @@ from rich.table import Table
 
 from tradegy import config
 from tradegy.audit.basic import audit_source
+from tradegy.auto_generation import (
+    AnthropicHypothesisGenerator,
+    AnthropicVariantGenerator,
+    AutoTestOrchestrator,
+    StubVariantGenerator,
+    format_cost_line,
+    list_hypotheses,
+    load_hypothesis,
+)
+from tradegy.auto_generation.generators import GenerationContext
+from tradegy.auto_generation.hypothesis import hypotheses_dir
+from tradegy.auto_generation.records import read_records
 from tradegy.evidence import (
     build_packet,
     read_packet,
@@ -831,6 +843,262 @@ def validate_evidence_cmd(
     else:
         console.print(f"[red]FAIL[/] — {msg}")
         raise typer.Exit(code=7)
+
+
+def _build_generation_context() -> GenerationContext:
+    """Snapshot the live registries for the LLM. Reads class IDs from
+    the in-process registry (populated by the side-effect imports of
+    `tradegy.strategies.classes` etc.) and feature IDs from the
+    on-disk registry directory.
+    """
+    from tradegy.strategies.base import list_strategy_classes
+
+    feature_ids = tuple(
+        sorted(p.stem for p in config.features_registry_dir().glob("*.yaml"))
+    )
+    class_ids = tuple(sorted(list_strategy_classes()))
+    return GenerationContext(
+        available_class_ids=class_ids,
+        available_feature_ids=feature_ids,
+        instrument_scope=("MES",),
+    )
+
+
+def _make_anthropic_client() -> "Any":  # noqa: F821 — runtime-imported
+    """Build an Anthropic client. Surfaces a clear error if the key
+    isn't set rather than waiting for the API to 401.
+    """
+    import os
+
+    import anthropic
+
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        console.print(
+            "[red]ERROR:[/] ANTHROPIC_API_KEY not set in the environment."
+        )
+        raise typer.Exit(code=2)
+    return anthropic.Anthropic(api_key=key)
+
+
+@app.command("hypothesize")
+def hypothesize_cmd(
+    n: Annotated[int, typer.Option(
+        "--n", min=1, max=10,
+        help="number of hypotheses to draft per call",
+    )] = 3,
+    seed: Annotated[str, typer.Option(
+        "--seed",
+        help="optional one-line direction the LLM should bias toward "
+        "(market-structure observation, recent news, etc.)",
+    )] = "",
+    effort: Annotated[str, typer.Option(
+        help="opus 4.7 effort level: low | medium | high | xhigh | max",
+    )] = "high",
+    model: Annotated[str, typer.Option(
+        help="anthropic model id",
+    )] = "claude-opus-4-7",
+) -> None:
+    """LLM-driven hypothesis generation.
+
+    Reads the live class + feature registry, prompts Claude for `n`
+    hypothesis drafts, wraps each as a full Hypothesis record with
+    `status: proposed`, and writes one YAML per hypothesis under
+    `hypotheses/`. Doc 06 §39 says promotion is a human decision —
+    nothing in this command auto-promotes.
+    """
+    import yaml
+
+    client = _make_anthropic_client()
+    ctx = _build_generation_context()
+    gen = AnthropicHypothesisGenerator(
+        client=client, model=model, effort=effort,
+    )
+    console.print(
+        f"[bold]hypothesize[/]  model={model}  effort={effort}  n={n}  "
+        f"seed={seed!r}"
+    )
+    hyps = gen.generate(seed=seed, context=ctx, n=n)
+
+    out_dir = hypotheses_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    table = Table(title="generated hypotheses")
+    table.add_column("id")
+    table.add_column("title")
+    table.add_column("path")
+    for h in hyps:
+        path = out_dir / f"{h.id}.yaml"
+        path.write_text(
+            yaml.safe_dump(
+                h.model_dump(mode="json"), sort_keys=False, allow_unicode=True,
+            )
+        )
+        table.add_row(
+            h.id, h.title, str(path.relative_to(config.repo_root())),
+        )
+    console.print(table)
+    if gen.last_cost is not None:
+        console.print(format_cost_line(gen.last_cost))
+
+
+@app.command("auto-vary")
+def auto_vary_cmd(
+    hypothesis_id: Annotated[str, typer.Argument(
+        help="hypothesis id (must be status=promoted)",
+    )],
+    n: Annotated[int, typer.Option("--n", min=1, max=15)] = 5,
+    effort: Annotated[str, typer.Option()] = "medium",
+    model: Annotated[str, typer.Option()] = "claude-opus-4-7",
+) -> None:
+    """LLM-driven variant generation for a promoted hypothesis.
+
+    Loads the hypothesis YAML, requires it to be `status: promoted`
+    per doc 07 § Where auto-generation is allowed, prompts Claude for
+    `n` strategy specs, validates each against the schema, and writes
+    one YAML per spec under `strategies/`.
+    """
+    import yaml
+
+    h = load_hypothesis(hypothesis_id)
+    if h.status != "promoted":
+        console.print(
+            f"[red]ERROR:[/] hypothesis {hypothesis_id!r} is "
+            f"status={h.status!r}; only `promoted` hypotheses can be "
+            "auto-varied (doc 07 § Where auto-generation is allowed)."
+        )
+        raise typer.Exit(code=2)
+    if n > h.variant_budget:
+        console.print(
+            f"[red]ERROR:[/] requested n={n} exceeds the hypothesis's "
+            f"declared variant_budget={h.variant_budget}. Doc 07 §82-90 "
+            "forbids post-hoc budget expansion. Edit the hypothesis or "
+            "lower n."
+        )
+        raise typer.Exit(code=2)
+
+    client = _make_anthropic_client()
+    ctx = _build_generation_context()
+    gen = AnthropicVariantGenerator(
+        client=client, model=model, effort=effort,
+    )
+    console.print(
+        f"[bold]auto-vary[/]  hypothesis={hypothesis_id}  model={model}  "
+        f"effort={effort}  n={n}/{h.variant_budget}"
+    )
+    specs = gen.generate(hypothesis=h, context=ctx, n=n)
+
+    out_dir = config.strategy_specs_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    table = Table(title="generated variants")
+    table.add_column("spec id")
+    table.add_column("class")
+    table.add_column("path")
+    for spec in specs:
+        path = out_dir / f"{spec.metadata.id}.yaml"
+        path.write_text(
+            yaml.safe_dump(
+                spec.model_dump(mode="json"), sort_keys=False, allow_unicode=True,
+            )
+        )
+        table.add_row(
+            spec.metadata.id,
+            spec.entry.strategy_class,
+            str(path.relative_to(config.repo_root())),
+        )
+    console.print(table)
+    if gen.last_cost is not None:
+        console.print(format_cost_line(gen.last_cost))
+
+
+@app.command("auto-test")
+def auto_test_cmd(
+    hypothesis_id: Annotated[str, typer.Argument(
+        help="hypothesis id (must be status=promoted)",
+    )],
+    spec_glob: Annotated[Optional[str], typer.Option(
+        "--spec-glob",
+        help="glob (under strategies/) selecting variant specs; "
+             "defaults to '<hypothesis_id>__variant_*'",
+    )] = None,
+    run_walk_forward: Annotated[bool, typer.Option(
+        "--walk-forward/--sanity-only",
+        help="whether to run the walk-forward gate after sanity passes",
+    )] = True,
+    holdout_months: Annotated[int, typer.Option()] = 0,
+) -> None:
+    """Run the auto-test orchestrator on every spec already on disk
+    that matches the hypothesis. Per-variant records land under
+    `data/auto_generation/<hypothesis_id>/variants.jsonl`.
+
+    Pre-registration enforcement (doc 07 §218-228): if the hypothesis
+    has already had `variant_budget` records logged, the orchestrator
+    refuses — expanding the budget post-hoc is a sprint-level rule.
+    """
+    h = load_hypothesis(hypothesis_id)
+    if h.status != "promoted":
+        console.print(
+            f"[red]ERROR:[/] hypothesis {hypothesis_id!r} is "
+            f"status={h.status!r}; auto-test requires `promoted`."
+        )
+        raise typer.Exit(code=2)
+
+    pattern = spec_glob or f"{hypothesis_id}__variant_*"
+    matches = sorted(config.strategy_specs_dir().glob(f"{pattern}.yaml"))
+    if not matches:
+        console.print(
+            f"[red]ERROR:[/] no specs matched glob {pattern!r}.yaml "
+            "under strategies/. Run `tradegy auto-vary` first."
+        )
+        raise typer.Exit(code=2)
+
+    specs = [load_spec(p) for p in matches]
+    console.print(
+        f"[bold]auto-test[/]  hypothesis={hypothesis_id}  "
+        f"variants_on_disk={len(specs)}  walk_forward={run_walk_forward}"
+    )
+
+    ctx = _build_generation_context()
+    orch = AutoTestOrchestrator(
+        hypothesis=h,
+        variant_generator=StubVariantGenerator(specs),
+        context=ctx,
+        run_walk_forward_on_pass=run_walk_forward,
+        run_holdout_on_pass=holdout_months > 0,
+        holdout_months=holdout_months,
+    )
+    summary = orch.run()
+
+    table = Table(title=f"auto-test summary: {hypothesis_id}")
+    table.add_column("metric")
+    table.add_column("value", justify="right")
+    table.add_row("variants generated", str(summary.variants_generated))
+    table.add_row("validation failed", str(summary.variants_validation_failed))
+    table.add_row("passed sanity", str(summary.variants_passed_sanity))
+    table.add_row("passed walk-forward", str(summary.variants_passed_walk_forward))
+    table.add_row("candidate pool", str(summary.candidate_count))
+    console.print(table)
+    if summary.candidate_pool_ids:
+        console.print(
+            "[green]candidate pool[/]: "
+            + ", ".join(summary.candidate_pool_ids)
+        )
+
+
+@app.command("hypothesis-list")
+def hypothesis_list_cmd() -> None:
+    """List all hypotheses on disk with their status + variant budget."""
+    items = list_hypotheses()
+    if not items:
+        console.print("[yellow]no hypotheses found in hypotheses/[/]")
+        return
+    table = Table(title="hypotheses")
+    table.add_column("id")
+    table.add_column("status")
+    table.add_column("budget", justify="right")
+    table.add_column("title")
+    for h in items:
+        table.add_row(h.id, h.status, str(h.variant_budget), h.title)
+    console.print(table)
 
 
 if __name__ == "__main__":

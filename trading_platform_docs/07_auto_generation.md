@@ -1,7 +1,24 @@
 # Auto-Generation Spec
 
-**Status:** Draft for review
+**Status:** Draft for review (Phase A + B implemented 2026-05-01)
 **Purpose:** Define the automated generation of strategy spec variants from promoted hypotheses. Auto-generation widens the development funnel without compromising rigor. It produces variants for early-stage evaluation; it does not produce live library strategies.
+
+## Implementation status
+
+| Section | Status | Code path |
+|---|---|---|
+| Hypothesis schema + loader | ✅ implemented (Phase A, 2026-05-01) — Pydantic model with mechanism, falsification, parameter_envelope, variant_budget (cap 15), gate_thresholds | `src/tradegy/auto_generation/hypothesis.py` |
+| VariantRecord + JSONL append-only log | ✅ implemented (Phase A) | `src/tradegy/auto_generation/records.py` |
+| HypothesisGenerator + VariantGenerator ABCs (with stubs) | ✅ implemented (Phase A) | `src/tradegy/auto_generation/generators.py` |
+| AutoTestOrchestrator (sanity → walk-forward, multi-hypothesis correction, pre-registration enforcement) | ✅ implemented (Phase A) — Bonferroni-flavoured Sharpe lift; full DSR is open work | `src/tradegy/auto_generation/orchestrator.py` |
+| AnthropicHypothesisGenerator (LLM ideation) | ✅ implemented (Phase B, 2026-05-01) — opus-4-7, adaptive thinking, prompt-cached registry block | `src/tradegy/auto_generation/anthropic_generators.py` |
+| AnthropicVariantGenerator (LLM spec drafting) | ✅ implemented (Phase B) — `client.messages.parse()` with full StrategySpec Pydantic schema | same file |
+| Cost reporting | ✅ implemented (Phase B) — post-call USD estimate from `response.usage`; non-blocking | `src/tradegy/auto_generation/cost.py` |
+| `tradegy hypothesize` / `auto-vary` / `auto-test` / `hypothesis-list` CLI | ✅ implemented (Phase B) | `src/tradegy/cli.py` |
+| Embedding-based diversity check | ⚠️ Phase C — content-hash dedup is the MVP placeholder | (Phase C) |
+| Deflated Sharpe Ratio (López de Prado) | ⚠️ Phase C — Bonferroni is the MVP correction | (Phase C) |
+| Hypothesis triage / five-test scorer | ⚠️ Phase C — schema fields exist, scorer not wired | (Phase C) |
+| Holdout integration (auto-test path) | ⚠️ deferred — slot wired in orchestrator; the CLI's `--holdout-months` flow is the production path; auto-test should reuse it | (Phase C) |
 
 ---
 
