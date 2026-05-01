@@ -15,17 +15,21 @@ in `00_master_architecture.md:65-71` into an enforceable contract.
 | Order lifecycle FSM (states + transitions) | ✅ implemented (Phase 1, 2026-05-01) | `src/tradegy/execution/lifecycle.py` |
 | Idempotency keys + dedup window | ✅ implemented (Phase 1) | `src/tradegy/execution/idempotency.py` |
 | Append-only transition log | ✅ implemented (Phase 1) | `src/tradegy/execution/log.py` |
-| Broker reconciliation loop | ⚠️ spec only | (Phase 2) |
-| Account state / margin pre-flight | ⚠️ spec only | (Phase 2) |
-| Session-boundary flatten | ⚠️ spec only | (Phase 3) |
-| Global kill-switch | ⚠️ spec only | (Phase 3) |
-| IBKR adapter wiring | ⚠️ adapter stub exists; lifecycle not wired | `src/tradegy/live/ibkr.py` (Phase 2) |
+| Pre-flight risk-cap gate | ✅ implemented (Phase 2, 2026-05-01) | `src/tradegy/execution/risk_caps.py` |
+| Global kill-switch | ✅ implemented (Phase 2) — trip / clear / mark_reconciled lifecycle with audit history | `src/tradegy/execution/kill_switch.py` |
+| Session-boundary flatten plan | ✅ implemented (Phase 2) — pure-function plan builder; orchestration deferred to Phase 3 | `src/tradegy/execution/session_flatten.py` |
+| Broker reconciliation loop | ⚠️ spec only | (Phase 3) |
+| Margin / heartbeat live wiring | ⚠️ pre-flight slots wired but inputs come from broker (Phase 3) | `risk_caps.RiskState` |
+| IBKR adapter wiring | ⚠️ adapter stub exists; lifecycle not wired | `src/tradegy/live/ibkr.py` (Phase 3) |
 
-Phase 1 ships the broker-agnostic core: the FSM is a pure-function state
-machine; idempotency keys are deterministic per the format below; the
-transition log persists every change. Subsequent phases layer on the
-live integration without changing the Phase 1 contract. 33 tests cover
-the legal/illegal transition surface, ID format, and log round-trip.
+Phase 1 shipped the broker-agnostic FSM core. Phase 2 adds the
+deterministic enforcement gates that sit on top of it: pre-flight risk
+caps (the doc 11 §263-273 checklist in order), the kill-switch with the
+restart contract from §306-313, and the session-flatten plan builder
+from §264-281. All Phase 2 modules are pure functions or pure-state
+classes — no broker required, fully testable. Phase 3 wires these to
+the live IBKR adapter and the reconciliation loop. **74 tests** cover
+the execution layer total (33 Phase 1 + 41 Phase 2).
 
 ---
 
