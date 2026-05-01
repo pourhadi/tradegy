@@ -27,12 +27,13 @@ Design notes:
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import date, datetime, timezone
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from tradegy.auto_generation.cost import (
     CostEstimate,
@@ -49,7 +50,19 @@ from tradegy.auto_generation.hypothesis import (
     Hypothesis,
     ParameterRangeSpec,
 )
-from tradegy.specs.schema import StrategySpec
+from tradegy.specs.schema import (
+    EntrySpec,
+    ExitsSpec,
+    GatingCondition,
+    InvalidationCondition,
+    MarketScopeSpec,
+    MetadataSpec,
+    OperationalSpec,
+    SizingSpec,
+    StopsSpec,
+    StrategySpec,
+    TimeStopBlock,
+)
 
 
 _log = logging.getLogger(__name__)
@@ -102,6 +115,54 @@ def _slugify(s: str, *, max_len: int = 48) -> str:
     return cleaned[:max_len].strip("_") or "hypothesis"
 
 
+_JSON_FENCE_RE = re.compile(
+    r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```",
+    re.DOTALL,
+)
+
+
+def _extract_json_blob(text: str) -> str:
+    """Pull a JSON object/array out of an LLM text response.
+
+    Tolerates the common formats: bare JSON, ```json fences, ``` fences,
+    or JSON wrapped in any explanatory prose. Returns the longest blob
+    that parses as JSON.
+    """
+    # Prefer fenced code blocks first.
+    fence_matches = _JSON_FENCE_RE.findall(text)
+    candidates = list(fence_matches)
+    # Add the largest balanced object/array we can find as a fallback.
+    obj_start = text.find("{")
+    obj_end = text.rfind("}")
+    if obj_start != -1 and obj_end > obj_start:
+        candidates.append(text[obj_start : obj_end + 1])
+    arr_start = text.find("[")
+    arr_end = text.rfind("]")
+    if arr_start != -1 and arr_end > arr_start:
+        candidates.append(text[arr_start : arr_end + 1])
+
+    for blob in candidates:
+        try:
+            json.loads(blob)
+            return blob
+        except json.JSONDecodeError:
+            continue
+    raise ValueError(
+        "could not extract a parseable JSON blob from the LLM response"
+    )
+
+
+def _parse_with_schema(text: str, schema: type[BaseModel]) -> BaseModel:
+    """Extract JSON from prose, then Pydantic-validate against `schema`."""
+    blob = _extract_json_blob(text)
+    try:
+        return schema.model_validate_json(blob)
+    except ValidationError as exc:
+        raise ValueError(
+            f"LLM output did not match {schema.__name__}: {exc}"
+        ) from exc
+
+
 def _draft_to_hypothesis(
     draft: HypothesisDraft,
     *,
@@ -134,15 +195,182 @@ def _draft_to_hypothesis(
     )
 
 
+def _normalize_session(s: str) -> str:
+    """LLMs often emit case variants ('rth', 'RTH', 'Globex'). The
+    StrategySpec literal is case-sensitive, so we map robustly.
+    """
+    canonical = {"rth": "RTH", "globex": "globex", "both": "both"}
+    return canonical.get(s.strip().lower(), s)
+
+
+def _normalize_direction(s: str) -> str:
+    """`EntrySpec.direction` literal is lowercase."""
+    return s.strip().lower()
+
+
+def _coerce_condition_entry(raw: Any) -> dict:
+    """Normalize one gating/invalidation condition record.
+
+    LLMs sometimes emit the registry name under `condition` (correct),
+    `name`, `type`, or `evaluator`. We accept any of these and surface
+    a clear error otherwise. Parameters are likewise pulled from
+    `parameters`, `params`, or `args` if present.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"condition entry must be a JSON object; got {type(raw).__name__}"
+        )
+    name = (
+        raw.get("condition")
+        or raw.get("name")
+        or raw.get("type")
+        or raw.get("evaluator")
+    )
+    if not name:
+        raise ValueError(
+            "condition entry missing 'condition' (or 'name' / 'type' / "
+            f"'evaluator'); keys present: {sorted(raw.keys())}"
+        )
+    params = raw.get("parameters") or raw.get("params") or raw.get("args") or {}
+    if not isinstance(params, dict):
+        raise ValueError(
+            f"condition parameters must be an object; got "
+            f"{type(params).__name__}"
+        )
+    action = raw.get("action", "exit_market")
+    return {"condition": name, "parameters": dict(params), "action": action}
+
+
+def _safe_loads(blob: str, default: Any) -> Any:
+    """`json.loads` with a fallback. Empty / whitespace strings → default."""
+    import json
+
+    if not blob or not blob.strip():
+        return default
+    try:
+        return json.loads(blob)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"LLM emitted invalid JSON in a draft field: {exc}"
+        ) from exc
+
+
+def _draft_to_spec(
+    draft: StrategySpecDraft, *, author: str, today: date,
+) -> StrategySpec:
+    """Wrap a compact LLM draft into a full StrategySpec.
+
+    The draft is the creative content; the boilerplate (schema_version,
+    status, dates, author, defaults for risk_envelope etc.) is added
+    here so the spec passes the harness's `validate_spec` invariants.
+    JSON-string fields on the draft are parsed and re-validated by the
+    full schema.
+    """
+    entry_params = _safe_loads(draft.entry_parameters_json, {})
+    gating_raw = _safe_loads(draft.gating_conditions_json, [])
+    sizing_params = _safe_loads(draft.sizing_parameters_json, {"contracts": 1})
+    initial_stop_params = _safe_loads(draft.initial_stop_parameters_json, {})
+    invalidation_raw = _safe_loads(draft.invalidation_conditions_json, [])
+
+    return StrategySpec(
+        metadata=MetadataSpec(
+            id=draft.spec_id,
+            version="0.1.0",
+            schema_version="1.0",
+            name=draft.name,
+            status="draft",
+            created_date=today,
+            last_modified_date=today,
+            author=author,
+            description=draft.description,
+        ),
+        market_scope=MarketScopeSpec(
+            instrument=draft.instrument,
+            session=_normalize_session(draft.session),  # type: ignore[arg-type]
+        ),
+        entry=EntrySpec(
+            strategy_class=draft.strategy_class,
+            parameters=dict(entry_params),
+            direction=_normalize_direction(draft.direction),  # type: ignore[arg-type]
+            entry_order_type=draft.entry_order_type.strip().lower(),  # type: ignore[arg-type]
+            gating_conditions=[
+                GatingCondition(
+                    condition=norm["condition"],
+                    parameters=norm["parameters"],
+                )
+                for norm in (_coerce_condition_entry(g) for g in gating_raw)
+            ],
+        ),
+        sizing=SizingSpec(
+            method=draft.sizing_method,
+            parameters=dict(sizing_params),
+        ),
+        stops=StopsSpec(
+            initial_stop={
+                "method": draft.initial_stop_method,
+                **dict(initial_stop_params),
+            },
+            adjustment_rules=[],
+            hard_max_distance_ticks=draft.hard_max_distance_ticks,
+            time_stop=TimeStopBlock(
+                enabled=True,
+                max_holding_bars=draft.time_stop_max_holding_bars,
+                action_at_time_stop="exit_market",
+            ),
+        ),
+        exits=ExitsSpec(
+            invalidation_conditions=[
+                InvalidationCondition(
+                    condition=norm["condition"],
+                    parameters=norm["parameters"],
+                    action=norm["action"],  # type: ignore[arg-type]
+                )
+                for norm in (_coerce_condition_entry(c) for c in invalidation_raw)
+            ],
+        ),
+        operational=OperationalSpec(tier="proposal_only"),
+    )
+
+
 def _registry_context_block(ctx: GenerationContext) -> str:
-    """The cacheable system-prompt section listing the registry."""
+    """The cacheable system-prompt section listing the registry. Lists
+    every primitive a generated spec can reference, plus the parameter
+    shapes for the most common evaluators / stops so the LLM doesn't
+    invent inline DSL.
+    """
+
+    def _list(items: tuple[str, ...]) -> str:
+        return "\n".join(f"  - {x}" for x in items) if items else "  (none)"
+
     return (
         "## Registry context (use ONLY these)\n\n"
-        f"Available strategy classes:\n"
-        + "\n".join(f"  - {c}" for c in ctx.available_class_ids)
+        "Available strategy classes:\n"
+        + _list(ctx.available_class_ids)
         + "\n\nAvailable feature ids:\n"
-        + "\n".join(f"  - {f}" for f in ctx.available_feature_ids)
-        + f"\n\nInstrument scope: {', '.join(ctx.instrument_scope)}\n"
+        + _list(ctx.available_feature_ids)
+        + "\n\nAvailable condition evaluators (used in gating_conditions"
+        " + invalidation_conditions). Each entry is a JSON object with"
+        " `condition` (name from this list) and `parameters` (per-"
+        "evaluator):\n"
+        + _list(ctx.available_condition_ids)
+        + "\n  Common evaluator parameter shapes:\n"
+        '  * feature_threshold:  {"feature_id": "...", '
+        '"operator": "gt|gte|lt|lte|eq", "threshold": NUMBER}\n'
+        '  * feature_range:      {"feature_id": "...", '
+        '"lo": NUMBER, "hi": NUMBER}\n'
+        '  * time_of_session:    {"session_position_feature_id": '
+        '"mes_session_position" or "mes_xnys_session_position", '
+        '"lo": 0..1, "hi": 0..1}\n'
+        + "\n\nAvailable sizing methods:\n"
+        + _list(ctx.available_sizing_methods)
+        + "\n\nAvailable initial-stop methods:\n"
+        + _list(ctx.available_stop_methods)
+        + "\n  Common stop parameter shapes:\n"
+        '  * fixed_ticks:   {"stop_ticks": INT, "tick_size": 0.25}\n'
+        '  * atr_multiple:  {"atr_feature_id": "mes_atr_14m", '
+        '"multiplier": NUMBER, "max_distance_ticks": INT, '
+        '"tick_size": 0.25}\n'
+        f"\nInstrument scope: {', '.join(ctx.instrument_scope)}\n"
     )
 
 
@@ -224,18 +452,20 @@ class AnthropicHypothesisGenerator(HypothesisGenerator):
         system_blocks = self._build_system(context)
         user_text = self._build_user(seed=seed, n=n)
 
-        response = self._client.messages.parse(
+        response = self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
             thinking={"type": "adaptive"},
             output_config={"effort": self._effort},
             system=system_blocks,
             messages=[{"role": "user", "content": user_text}],
-            output_format=HypothesisDraftBatch,
         )
         self._record_cost(response)
 
-        batch: HypothesisDraftBatch = response.parsed_output
+        text = "".join(
+            b.text for b in response.content if getattr(b, "type", None) == "text"
+        )
+        batch = _parse_with_schema(text, HypothesisDraftBatch)
         out: list[Hypothesis] = []
         for draft in batch.hypotheses[:n]:
             out.append(_draft_to_hypothesis(draft, author=self._author))
@@ -264,14 +494,20 @@ class AnthropicHypothesisGenerator(HypothesisGenerator):
             else "Seed direction: (none — generate freely from market-structure or "
             "practitioner-canon sources).\n\n"
         )
+        schema_json = json.dumps(
+            HypothesisDraftBatch.model_json_schema(), indent=2,
+        )
         return (
-            f"Generate {n} new hypothesis drafts as a JSON object matching the "
-            "`HypothesisDraftBatch` schema.\n\n"
+            f"Generate {n} new hypothesis drafts.\n\n"
             f"{seed_section}"
             "Each hypothesis must include a concrete mechanism and a quantitative "
             "falsification criterion. Reference only the registered classes and "
             "features listed above. Vary mechanisms across the batch — duplicates "
-            "are wasted budget."
+            "are wasted budget.\n\n"
+            "Respond with a single JSON object matching this schema, wrapped in "
+            "a ```json code fence and nothing else (no preamble, no trailing "
+            "prose):\n\n"
+            f"```json-schema\n{schema_json}\n```"
         )
 
     def _record_cost(self, response: Any) -> None:
@@ -285,13 +521,66 @@ class AnthropicHypothesisGenerator(HypothesisGenerator):
 # ─── Variant generator ────────────────────────────────────────────
 
 
-class StrategySpecBatch(_Strict):
-    """LLM output for `messages.parse()`. The list-of-StrategySpec
-    case requires wrapping in a single object. Each spec is the full
-    schema — Pydantic enforces every constraint at parse time.
+class StrategySpecDraft(_Strict):
+    """Compact, LLM-friendly subset of a StrategySpec.
+
+    Server-side strict-output grammar compilation rejects schemas with
+    free-form `dict[str, Any]` fields ("Schema is too complex"). To
+    work around that, every dynamic dict in this draft is a JSON
+    STRING — the LLM emits valid JSON text, we `json.loads` it on the
+    Python side, and Pydantic validation happens against the resulting
+    full StrategySpec.
     """
 
-    specs: list[StrategySpec]
+    spec_id: str = Field(min_length=4)
+    name: str
+    description: str = ""
+    instrument: str = "MES"
+    session: str = "globex"  # "RTH" | "globex" | "both"
+
+    strategy_class: str
+    entry_parameters_json: str = "{}"
+    """JSON object string. Keys/values match the strategy class's
+    parameter_schema (see `03_strategy_class_registry.md` for each
+    class's contract). Example: '{"vwap_feature_id": "mes_vwap",
+    "deviation_threshold_ticks": 8}'."""
+
+    direction: str = "long"  # "long" | "short" | "both"
+    entry_order_type: str = "market"
+
+    gating_conditions_json: str = "[]"
+    """JSON array string of {condition, parameters} objects. Each
+    condition must resolve in the condition-evaluator registry.
+    Example: '[{"condition": "feature_range", "parameters":
+    {"feature_id": "mes_realized_vol_30m", "lo": 0.08, "hi": 0.22}}]'."""
+
+    sizing_method: str = "fixed_contracts"
+    sizing_parameters_json: str = '{"contracts": 1}'
+
+    initial_stop_method: str = "fixed_ticks"
+    """e.g. 'fixed_ticks' or 'atr_multiple'."""
+
+    initial_stop_parameters_json: str = "{}"
+    """JSON object string. For fixed_ticks: {"stop_ticks": 12,
+    "tick_size": 0.25}. For atr_multiple: {"atr_feature_id":
+    "mes_atr_14m", "multiplier": 2.0, "max_distance_ticks": 200}."""
+
+    hard_max_distance_ticks: int = 200
+    time_stop_max_holding_bars: int = 60
+
+    invalidation_conditions_json: str = "[]"
+    """JSON array string of {condition, parameters, action} objects."""
+
+    rationale: str = ""
+    """One-line explanation of how this variant differs from siblings."""
+
+
+class StrategySpecBatch(_Strict):
+    """LLM output for `messages.parse()` — wraps a list of drafts in a
+    single object (top-level lists aren't allowed).
+    """
+
+    specs: list[StrategySpecDraft]
 
 
 _VARIANT_SYSTEM_FRAME = """You are a strategy-spec variant generator for the tradegy project.
@@ -348,8 +637,13 @@ class AnthropicVariantGenerator(VariantGenerator):
         model: str = DEFAULT_MODEL,
         author_label: str | None = None,
         effort: str = "medium",
-        max_tokens: int = 32_000,
+        max_tokens: int = 16_000,
     ) -> None:
+        # 16K keeps the non-streaming `messages.parse()` call under the
+        # SDK's 10-minute timeout guard. Spec batches of 5-8 variants
+        # comfortably fit; if a future hypothesis needs more output,
+        # bump max_tokens AND switch to streaming (the SDK refuses
+        # non-streaming above ~16K).
         self._client = client
         self._model = model
         self._author = author_label or model
@@ -370,28 +664,25 @@ class AnthropicVariantGenerator(VariantGenerator):
         system_blocks = self._build_system(context)
         user_text = self._build_user(hypothesis=hypothesis, n=n)
 
-        response = self._client.messages.parse(
+        response = self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
             thinking={"type": "adaptive"},
             output_config={"effort": self._effort},
             system=system_blocks,
             messages=[{"role": "user", "content": user_text}],
-            output_format=StrategySpecBatch,
         )
         self._record_cost(response)
 
-        batch: StrategySpecBatch = response.parsed_output
-        # Stamp author + created_date on every spec the LLM returns
-        # so downstream `validate_spec` is happy. The LLM provides the
-        # creative content; we own the bookkeeping.
+        text = "".join(
+            b.text for b in response.content if getattr(b, "type", None) == "text"
+        )
+        batch = _parse_with_schema(text, StrategySpecBatch)
+        # Convert each compact draft into a full StrategySpec.
         today = datetime.now(tz=timezone.utc).date()
         out: list[StrategySpec] = []
-        for spec in batch.specs[:n]:
-            spec.metadata.author = self._author
-            spec.metadata.created_date = today
-            spec.metadata.last_modified_date = today
-            out.append(spec)
+        for draft in batch.specs[:n]:
+            out.append(_draft_to_spec(draft, author=self._author, today=today))
         return out
 
     # ── Prompt assembly ─────────────────────────────────────────
@@ -421,6 +712,9 @@ class AnthropicVariantGenerator(VariantGenerator):
             if hypothesis.feature_dependencies
             else "(unconstrained — use any registered feature)"
         )
+        schema_json = json.dumps(
+            StrategySpecBatch.model_json_schema(), indent=2,
+        )
         return f"""Hypothesis under test:
 
 Title: {hypothesis.title}
@@ -435,10 +729,18 @@ Feature dependencies declared on the hypothesis: {feature_deps}
 Parameter envelope (variants must stay within these bounds):
 {env_text}
 
-Generate {n} variant strategy specs as a JSON object matching the
-`StrategySpecBatch` schema. Each spec id should follow the
-"{hypothesis.id}__variant_<letter>" pattern. Make the variants
-mechanistically distinct, not just numerically different."""
+Generate {n} variant strategy spec drafts. Each spec_id should follow
+"{hypothesis.id}__variant_<letter>" (e.g. "_variant_a", "_variant_b").
+Make the variants mechanistically distinct, not just numerically
+different. The dynamic-parameter fields are JSON STRINGS (not nested
+objects) — emit valid JSON text inside each `*_json` field.
+
+Respond with a single JSON object matching this schema, wrapped in a
+```json code fence and nothing else (no preamble, no trailing prose):
+
+```json-schema
+{schema_json}
+```"""
 
     def _record_cost(self, response: Any) -> None:
         usage = getattr(response, "usage", None)

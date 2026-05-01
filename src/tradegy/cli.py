@@ -846,20 +846,27 @@ def validate_evidence_cmd(
 
 
 def _build_generation_context() -> GenerationContext:
-    """Snapshot the live registries for the LLM. Reads class IDs from
-    the in-process registry (populated by the side-effect imports of
-    `tradegy.strategies.classes` etc.) and feature IDs from the
-    on-disk registry directory.
+    """Snapshot the live registries for the LLM. Pulls strategy classes,
+    feature ids, condition evaluators, sizing methods, and stop methods
+    — every primitive a generated spec can reference is listed in the
+    cached prompt prefix.
     """
+    from tradegy.strategies.auxiliary import (
+        list_condition_evaluators,
+        list_sizing_classes,
+        list_stop_classes,
+    )
     from tradegy.strategies.base import list_strategy_classes
 
     feature_ids = tuple(
         sorted(p.stem for p in config.features_registry_dir().glob("*.yaml"))
     )
-    class_ids = tuple(sorted(list_strategy_classes()))
     return GenerationContext(
-        available_class_ids=class_ids,
+        available_class_ids=tuple(sorted(list_strategy_classes())),
         available_feature_ids=feature_ids,
+        available_condition_ids=tuple(sorted(list_condition_evaluators())),
+        available_sizing_methods=tuple(sorted(list_sizing_classes())),
+        available_stop_methods=tuple(sorted(list_stop_classes())),
         instrument_scope=("MES",),
     )
 

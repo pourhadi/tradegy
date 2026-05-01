@@ -40,6 +40,12 @@ class GenerationContext:
 
     available_class_ids: tuple[str, ...]
     available_feature_ids: tuple[str, ...]
+    available_condition_ids: tuple[str, ...] = ()
+    """Registered condition evaluators — used in gating_conditions
+    and invalidation_conditions on generated specs."""
+
+    available_sizing_methods: tuple[str, ...] = ()
+    available_stop_methods: tuple[str, ...] = ()
     instrument_scope: tuple[str, ...] = ("MES",)
     extra: dict[str, Any] = None  # type: ignore[assignment]
 

@@ -1,0 +1,83 @@
+id: hyp_midday_compression_after_balanced_morning_predic_20260501_221414_18053
+title: Midday compression after balanced morning predicts afternoon trend break, conditional
+  on volume dry-up
+status: proposed
+source: llm_brainstorm
+created_date: '2026-05-01'
+last_modified_date: '2026-05-01'
+author: claude-opus-4-7
+observation: When the morning (session_pos 0.0-0.4) closes with price within OR30
+  range AND realized 5m vol falls into the bottom quartile of the 30m realized vol
+  distribution AND volume z-score is negative (<-0.5) heading into session_pos ~0.5,
+  the subsequent break of the morning's range tends to trend through the close.
+mechanism: A balanced morning that fails to break OR30 indicates two-sided positioning
+  with no inventory imbalance. The volume dry-up at midday signals liquidity providers
+  have stepped back and inventory is flat. When a directional break finally occurs
+  in the afternoon, it triggers stop runs from both sides of the balanced positioning
+  AND forces market makers to widen and chase, since their inventory was symmetric.
+  The combination of (range-bound morning) + (vol compression) + (negative volume
+  z) is the classic coiled-spring setup; any single one of these is too common to
+  carry edge — the conjunction is rare and selects for the regime where break-and-go
+  dominates over break-and-fail.
+falsification: Refuted if, across >=50 qualifying setups, the post-midday break fails
+  to extend at least 1.0*mes_atr_14m beyond OR30 boundary in the break direction by
+  session close >=55% of the time, OR if the win rate of the break-continuation entry
+  (target 1.5*ATR, stop 0.6*ATR) is <=48%. Additionally refuted if compression-only
+  variants (no volume-z gate) match performance, indicating the volume condition adds
+  no edge.
+counterparty: Symmetrically-positioned market makers forced to chase after inventory
+  neutrality breaks; trapped fade traders from the morning balanced range.
+instrument_scope:
+- MES
+feature_dependencies:
+- mes_or30_high
+- mes_or30_low
+- mes_realized_vol_5m
+- mes_realized_vol_30m
+- mes_volume_zscore_20m
+- mes_xnys_session_position
+- mes_atr_14m
+parameter_envelope:
+- name: morning_end_session_pos
+  min: 0.35
+  max: 0.55
+  step: 0.05
+- name: vol_compression_ratio
+  min: 0.3
+  max: 0.6
+  step: 0.05
+- name: volume_z_max
+  min: -1.5
+  max: -0.25
+  step: 0.25
+- name: break_confirm_ticks
+  min: 2.0
+  max: 8.0
+  step: 1.0
+- name: target_atr
+  min: 1.0
+  max: 2.0
+  step: 0.25
+- name: stop_atr
+  min: 0.4
+  max: 0.9
+  step: 0.1
+variant_budget: 8
+gate_thresholds:
+  sanity_min_trades: 30
+  sanity_min_in_sample_sharpe: 0.0
+  walk_forward_oos_in_sample_ratio: 0.5
+  walk_forward_min_in_sample_sharpe: 0.0
+  cpcv_median_sharpe_threshold: 0.8
+  cpcv_max_pct_paths_negative: 0.2
+  holdout_sharpe_ratio_to_walk_forward: 0.5
+five_test_scores:
+  mechanism: 5
+  falsifiability: 5
+  novelty: 4
+  economic_plausibility: 4
+  data_feasibility: 5
+parent_hypothesis_id: null
+notes: Maps to compression_breakout / range_break_continuation. Triple-gate selectivity;
+  volume_z as third filter is the novel addition vs killed single-feature OR30 trades.
+kill_reason: null

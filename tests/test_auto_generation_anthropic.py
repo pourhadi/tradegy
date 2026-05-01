@@ -2,7 +2,8 @@
 
 Anthropic SDK calls are mocked — no real API access. Tests verify:
   - the prompt is built with cacheable registry context
-  - the LLM-returned Pydantic batch round-trips through draft → full
+  - the LLM-returned JSON parses through Pydantic and round-trips
+    through draft → full
   - bookkeeping fields (id, dates, author) get filled by the generator
   - cost is recorded after the call
 """
@@ -20,6 +21,8 @@ from tradegy.auto_generation.anthropic_generators import (
     HypothesisDraft,
     HypothesisDraftBatch,
     StrategySpecBatch,
+    StrategySpecDraft,
+    _extract_json_blob,
 )
 from tradegy.auto_generation.generators import GenerationContext
 from tradegy.auto_generation.hypothesis import (
@@ -44,28 +47,36 @@ class _FakeUsage:
 
 
 @dataclass
+class _FakeTextBlock:
+    text: str
+    type: str = "text"
+
+
+@dataclass
 class _FakeResponse:
-    parsed_output: Any
+    content: list[_FakeTextBlock]
     usage: _FakeUsage = field(default_factory=_FakeUsage)
 
 
 class _FakeMessages:
-    """Mocks `client.messages.parse()`. Returns a pre-set parsed_output
-    and records the kwargs the caller passed in for assertions.
+    """Mocks `client.messages.create()`. Returns a pre-built response
+    whose `content` carries a JSON-fenced text block; records call
+    kwargs for assertions.
     """
 
-    def __init__(self, parsed_output: Any) -> None:
-        self.parsed_output = parsed_output
+    def __init__(self, response_json: str) -> None:
+        self._response_json = response_json
         self.last_call_kwargs: dict | None = None
 
-    def parse(self, **kwargs):
+    def create(self, **kwargs):
         self.last_call_kwargs = kwargs
-        return _FakeResponse(parsed_output=self.parsed_output)
+        text = f"```json\n{self._response_json}\n```"
+        return _FakeResponse(content=[_FakeTextBlock(text=text)])
 
 
 class _FakeClient:
-    def __init__(self, parsed_output: Any) -> None:
-        self.messages = _FakeMessages(parsed_output)
+    def __init__(self, response_json: str) -> None:
+        self.messages = _FakeMessages(response_json)
 
 
 # ── Fixtures ────────────────────────────────────────────────────
@@ -101,26 +112,19 @@ def _hypothesis_draft(title: str = "Test hypothesis") -> HypothesisDraft:
     )
 
 
-def _strategy_spec(spec_id: str = "auto_v_a") -> StrategySpec:
-    return StrategySpec(
-        metadata=MetadataSpec(
-            id=spec_id, version="0.1.0",
-            name="LLM-drafted variant",
-            created_date=date(2026, 5, 1),
-            last_modified_date=date(2026, 5, 1),
-            author="LLM",
-        ),
-        market_scope=MarketScopeSpec(instrument="MES"),
-        entry=EntrySpec(
-            strategy_class="vwap_reversion",
-            parameters={"vwap_feature_id": "mes_vwap"},
-        ),
-        sizing=SizingSpec(method="fixed_contracts", parameters={"contracts": 1}),
-        stops=StopsSpec(
-            initial_stop={"method": "fixed_ticks", "stop_ticks": 12, "tick_size": 0.25},
-            time_stop=TimeStopBlock(enabled=True, max_holding_bars=30),
-        ),
-        exits=ExitsSpec(),
+def _strategy_spec_draft(spec_id: str = "auto_variant_a") -> StrategySpecDraft:
+    return StrategySpecDraft(
+        spec_id=spec_id,
+        name="LLM-drafted variant",
+        description="test draft",
+        instrument="MES",
+        strategy_class="vwap_reversion",
+        entry_parameters_json='{"vwap_feature_id": "mes_vwap"}',
+        sizing_method="fixed_contracts",
+        sizing_parameters_json='{"contracts": 1}',
+        initial_stop_method="fixed_ticks",
+        initial_stop_parameters_json='{"stop_ticks": 12, "tick_size": 0.25}',
+        time_stop_max_holding_bars=30,
     )
 
 
@@ -134,7 +138,7 @@ def test_hypothesis_generator_returns_full_records():
             _hypothesis_draft("second hypothesis"),
         ]
     )
-    client = _FakeClient(parsed_output=batch)
+    client = _FakeClient(response_json=batch.model_dump_json())
     gen = AnthropicHypothesisGenerator(client=client)
     out = gen.generate(seed="", context=_ctx(), n=5)
     assert len(out) == 2
@@ -153,13 +157,13 @@ def test_hypothesis_generator_truncates_to_n():
             _hypothesis_draft(f"hypothesis number {i}") for i in range(5)
         ]
     )
-    gen = AnthropicHypothesisGenerator(client=_FakeClient(parsed_output=batch))
+    gen = AnthropicHypothesisGenerator(client=_FakeClient(response_json=batch.model_dump_json()))
     out = gen.generate(seed="", context=_ctx(), n=2)
     assert len(out) == 2
 
 
 def test_hypothesis_generator_n_zero_short_circuits():
-    client = _FakeClient(parsed_output=HypothesisDraftBatch(hypotheses=[]))
+    client = _FakeClient(response_json=HypothesisDraftBatch(hypotheses=[]).model_dump_json())
     gen = AnthropicHypothesisGenerator(client=client)
     out = gen.generate(seed="", context=_ctx(), n=0)
     assert out == []
@@ -168,7 +172,7 @@ def test_hypothesis_generator_n_zero_short_circuits():
 
 def test_hypothesis_generator_records_cost():
     batch = HypothesisDraftBatch(hypotheses=[_hypothesis_draft()])
-    gen = AnthropicHypothesisGenerator(client=_FakeClient(parsed_output=batch))
+    gen = AnthropicHypothesisGenerator(client=_FakeClient(response_json=batch.model_dump_json()))
     gen.generate(seed="", context=_ctx(), n=1)
     assert gen.last_cost is not None
     assert gen.last_response_usage is not None
@@ -176,7 +180,7 @@ def test_hypothesis_generator_records_cost():
 
 def test_hypothesis_prompt_includes_cache_control_block():
     batch = HypothesisDraftBatch(hypotheses=[_hypothesis_draft()])
-    client = _FakeClient(parsed_output=batch)
+    client = _FakeClient(response_json=batch.model_dump_json())
     gen = AnthropicHypothesisGenerator(client=client)
     gen.generate(seed="VIX regime gating", context=_ctx(), n=1)
 
@@ -195,7 +199,7 @@ def test_hypothesis_prompt_includes_cache_control_block():
 
 def test_hypothesis_prompt_user_carries_seed():
     batch = HypothesisDraftBatch(hypotheses=[_hypothesis_draft()])
-    client = _FakeClient(parsed_output=batch)
+    client = _FakeClient(response_json=batch.model_dump_json())
     gen = AnthropicHypothesisGenerator(client=client)
     gen.generate(seed="post-FOMC drift studies", context=_ctx(), n=1)
 
@@ -206,7 +210,7 @@ def test_hypothesis_prompt_user_carries_seed():
 
 def test_hypothesis_prompt_user_handles_empty_seed():
     batch = HypothesisDraftBatch(hypotheses=[_hypothesis_draft()])
-    client = _FakeClient(parsed_output=batch)
+    client = _FakeClient(response_json=batch.model_dump_json())
     gen = AnthropicHypothesisGenerator(client=client)
     gen.generate(seed="", context=_ctx(), n=1)
     [user_msg] = client.messages.last_call_kwargs["messages"]
@@ -236,16 +240,16 @@ def _promoted_hypothesis() -> Hypothesis:
 
 
 def test_variant_generator_returns_validated_specs():
-    batch = StrategySpecBatch(specs=[_strategy_spec("v_a"), _strategy_spec("v_b")])
-    gen = AnthropicVariantGenerator(client=_FakeClient(parsed_output=batch))
+    batch = StrategySpecBatch(specs=[_strategy_spec_draft("variant_a"), _strategy_spec_draft("variant_b")])
+    gen = AnthropicVariantGenerator(client=_FakeClient(response_json=batch.model_dump_json()))
     out = gen.generate(hypothesis=_promoted_hypothesis(), context=_ctx(), n=5)
     assert len(out) == 2
     assert all(isinstance(s, StrategySpec) for s in out)
 
 
 def test_variant_generator_stamps_author_and_dates():
-    batch = StrategySpecBatch(specs=[_strategy_spec("v_a")])
-    gen = AnthropicVariantGenerator(client=_FakeClient(parsed_output=batch), author_label="custom")
+    batch = StrategySpecBatch(specs=[_strategy_spec_draft("variant_a")])
+    gen = AnthropicVariantGenerator(client=_FakeClient(response_json=batch.model_dump_json()), author_label="custom")
     [s] = gen.generate(hypothesis=_promoted_hypothesis(), context=_ctx(), n=1)
     assert s.metadata.author == "custom"
     # created_date / last_modified_date overwritten to today
@@ -254,15 +258,15 @@ def test_variant_generator_stamps_author_and_dates():
 
 def test_variant_generator_truncates_to_n():
     batch = StrategySpecBatch(
-        specs=[_strategy_spec(f"v_{i}") for i in range(5)]
+        specs=[_strategy_spec_draft(f"variant_{i}") for i in range(5)]
     )
-    gen = AnthropicVariantGenerator(client=_FakeClient(parsed_output=batch))
+    gen = AnthropicVariantGenerator(client=_FakeClient(response_json=batch.model_dump_json()))
     out = gen.generate(hypothesis=_promoted_hypothesis(), context=_ctx(), n=2)
     assert len(out) == 2
 
 
 def test_variant_generator_n_zero_short_circuits():
-    client = _FakeClient(parsed_output=StrategySpecBatch(specs=[]))
+    client = _FakeClient(response_json=StrategySpecBatch(specs=[]).model_dump_json())
     gen = AnthropicVariantGenerator(client=client)
     out = gen.generate(hypothesis=_promoted_hypothesis(), context=_ctx(), n=0)
     assert out == []
@@ -270,8 +274,8 @@ def test_variant_generator_n_zero_short_circuits():
 
 
 def test_variant_prompt_includes_hypothesis_fields():
-    batch = StrategySpecBatch(specs=[_strategy_spec("v_a")])
-    client = _FakeClient(parsed_output=batch)
+    batch = StrategySpecBatch(specs=[_strategy_spec_draft("variant_a")])
+    client = _FakeClient(response_json=batch.model_dump_json())
     gen = AnthropicVariantGenerator(client=client)
     gen.generate(hypothesis=_promoted_hypothesis(), context=_ctx(), n=1)
 
@@ -284,8 +288,8 @@ def test_variant_prompt_includes_hypothesis_fields():
 
 
 def test_variant_prompt_caches_registry():
-    batch = StrategySpecBatch(specs=[_strategy_spec("v_a")])
-    client = _FakeClient(parsed_output=batch)
+    batch = StrategySpecBatch(specs=[_strategy_spec_draft("variant_a")])
+    client = _FakeClient(response_json=batch.model_dump_json())
     gen = AnthropicVariantGenerator(client=client)
     gen.generate(hypothesis=_promoted_hypothesis(), context=_ctx(), n=1)
 
@@ -295,7 +299,7 @@ def test_variant_prompt_caches_registry():
 
 
 def test_variant_generator_records_cost():
-    batch = StrategySpecBatch(specs=[_strategy_spec("v_a")])
-    gen = AnthropicVariantGenerator(client=_FakeClient(parsed_output=batch))
+    batch = StrategySpecBatch(specs=[_strategy_spec_draft("variant_a")])
+    gen = AnthropicVariantGenerator(client=_FakeClient(response_json=batch.model_dump_json()))
     gen.generate(hypothesis=_promoted_hypothesis(), context=_ctx(), n=1)
     assert gen.last_cost is not None
