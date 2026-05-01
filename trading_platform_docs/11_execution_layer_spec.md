@@ -21,9 +21,10 @@ in `00_master_architecture.md:65-71` into an enforceable contract.
 | Broker-agnostic order router (ABC) | ✅ implemented (Phase 3A, 2026-05-01) | `src/tradegy/execution/router.py` |
 | IBKR order router (place / cancel / query) | ✅ implemented (Phase 3A) — drives FSM via ib_async statusEvent / fillEvent; dependency-injected IB client for testability | `src/tradegy/execution/ibkr_router.py` |
 | IBKR status string → OrderState mapping | ✅ implemented (Phase 3A) — defensive (unknown→UNKNOWN) | `src/tradegy/execution/ibkr_status.py` |
-| Broker reconciliation loop | ⚠️ spec only — query_* methods on the router exist; periodic divergence detector deferred | (Phase 3B) |
-| Margin / heartbeat live wiring | ⚠️ pre-flight slots wired but inputs come from broker (Phase 3B) | `risk_caps.RiskState` |
-| Paper-account integration test | ⚠️ not wired — Phase 3A unit-tests use a `MockIB`; live paper test requires TWS/Gateway running | (deferred to user-run) |
+| Broker reconciliation: divergence detector | ✅ implemented (Phase 3B, 2026-05-01) — pure-function detector covering all 5 divergence types from §227-237 | `src/tradegy/execution/divergence.py` |
+| Broker reconciliation: async orchestration loop | ⚠️ deferred — periodic-cadence call orchestration on top of the detector | (Phase 3C) |
+| Margin / heartbeat live wiring | ⚠️ pre-flight slots wired but inputs come from broker (Phase 3C) | `risk_caps.RiskState` |
+| Paper-account integration test | ⚠️ not wired — Phase 3A/3B unit-tests use a `MockIB`; live paper test requires TWS/Gateway running | (deferred to user-run) |
 
 Phase 1 shipped the broker-agnostic FSM core. Phase 2 added the
 deterministic enforcement gates that sit on top of it: pre-flight risk
@@ -40,12 +41,25 @@ ports only re-implement that table. The IB client is dependency-
 injected so unit tests can use a `MockIB` without a real TWS connection
 (33 Phase 3A tests cover happy path, partial fills, terminal-state
 ignore, idempotent re-emission, query_* methods, and handler
-exception isolation). **107 execution-layer tests total** (33 Phase 1
-+ 41 Phase 2 + 33 Phase 3A).
+exception isolation).
 
-Phase 3B wires the reconciliation loop (periodic `query_*` calls →
-divergence detection → `apply_transition` with
-`source=RECONCILIATION`), the margin / heartbeat live inputs into
+Phase 3B adds the divergence detector (`divergence.py`) — a pure
+function over `(local_orders, broker_orders, local_positions,
+broker_positions, broker_account)` that emits a structured list of
+`DivergenceEvent`s with severity (HIGH | CRITICAL) and a recommended
+action. All five divergence types from doc 11 §227-237 are covered:
+order missing at broker, local FILLED but broker WORKING, local
+position with broker flat, local flat with broker position, signed
+quantity mismatch, plus margin breach at the account level. 17 Phase
+3B tests cover every row of the resolution table including the
+"local terminal not in broker.openTrades" non-divergence case.
+**124 execution-layer tests total** (33 Phase 1 + 41 Phase 2 + 33
+Phase 3A + 17 Phase 3B).
+
+Phase 3C wires the async reconciliation orchestration on top of the
+detector (periodic `query_*` calls at the cadences in §218-223,
+dispatching detected divergences to the kill-switch / handler / log
+layer), the margin / heartbeat live inputs into
 `RiskState`, and the actual paper-account integration test against
 TWS/Gateway. None of those require changes to Phase 1-3A code.
 
