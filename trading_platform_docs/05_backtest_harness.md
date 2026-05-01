@@ -48,13 +48,16 @@ prints aggregate stats. `tradegy walk-forward <spec_id>` runs rolling
 plus the distribution gate. End-to-end runs on real MES data (2019-05
 → 2025-06, 609,923 1m bars):
 
-| Spec | Single-mode trades | Single-mode expectancy R | Walk-forward (3y/1y/1y) gate | Notes |
-|---|---|---|---|---|
-| `mes_momentum_breakout` | 9,719 | -0.29 | FAIL (avg in-sample Sharpe -0.15, OOS -0.18) | naive momentum continuation |
-| `mes_vwap_reversion` | 1,512 | -0.56 | FAIL (avg in-sample Sharpe -0.31, OOS -0.26) | naive long-only fade |
-| `mes_vwap_reversion_gated` | 565 | +0.0513 | FAIL (avg in-sample Sharpe +0.007, OOS -0.019; gate ratio -2.58) | H2 of signal-hunt sprint; vol-band + time-of-session gates raise IS Sharpe but OOS still negative |
+| Spec | Bar source | Trades | Expectancy R | Walk-forward gate | Notes |
+|---|---|---|---|---|---|
+| `mes_momentum_breakout` | mes_5s_ohlcv (partial-day) | 9,719 | -0.29 | FAIL | naive momentum continuation |
+| `mes_vwap_reversion` | mes_5s_ohlcv (partial-day) | 1,512 | -0.56 | FAIL (avg IS Sharpe -0.31, OOS -0.26) | naive long-only fade |
+| `mes_vwap_reversion_gated` (H2) | mes_5s_ohlcv (partial-day) | 565 | +0.0513 | FAIL (gate ratio -2.58) | gates raise IS Sharpe but OOS still negative |
+| `mes_vwap_reversion_gated` (H2 re-test) | mes_1m_ohlcv (24h) | 1,486 | -0.659 | n/a (FAIL sanity, IS Sharpe -0.380) | re-test on full-coverage data; "barely positive" prior result was an artifact of partial-coverage filtering out morning RTH |
+| `mes_orb_failure_fade` (H1) | mes_1m_ohlcv (24h) | 2,718 | -0.526 | n/a (FAIL sanity, IS Sharpe -0.238) | range-break fade with 12-tick fixed stop; trigger fires too easily on minor wicks |
+| `mes_orb_continuation` (H3) | mes_1m_ohlcv (24h) | 3,000 | -0.598 | n/a (FAIL sanity, IS Sharpe -0.386) | inverse mechanism of H1; volume-confirmed range break + 12-tick fixed stop |
 
-The first two strategies fail the walk-forward gate at the "no in-sample edge" check — unprofitable both in-sample and out-of-sample. The expected shape for naive entry rules without regime filters / volatility gating / time-of-day discipline. `mes_vwap_reversion_gated` (added 2026-04-30) tests whether mechanical gates fix those failure modes for VWAP reversion specifically; gates lift IS Sharpe materially (-0.31 → +0.007) but the strategy is essentially zero-edge under them, OOS turns slightly negative, and per the sprint's anti-overfitting rules the hypothesis is killed (no parameter tuning of failed variants). Round 2 introduces a mechanistically distinct hypothesis (`range_break_fade`).
+**Signal-hunt sprint outcome (2026-04-30):** All three pre-registered hypotheses (H1, H2 re-test, H3) failed the sanity gate (raw IS Sharpe ≤ 0). Hypothesis budget exhausted (3/3). Common failure mode: ~20-23% win rate with avg_loss near full stop, indicating the fixed-tick stop framework + ~2.2-tick cost overhead per round trip eats the asymmetric R/R distribution. The 12-tick stop is too tight relative to MES intraday true-range. Per sprint anti-overfitting rules, no parameter tuning permitted. See `06_hypothesis_system.md` § Named hypotheses under investigation for the full kill record and implications for the next sprint.
 
 ---
 

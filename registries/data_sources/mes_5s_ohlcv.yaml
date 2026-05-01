@@ -84,4 +84,17 @@ known_issues:
     levels, fixed-dollar stops referenced to historical bars,
     percentile-of-historical-price thresholds) inherit synthetic levels
     and should be flagged.
+  - >
+    Coverage gap (discovered 2026-04-30): the actual ingested bars cover
+    only ~14:00–20:00 ET each day (UTC hours 0–1, 18–23), missing the
+    RTH morning 9:30 ET open. ``coverage.gaps: []`` is misleading — the
+    audit suite's gap detector treats intraday partial coverage as
+    expected because CMES sessions are 23h and the basic-audit
+    `excessive_gap` check is gated on `max_inactivity_seconds`. Strategy
+    classes anchored on the RTH open (ORB family) cannot use this
+    source. As of 2026-04-30 a parallel source `mes_1m_ohlcv` (databento
+    OHLCV-1m) carries 24h-coverage data 2019-05-06 → 2026-04-29 at 1m
+    cadence and is the source of record for `mes_1m_bars` and all
+    derived features. This 5s source remains for callers that need
+    the back-adjusted continuous price series specifically.
 audit_history: []

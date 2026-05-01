@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from tradegy.strategies.classes import (  # noqa: F401
     momentum_breakout,
+    range_break_continuation,
+    range_break_fade,
     stand_down,
     vwap_reversion,
 )

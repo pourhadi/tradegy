@@ -91,6 +91,7 @@ def _resolve_inputs(
         "rolling_zscore": ["series"],
         "session_position": ["bars"],
         "session_vwap": ["bars"],
+        "opening_range_levels": ["bars"],
     }
     transform_id = feature.computation.transform_id
     if transform_id not in slot_name_for_transform:

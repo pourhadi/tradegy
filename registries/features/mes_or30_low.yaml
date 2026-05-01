@@ -1,0 +1,31 @@
+# Hypothesis-driven feature (H1 of signal-hunt sprint): MES first-30-min
+# RTH session low, carried forward through the rest of the session.
+#
+# Mirror of mes_or30_high; defines the lower breakout/fade trigger zone.
+
+id: mes_or30_low
+version: v1
+description: >
+  Lowest 1m bar low within the first 30 minutes of the regular-session
+  (XNYS-aligned 09:30–16:00 ET) on MES front-month continuous, carried
+  forward through the rest of the session. Bars inside the OR window
+  itself and bars outside RTH emit no value.
+type: derived
+inputs:
+  - feature_id: mes_1m_bars
+computation:
+  type: registered_transform
+  transform_id: opening_range_levels
+  parameters:
+    level: low
+    or_window_minutes: 30
+    session_calendar: XNYS
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 100000.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

@@ -287,10 +287,11 @@ For the starting library of 4–6 strategies, the minimum set of classes to impl
 
 **Strategy classes (Phase 1):**
 
-- `range_break_fade` — fades failed breakouts of a defined range
-- `range_break_continuation` — enters on confirmed range break with volume
-- `vwap_reversion` — fades deviations from VWAP in range-bound sessions
-- `stand_down` — trivial "do nothing" class; first-class selectable option for the LLM
+- ✅ `range_break_fade` — fades failed breakouts of a defined range (implemented 2026-04-30; H1 of signal-hunt sprint, killed at sanity — see `06_hypothesis_system.md`)
+- ✅ `range_break_continuation` — enters on confirmed range break with volume (implemented 2026-04-30; H3, killed at sanity)
+- ✅ `vwap_reversion` — fades deviations from VWAP in range-bound sessions
+- ✅ `momentum_breakout` — long-only continuation entry on positive momentum (added during Phase 2B, not in original catalog)
+- ✅ `stand_down` — trivial "do nothing" class; first-class selectable option for the LLM
 
 **Sizing classes:** `fixed_contracts`, `fixed_fractional_risk`
 

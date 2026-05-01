@@ -1,14 +1,25 @@
-# 1-minute OHLCV bars for MES, aggregated from the 5-second source bars.
+# 1-minute OHLCV bars for MES front-month, sourced from databento OHLCV-1m
+# with no-lookahead front-month rolling.
+#
+# Switched 2026-04-30 from the Sierra Chart 5s-source resample (mes_5s_ohlcv)
+# to the databento 1m source (mes_1m_ohlcv) because the 5s source has only
+# ~14:00–20:00 ET coverage per day, missing the RTH morning open. The
+# resample_ohlcv_bars transform with cadence=1m on already-1m input is
+# idempotent on the OHLCV columns; it normalizes the timestamp to the
+# bar-close convention (label=right, closed=left) the rest of the
+# pipeline expects.
 
 id: mes_1m_bars
 version: v1
 description: >
-  1-minute OHLCV bars for MES front-month continuous, aggregated from the
-  mes_5s_ohlcv source via resample_ohlcv_bars. Right-labeled close,
-  left-closed window so each bar's ts_utc is the bar-close instant.
+  1-minute OHLCV bars for MES front-month, sourced from databento
+  OHLCV-1m via the mes_1m_ohlcv data source (front-month roll by
+  previous-day volume, no back-adjustment). The resample transform
+  normalizes timestamps to bar-close (right-labeled, left-closed
+  windows). 24h coverage every session day, 2019-05-06 → 2026-04-29.
 type: derived
 inputs:
-  - source_id: mes_5s_ohlcv
+  - source_id: mes_1m_ohlcv
 computation:
   type: registered_transform
   transform_id: resample_ohlcv_bars

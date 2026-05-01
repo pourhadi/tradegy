@@ -1,0 +1,107 @@
+# MES Opening-Range Failed-Breakout Fade — H1 of the signal-hunt sprint.
+#
+# Hypothesis: when price extends beyond the first-30-min RTH range and
+# returns inside the range within 5 bars, the breakout lacked
+# institutional commitment; fade it back toward the mid-range. Event-
+# anchored — fires at most once per direction per session.
+#
+# Mechanically distinct from the failing pair:
+#   * Trigger is range-anchored, not a sliding return threshold (vs.
+#     mes_momentum_breakout which fires on every bar that crosses the
+#     5m return threshold).
+#   * Trade window is restricted to the post-OR RTH window via the
+#     OR30 features being null outside of it (gating naturally falls
+#     through), and explicitly time-of-session-bounded via a
+#     time_of_session gate that excludes the last 30 min so reversion
+#     has time to play out.
+#
+# Status=draft, tier=proposal_only — under H1 of round 2, awaiting
+# walk-forward + CPCV results.
+
+metadata:
+  id: mes_orb_failure_fade
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES Opening-Range Failed-Breakout Fade
+  status: draft
+  created_date: 2026-04-30
+  last_modified_date: 2026-04-30
+  author: dan
+  reviewers: []
+  parent_strategy_id: null
+  description: >
+    Fade failed breakouts of the first-30-min RTH range on MES. When
+    price has printed beyond mes_or30_high (or below mes_or30_low) in
+    the recent 5 bars AND the current 1m close has settled back inside
+    the range by at least 1 tick, enter against the break direction.
+    Fixed 12-tick stop, 30-min time-stop, 1 attempt per direction per
+    session. Both directions armed.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: range_break_fade
+  parameters:
+    upper_level_feature_id: mes_or30_high
+    lower_level_feature_id: mes_or30_low
+    breakout_lookback_bars: 5
+    re_entry_buffer_ticks: 1
+    tick_size: 0.25
+    max_attempts_per_session: 1
+    direction_mode: both
+  direction: both
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    # Skip the last 30 min of the XNYS session so the time_stop and the
+    # natural mean-reversion target both have time to play out before
+    # the session-end flatten kicks in.
+    - condition: time_of_session
+      parameters:
+        session_position_feature_id: mes_session_position
+        lo: 0.10
+        hi: 0.85
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: fixed_ticks
+    stop_ticks: 12
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 100
+  time_stop:
+    enabled: true
+    max_holding_bars: 30
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only

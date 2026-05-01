@@ -257,6 +257,31 @@ no-lookahead audit, reproducibility check. End-to-end backtest of the
 strategy then ran successfully against the new feature, demonstrating
 the hybrid push/pull model in operation.*
 
+*Round 2 of the signal-hunt sprint (2026-04-30) added two more pull-
+driven features under the same gates: `mes_or30_high` and `mes_or30_low`,
+the first-30-min RTH session high/low carried forward through the rest
+of the session, used by the `range_break_fade` (H1) and
+`range_break_continuation` (H3) classes. The transform
+(`opening_range_levels`) is parameterized by `level` (high|low),
+`or_window_minutes` (default 30), and `session_calendar` (default
+`XNYS` — close enough to ES/MES RTH at the open, where the OR forms).
+Both features pass no-lookahead and reproducibility audits. They are
+non-null only for post-OR RTH bars (~628k of the 2.46M-bar series).*
+
+*The same Round 2 work also surfaced and fixed a major data gap:
+`mes_5s_ohlcv` (Sierra Chart export) covers only the ~14:00–20:00 ET
+window each session day, missing the RTH morning open. The basic-
+audit gap detector did not flag it because intraday partial coverage
+falls inside the configured `max_inactivity_seconds` ceiling. A new
+data source `mes_1m_ohlcv` (databento OHLCV-1m, 24h coverage,
+2019-05-06 → 2026-04-29) was admitted with a no-lookahead front-month
+roll (previous-day-volume rule), and `mes_1m_bars` was repointed at
+it. All MES derived features were recomputed against the new bar
+series; the 5s source remains in the registry for callers needing
+back-adjusted continuous prices specifically. Open follow-up: add a
+coverage-by-hour audit so future ingestions cannot silently miss
+intraday windows.*
+
 
 
 The registry is *not* meant to be a speculatively-pre-populated catalog of

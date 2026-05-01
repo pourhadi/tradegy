@@ -22,6 +22,7 @@ from tradegy.harness import (
     run_cpcv,
     run_walk_forward,
 )
+from tradegy.ingest.csv_databento import ingest_databento_csv
 from tradegy.ingest.csv_es import ingest_csv
 from tradegy.ingest.csv_sierra import ingest_sierra_csv
 from tradegy.registry.api import find_features, get_feature, value_at
@@ -50,12 +51,16 @@ def ingest(
 
     Dispatches on `source.ingest.format`:
       * sierra_chart_csv → ingest_sierra_csv (multi-column timestamp, OHLCV).
+      * databento_ohlcv_csv → ingest_databento_csv (per-contract OHLCV with
+        no-lookahead front-month roll).
       * generic_csv (or omitted ingest spec) → ingest_csv (ts/price/size).
     """
     source = load_data_source(source_id)
     fmt = source.ingest.format if source.ingest is not None else "generic_csv"
     if fmt == "sierra_chart_csv":
         result = ingest_sierra_csv(csv_path, source, input_tz=input_tz)
+    elif fmt == "databento_ohlcv_csv":
+        result = ingest_databento_csv(csv_path, source)
     elif fmt == "generic_csv":
         result = ingest_csv(csv_path, source, input_tz=input_tz)
     else:
