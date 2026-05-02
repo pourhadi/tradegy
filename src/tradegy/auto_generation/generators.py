@@ -21,11 +21,14 @@ the stubs to drive the orchestrator without spending API tokens.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, TYPE_CHECKING
 
 from tradegy.auto_generation.hypothesis import Hypothesis
 from tradegy.specs.schema import StrategySpec
+
+if TYPE_CHECKING:
+    from tradegy.auto_generation.feature_stats import FeatureStats
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,15 @@ class GenerationContext:
 
     available_sizing_methods: tuple[str, ...] = ()
     available_stop_methods: tuple[str, ...] = ()
+
+    feature_stats: dict[str, "FeatureStats"] = field(default_factory=dict)
+    """Per-feature distribution snapshot (rows, min, max, p10, median,
+    p90). Populated by the CLI from `feature_stats.compute_all_*`;
+    rendered alongside each feature id in the cached registry block
+    so the LLM proposes thresholds inside the live distribution.
+    Empty dict → fall back to no-stats rendering (pre-2026-05-02
+    behaviour)."""
+
     instrument_scope: tuple[str, ...] = ("MES",)
     extra: dict[str, Any] = None  # type: ignore[assignment]
 

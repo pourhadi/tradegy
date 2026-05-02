@@ -461,6 +461,8 @@ verified; model artifact serializable and deterministic on reload.
 Automated registration acceptable only for features remaining in the
 `in_development` or `research` lifecycle state.
 
+**Distribution stats sidecar (added 2026-05-02):** every materialised feature can have a per-feature distribution snapshot at `data/feature_stats/<feature_id>.json` — `(rows, min, max, p10, p25, median, p75, p90)` computed from the parquet. The auto-generator (`07_auto_generation.md`) injects these into the LLM prompt so threshold proposals are grounded in the live distribution. Refresh with `tradegy refresh-feature-stats` after any re-ingest or new feature materialisation. Lazily computed on first read otherwise (cached forever until a schema-version bump or explicit refresh). Stats live under `data/`, gitignored — see `src/tradegy/auto_generation/feature_stats.py`.
+
 ---
 
 ## Data source registry schema

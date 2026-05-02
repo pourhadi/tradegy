@@ -40,6 +40,14 @@ from tradegy.auto_generation.cost import (
     cost_for_usage,
     format_cost_line,
 )
+from tradegy.auto_generation.feature_stats import (
+    FeatureStats,
+    compute_all_feature_stats,
+    compute_feature_stats,
+    format_feature_stats,
+    read_stats,
+    write_stats,
+)
 from tradegy.auto_generation.generators import (
     HypothesisGenerator,
     StubHypothesisGenerator,
@@ -70,6 +78,7 @@ __all__ = [
     "AutoTestOrchestrator",
     "AutoTestSummary",
     "CostEstimate",
+    "FeatureStats",
     "GateOutcome",
     "Hypothesis",
     "HypothesisDraft",
@@ -83,9 +92,14 @@ __all__ = [
     "VariantOutcome",
     "VariantRecord",
     "append_record",
+    "compute_all_feature_stats",
+    "compute_feature_stats",
     "cost_for_usage",
     "format_cost_line",
+    "format_feature_stats",
     "list_hypotheses",
     "load_hypothesis",
     "read_records",
+    "read_stats",
+    "write_stats",
 ]

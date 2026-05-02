@@ -1,6 +1,6 @@
 # Auto-Generation Spec
 
-**Status:** Draft for review (Phase A + B implemented 2026-05-01)
+**Status:** Draft for review (Phase A + B implemented 2026-05-01; feature-stat injection landed 2026-05-02)
 **Purpose:** Define the automated generation of strategy spec variants from promoted hypotheses. Auto-generation widens the development funnel without compromising rigor. It produces variants for early-stage evaluation; it does not produce live library strategies.
 
 ## Implementation status
@@ -12,12 +12,14 @@
 | HypothesisGenerator + VariantGenerator ABCs (with stubs) | ✅ implemented (Phase A) | `src/tradegy/auto_generation/generators.py` |
 | AutoTestOrchestrator (sanity → walk-forward, multi-hypothesis correction, pre-registration enforcement) | ✅ implemented (Phase A) — Bonferroni-flavoured Sharpe lift; full DSR is open work | `src/tradegy/auto_generation/orchestrator.py` |
 | AnthropicHypothesisGenerator (LLM ideation) | ✅ implemented (Phase B, 2026-05-01) — opus-4-7, adaptive thinking, prompt-cached registry block | `src/tradegy/auto_generation/anthropic_generators.py` |
-| AnthropicVariantGenerator (LLM spec drafting) | ✅ implemented (Phase B) — `client.messages.parse()` with full StrategySpec Pydantic schema | same file |
+| AnthropicVariantGenerator (LLM spec drafting) | ✅ implemented (Phase B) — prose-instructed JSON via `messages.create()` (the strict-output grammar compiler rejected the full-spec schema as too complex during the 2026-05-01 dry run); we Pydantic-validate on our side | same file |
 | Cost reporting | ✅ implemented (Phase B) — post-call USD estimate from `response.usage`; non-blocking | `src/tradegy/auto_generation/cost.py` |
 | `tradegy hypothesize` / `auto-vary` / `auto-test` / `hypothesis-list` CLI | ✅ implemented (Phase B) | `src/tradegy/cli.py` |
-| Embedding-based diversity check | ⚠️ Phase C — content-hash dedup is the MVP placeholder | (Phase C) |
-| Deflated Sharpe Ratio (López de Prado) | ⚠️ Phase C — Bonferroni is the MVP correction | (Phase C) |
-| Hypothesis triage / five-test scorer | ⚠️ Phase C — schema fields exist, scorer not wired | (Phase C) |
+| Per-feature distribution stats injected into the LLM prompt | ✅ implemented (Phase C, 2026-05-02) — for each registered feature, the cached registry block carries (rows, min, max, p10, median, p90) computed from the live parquet. Anchors LLM threshold proposals inside the actual distribution. | `src/tradegy/auto_generation/feature_stats.py` |
+| `tradegy refresh-feature-stats` CLI | ✅ implemented (Phase C) — pre-warms `data/feature_stats/<id>.json` from materialised features. `hypothesize` / `auto-vary` accept `--refresh-stats` to recompute on demand. | `src/tradegy/cli.py` |
+| Embedding-based diversity check | ⚠️ Phase C-pending — content-hash dedup is the MVP placeholder | (Phase C) |
+| Deflated Sharpe Ratio (López de Prado) | ⚠️ Phase C-pending — Bonferroni is the MVP correction | (Phase C) |
+| Hypothesis triage / five-test scorer | ⚠️ Phase C-pending — schema fields exist, scorer not wired | (Phase C) |
 | Holdout integration (auto-test path) | ⚠️ deferred — slot wired in orchestrator; the CLI's `--holdout-months` flow is the production path; auto-test should reuse it | (Phase C) |
 
 ---

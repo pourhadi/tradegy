@@ -40,6 +40,7 @@ from tradegy.auto_generation.cost import (
     cost_for_usage,
     format_cost_line,
 )
+from tradegy.auto_generation.feature_stats import format_feature_stats
 from tradegy.auto_generation.generators import (
     GenerationContext,
     HypothesisGenerator,
@@ -337,17 +338,38 @@ def _registry_context_block(ctx: GenerationContext) -> str:
     every primitive a generated spec can reference, plus the parameter
     shapes for the most common evaluators / stops so the LLM doesn't
     invent inline DSL.
+
+    Feature ids include their (rows, min/max, p10/median/p90)
+    distribution stats when `ctx.feature_stats` is populated. This
+    grounds threshold proposals in the live data — the dry run on
+    2026-05-01 produced unfireable variants because the LLM picked
+    threshold values without knowing the feature's distribution.
     """
 
     def _list(items: tuple[str, ...]) -> str:
         return "\n".join(f"  - {x}" for x in items) if items else "  (none)"
 
+    if ctx.feature_stats:
+        feature_lines = "\n".join(
+            format_feature_stats(ctx.feature_stats[fid])
+            if fid in ctx.feature_stats
+            else f"  - {fid}: (no stats)"
+            for fid in ctx.available_feature_ids
+        )
+        feature_section_intro = (
+            "\n\nAvailable feature ids (with live distribution; "
+            "anchor thresholds inside [p10, p90]):\n"
+        )
+    else:
+        feature_lines = _list(ctx.available_feature_ids)
+        feature_section_intro = "\n\nAvailable feature ids:\n"
+
     return (
         "## Registry context (use ONLY these)\n\n"
         "Available strategy classes:\n"
         + _list(ctx.available_class_ids)
-        + "\n\nAvailable feature ids:\n"
-        + _list(ctx.available_feature_ids)
+        + feature_section_intro
+        + feature_lines
         + "\n\nAvailable condition evaluators (used in gating_conditions"
         " + invalidation_conditions). Each entry is a JSON object with"
         " `condition` (name from this list) and `parameters` (per-"
@@ -361,6 +383,10 @@ def _registry_context_block(ctx: GenerationContext) -> str:
         '  * time_of_session:    {"session_position_feature_id": '
         '"mes_session_position" or "mes_xnys_session_position", '
         '"lo": 0..1, "hi": 0..1}\n'
+        "  Threshold values must lie inside the feature's reported "
+        "distribution. Proposing thresholds outside [min, max] or in "
+        "the deep tails (< p10 / > p90) yields unfireable variants — "
+        "wasted budget.\n"
         + "\n\nAvailable sizing methods:\n"
         + _list(ctx.available_sizing_methods)
         + "\n\nAvailable initial-stop methods:\n"

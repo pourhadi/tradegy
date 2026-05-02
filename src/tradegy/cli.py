@@ -22,6 +22,9 @@ from tradegy.auto_generation import (
     list_hypotheses,
     load_hypothesis,
 )
+from tradegy.auto_generation.feature_stats import (
+    compute_all_feature_stats,
+)
 from tradegy.auto_generation.generators import GenerationContext
 from tradegy.auto_generation.hypothesis import hypotheses_dir
 from tradegy.auto_generation.records import read_records
@@ -845,11 +848,18 @@ def validate_evidence_cmd(
         raise typer.Exit(code=7)
 
 
-def _build_generation_context() -> GenerationContext:
+def _build_generation_context(
+    *, refresh_feature_stats: bool = False
+) -> GenerationContext:
     """Snapshot the live registries for the LLM. Pulls strategy classes,
-    feature ids, condition evaluators, sizing methods, and stop methods
-    — every primitive a generated spec can reference is listed in the
-    cached prompt prefix.
+    feature ids (with live distribution stats), condition evaluators,
+    sizing methods, and stop methods — every primitive a generated spec
+    can reference is listed in the cached prompt prefix.
+
+    `refresh_feature_stats=True` recomputes per-feature stats from the
+    parquet files; default `False` reads from the on-disk cache, falling
+    through to a fresh computation only when the cache is missing or
+    stale (schema-version mismatch).
     """
     from tradegy.strategies.auxiliary import (
         list_condition_evaluators,
@@ -861,12 +871,16 @@ def _build_generation_context() -> GenerationContext:
     feature_ids = tuple(
         sorted(p.stem for p in config.features_registry_dir().glob("*.yaml"))
     )
+    feature_stats = compute_all_feature_stats(
+        feature_ids, refresh=refresh_feature_stats,
+    )
     return GenerationContext(
         available_class_ids=tuple(sorted(list_strategy_classes())),
         available_feature_ids=feature_ids,
         available_condition_ids=tuple(sorted(list_condition_evaluators())),
         available_sizing_methods=tuple(sorted(list_sizing_classes())),
         available_stop_methods=tuple(sorted(list_stop_classes())),
+        feature_stats=feature_stats,
         instrument_scope=("MES",),
     )
 
@@ -905,6 +919,11 @@ def hypothesize_cmd(
     model: Annotated[str, typer.Option(
         help="anthropic model id",
     )] = "claude-opus-4-7",
+    refresh_stats: Annotated[bool, typer.Option(
+        "--refresh-stats/--no-refresh-stats",
+        help="recompute per-feature distribution stats before building "
+             "the LLM context. Default reads from the on-disk cache.",
+    )] = False,
 ) -> None:
     """LLM-driven hypothesis generation.
 
@@ -917,7 +936,7 @@ def hypothesize_cmd(
     import yaml
 
     client = _make_anthropic_client()
-    ctx = _build_generation_context()
+    ctx = _build_generation_context(refresh_feature_stats=refresh_stats)
     gen = AnthropicHypothesisGenerator(
         client=client, model=model, effort=effort,
     )
@@ -956,6 +975,11 @@ def auto_vary_cmd(
     n: Annotated[int, typer.Option("--n", min=1, max=15)] = 5,
     effort: Annotated[str, typer.Option()] = "medium",
     model: Annotated[str, typer.Option()] = "claude-opus-4-7",
+    refresh_stats: Annotated[bool, typer.Option(
+        "--refresh-stats/--no-refresh-stats",
+        help="recompute per-feature distribution stats before building "
+             "the LLM context. Default reads from the on-disk cache.",
+    )] = False,
 ) -> None:
     """LLM-driven variant generation for a promoted hypothesis.
 
@@ -984,7 +1008,7 @@ def auto_vary_cmd(
         raise typer.Exit(code=2)
 
     client = _make_anthropic_client()
-    ctx = _build_generation_context()
+    ctx = _build_generation_context(refresh_feature_stats=refresh_stats)
     gen = AnthropicVariantGenerator(
         client=client, model=model, effort=effort,
     )
@@ -1105,6 +1129,44 @@ def hypothesis_list_cmd() -> None:
     table.add_column("title")
     for h in items:
         table.add_row(h.id, h.status, str(h.variant_budget), h.title)
+    console.print(table)
+
+
+@app.command("refresh-feature-stats")
+def refresh_feature_stats_cmd() -> None:
+    """Recompute per-feature distribution stats from the live parquets.
+
+    Stats are cached at `data/feature_stats/<feature_id>.json` and used
+    by the auto-generator to ground LLM threshold proposals in the live
+    data distribution. Run this after re-ingesting a data source or
+    materializing new features.
+    """
+    feature_ids = tuple(
+        sorted(p.stem for p in config.features_registry_dir().glob("*.yaml"))
+    )
+    console.print(
+        f"[bold]refresh-feature-stats[/]  features={len(feature_ids)}"
+    )
+    stats = compute_all_feature_stats(feature_ids, refresh=True)
+    table = Table(title="feature stats")
+    table.add_column("feature")
+    table.add_column("rows", justify="right")
+    table.add_column("min", justify="right")
+    table.add_column("p10", justify="right")
+    table.add_column("median", justify="right")
+    table.add_column("p90", justify="right")
+    table.add_column("max", justify="right")
+    table.add_column("note")
+    for fid in feature_ids:
+        s = stats[fid]
+        if s.is_available:
+            fmt = lambda v: f"{v:.4g}"
+            table.add_row(
+                fid, f"{s.rows:,}", fmt(s.min), fmt(s.p10),
+                fmt(s.median), fmt(s.p90), fmt(s.max), s.note,
+            )
+        else:
+            table.add_row(fid, "0", "—", "—", "—", "—", "—", s.note)
     console.print(table)
 
 
