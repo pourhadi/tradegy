@@ -212,7 +212,12 @@ def _patch_harness(
     wf_passed: bool = True,
     wf_oos_sharpe: float = 0.4,
     wf_in_sample_sharpe: float = 0.5,
+    coverage_start: datetime | None = None,
+    coverage_end: datetime | None = None,
 ):
+    cs = coverage_start or datetime(2019, 5, 6, tzinfo=timezone.utc)
+    ce = coverage_end or datetime(2026, 4, 30, tzinfo=timezone.utc)
+
     def fake_backtest(spec, **kwargs):
         return _FakeBacktestResult(
             stats=_FakeStats(
@@ -224,14 +229,22 @@ def _patch_harness(
         return _FakeWFSummary(
             avg_oos_sharpe=wf_oos_sharpe,
             avg_in_sample_sharpe=wf_in_sample_sharpe,
-            coverage_start=datetime(2024, 1, 1, tzinfo=timezone.utc),
-            coverage_end=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            coverage_start=cs,
+            coverage_end=ce,
             passed=wf_passed,
             fail_reason="" if wf_passed else "test_fail",
         )
 
+    class _FakeBars:
+        def row(self, idx: int, *, named: bool):
+            return {"ts_utc": cs if idx == 0 else ce}
+
+    def fake_load_bar_stream(instrument: str):
+        return _FakeBars()
+
     monkeypatch.setattr(orch_mod, "run_backtest", fake_backtest)
     monkeypatch.setattr(orch_mod, "run_walk_forward", fake_walk_forward)
+    monkeypatch.setattr(orch_mod, "load_bar_stream", fake_load_bar_stream)
 
 
 # ── Sanity gate ────────────────────────────────────────────────
@@ -419,3 +432,189 @@ def test_summary_counts_aggregate(tmp_path, monkeypatch):
     assert summary.variants_passed_sanity == 3
     assert summary.candidate_count == 3
     assert len(read_records(h.id, root=tmp_path)) == 3
+
+
+# ── Holdout gate ──────────────────────────────────────────────
+
+
+def _patch_harness_with_holdout(
+    monkeypatch,
+    *,
+    holdout_sharpe: float,
+    wf_oos_sharpe: float = 0.4,
+    wf_in_sample_sharpe: float = 0.6,
+    sanity_sharpe: float = 0.6,
+    sanity_trades: int = 200,
+):
+    """Patch harness functions for the holdout-flow tests.
+
+    The holdout backtest is the SECOND call to run_backtest within the
+    same orchestrator pass — the first is sanity. We discriminate on
+    call order, not on kwargs, since both calls receive the same spec
+    type and the orchestrator passes start/end only on the holdout call.
+    """
+    cs = datetime(2019, 5, 6, tzinfo=timezone.utc)
+    ce = datetime(2026, 4, 30, tzinfo=timezone.utc)
+    state = {"calls": 0}
+
+    def fake_backtest(spec, **kwargs):
+        state["calls"] += 1
+        # Second call is the holdout backtest (start/end provided).
+        if "start" in kwargs and "end" in kwargs:
+            return _FakeBacktestResult(
+                stats=_FakeStats(
+                    sharpe=holdout_sharpe, total_trades=sanity_trades,
+                ),
+            )
+        return _FakeBacktestResult(
+            stats=_FakeStats(
+                sharpe=sanity_sharpe, total_trades=sanity_trades,
+            ),
+        )
+
+    def fake_walk_forward(spec, **kwargs):
+        return _FakeWFSummary(
+            avg_oos_sharpe=wf_oos_sharpe,
+            avg_in_sample_sharpe=wf_in_sample_sharpe,
+            coverage_start=cs, coverage_end=ce,
+            passed=True, fail_reason="",
+        )
+
+    class _FakeBars:
+        def row(self, idx: int, *, named: bool):
+            return {"ts_utc": cs if idx == 0 else ce}
+
+    monkeypatch.setattr(orch_mod, "run_backtest", fake_backtest)
+    monkeypatch.setattr(orch_mod, "run_walk_forward", fake_walk_forward)
+    monkeypatch.setattr(
+        orch_mod, "load_bar_stream", lambda instrument: _FakeBars(),
+    )
+
+
+def test_holdout_pass_records_passed(tmp_path, monkeypatch):
+    _patch_harness_with_holdout(
+        monkeypatch,
+        holdout_sharpe=0.30,  # ≥ 0.5 × 0.4 = 0.20
+        wf_oos_sharpe=0.4,
+    )
+    h = _promoted_hypothesis()
+    orch = AutoTestOrchestrator(
+        hypothesis=h,
+        variant_generator=StubVariantGenerator([_make_spec()]),
+        context=GenerationContext(
+            available_class_ids=("vwap_reversion",),
+            available_feature_ids=("mes_vwap",),
+        ),
+        persist_root=tmp_path,
+        run_walk_forward_on_pass=True,
+        run_holdout_on_pass=True,
+        holdout_months=12,
+    )
+    summary = orch.run()
+    assert summary.variants_passed_holdout == 1
+    assert summary.candidate_count == 1
+    [rec] = read_records(h.id, root=tmp_path)
+    assert rec.outcome == VariantOutcome.PASSED
+    assert rec.gate_results.holdout == GateOutcome.PASSED
+    assert rec.stats.holdout_sharpe == pytest.approx(0.30)
+
+
+def test_holdout_fail_records_discarded(tmp_path, monkeypatch):
+    _patch_harness_with_holdout(
+        monkeypatch,
+        holdout_sharpe=0.10,  # < 0.5 × 0.4 = 0.20
+        wf_oos_sharpe=0.4,
+    )
+    h = _promoted_hypothesis()
+    orch = AutoTestOrchestrator(
+        hypothesis=h,
+        variant_generator=StubVariantGenerator([_make_spec()]),
+        context=GenerationContext(
+            available_class_ids=("vwap_reversion",),
+            available_feature_ids=("mes_vwap",),
+        ),
+        persist_root=tmp_path,
+        run_walk_forward_on_pass=True,
+        run_holdout_on_pass=True,
+        holdout_months=12,
+    )
+    summary = orch.run()
+    assert summary.variants_passed_holdout == 0
+    assert summary.candidate_count == 0
+    [rec] = read_records(h.id, root=tmp_path)
+    assert rec.outcome == VariantOutcome.DISCARDED_AT_HOLDOUT
+    assert rec.gate_results.holdout == GateOutcome.FAILED
+    assert "0.5" in rec.fail_reason
+    assert rec.stats.holdout_sharpe == pytest.approx(0.10)
+
+
+def test_holdout_negative_wf_reference_fails_gate(tmp_path, monkeypatch):
+    """When walk-forward avg OOS sharpe is non-positive, the holdout
+    gate cannot pass — a negative threshold any holdout could clear
+    would invert the gate's intent.
+    """
+    _patch_harness_with_holdout(
+        monkeypatch,
+        holdout_sharpe=0.5,  # would clear a negative threshold trivially
+        wf_oos_sharpe=-0.1,
+    )
+    # walk-forward is configured to pass=True with negative oos sharpe;
+    # this is the edge case the holdout guard exists for.
+    h = _promoted_hypothesis(
+        gate_thresholds=GateThresholds(
+            sanity_min_trades=30,
+            sanity_min_in_sample_sharpe=0.0,
+            walk_forward_oos_in_sample_ratio=0.0,  # let WF "pass"
+            walk_forward_min_in_sample_sharpe=0.0,
+            holdout_sharpe_ratio_to_walk_forward=0.5,
+        ),
+    )
+    orch = AutoTestOrchestrator(
+        hypothesis=h,
+        variant_generator=StubVariantGenerator([_make_spec()]),
+        context=GenerationContext(
+            available_class_ids=("vwap_reversion",),
+            available_feature_ids=("mes_vwap",),
+        ),
+        persist_root=tmp_path,
+        run_walk_forward_on_pass=True,
+        run_holdout_on_pass=True,
+        holdout_months=12,
+    )
+    summary = orch.run()
+    [rec] = read_records(h.id, root=tmp_path)
+    # The variant must not pass holdout; whether it's discarded at WF
+    # or holdout depends on the WF gate semantics — the load-bearing
+    # assertion is that it didn't reach the candidate pool.
+    assert summary.candidate_count == 0
+    assert rec.outcome != VariantOutcome.PASSED
+
+
+def test_holdout_disabled_keeps_phase_b_behaviour(tmp_path, monkeypatch):
+    """holdout_months=0 → variant passes after walk-forward (no holdout
+    backtest invoked, no DISCARDED_AT_HOLDOUT path taken).
+    """
+    _patch_harness_with_holdout(
+        monkeypatch,
+        holdout_sharpe=999.0,  # would matter if holdout ran
+        wf_oos_sharpe=0.4,
+    )
+    h = _promoted_hypothesis()
+    orch = AutoTestOrchestrator(
+        hypothesis=h,
+        variant_generator=StubVariantGenerator([_make_spec()]),
+        context=GenerationContext(
+            available_class_ids=("vwap_reversion",),
+            available_feature_ids=("mes_vwap",),
+        ),
+        persist_root=tmp_path,
+        run_walk_forward_on_pass=True,
+        run_holdout_on_pass=False,
+        holdout_months=0,
+    )
+    summary = orch.run()
+    [rec] = read_records(h.id, root=tmp_path)
+    assert rec.outcome == VariantOutcome.PASSED
+    assert rec.gate_results.holdout == GateOutcome.NOT_RUN
+    assert rec.stats.holdout_sharpe is None
+    assert summary.variants_passed_holdout == 0  # never incremented

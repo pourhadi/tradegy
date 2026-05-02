@@ -82,7 +82,7 @@ quick-orient:
 | 04 | Spec schema | stable |
 | 05 | Backtest harness | Phases 3A/4/5/6A done — single, session-aware, walk-forward, CPCV |
 | 06 | Hypothesis system | manual hypothesis lifecycle done; **five-test triage scorer pending**; scanner Phase 1 (kill-record + in-data market-structure observer) landed 2026-05-02 |
-| 07 | Auto-generation | Phases A+B+C **shipped and verified**; scanner Phase 1 landed 2026-05-02; Phase C-pending: embedding diversity, Deflated Sharpe Ratio, triage scorer integration, holdout in auto-test |
+| 07 | Auto-generation | Phases A+B+C **shipped and verified**; scanner Phase 1 landed 2026-05-02; holdout in auto-test landed 2026-05-02; Phase C-pending: embedding diversity, Deflated Sharpe Ratio, triage scorer integration |
 | 08 | Development pipeline | docs only |
 | 09 | Selection layer | docs only |
 | 10 | Review / gap analysis | superseded by P0 doc sprint |

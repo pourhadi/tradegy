@@ -22,7 +22,7 @@
 | Embedding-based diversity check | ⚠️ Phase C-pending — content-hash dedup is the MVP placeholder | (Phase C) |
 | Deflated Sharpe Ratio (López de Prado) | ⚠️ Phase C-pending — Bonferroni is the MVP correction | (Phase C) |
 | Hypothesis triage / five-test scorer | ⚠️ Phase C-pending — schema fields exist, scorer not wired | (Phase C) |
-| Holdout integration (auto-test path) | ⚠️ deferred — slot wired in orchestrator; the CLI's `--holdout-months` flow is the production path; auto-test should reuse it | (Phase C) |
+| Holdout integration (auto-test path) | ✅ implemented (2026-05-02) — `tradegy auto-test --holdout-months N` reserves the trailing N months from every walk-forward fold and runs a single backtest on the held-out tail. Gate uses the hypothesis's `holdout_sharpe_ratio_to_walk_forward` (default 0.5) × wf avg OOS Sharpe; non-positive reference fails the gate (no negative-threshold loophole). Variant log records `holdout_sharpe` + `discarded_at_holdout` outcome. Mirrors `cli._evaluate_holdout` semantics. | `src/tradegy/auto_generation/orchestrator.py`, `src/tradegy/cli.py` |
 
 ---
 

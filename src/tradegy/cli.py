@@ -1066,7 +1066,15 @@ def auto_test_cmd(
         "--walk-forward/--sanity-only",
         help="whether to run the walk-forward gate after sanity passes",
     )] = True,
-    holdout_months: Annotated[int, typer.Option()] = 0,
+    holdout_months: Annotated[int, typer.Option(
+        "--holdout-months",
+        help="trailing months reserved untouched as holdout. After "
+             "walk-forward completes on [first_bar, last_bar - "
+             "holdout_months), a single backtest runs on the held-out "
+             "tail and is gated at the hypothesis's "
+             "holdout_sharpe_ratio_to_walk_forward (default 0.5x avg "
+             "OOS sharpe, per 07_auto_generation.md:165). 0 disables.",
+    )] = 0,
 ) -> None:
     """Run the auto-test orchestrator on every spec already on disk
     that matches the hypothesis. Per-variant records land under
@@ -1075,6 +1083,10 @@ def auto_test_cmd(
     Pre-registration enforcement (doc 07 §218-228): if the hypothesis
     has already had `variant_budget` records logged, the orchestrator
     refuses — expanding the budget post-hoc is a sprint-level rule.
+
+    With --holdout-months > 0, sanity → walk-forward → holdout runs in
+    one command. The held-out window is reserved from every fold of
+    walk-forward so it stays untouched until the gate decision.
     """
     h = load_hypothesis(hypothesis_id)
     if h.status != "promoted":
@@ -1117,6 +1129,8 @@ def auto_test_cmd(
     table.add_row("validation failed", str(summary.variants_validation_failed))
     table.add_row("passed sanity", str(summary.variants_passed_sanity))
     table.add_row("passed walk-forward", str(summary.variants_passed_walk_forward))
+    if holdout_months > 0:
+        table.add_row("passed holdout", str(summary.variants_passed_holdout))
     table.add_row("candidate pool", str(summary.candidate_count))
     console.print(table)
     if summary.candidate_pool_ids:

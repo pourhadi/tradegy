@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dateutil.relativedelta import relativedelta
+
 from tradegy.auto_generation.generators import GenerationContext, VariantGenerator
 from tradegy.auto_generation.hypothesis import Hypothesis
 from tradegy.auto_generation.records import (
@@ -43,6 +45,7 @@ from tradegy.harness import (
     run_backtest,
     run_walk_forward,
 )
+from tradegy.harness.data import load_bar_stream
 from tradegy.specs.loader import SpecValidationError, validate_spec
 from tradegy.specs.schema import StrategySpec
 
@@ -205,6 +208,17 @@ class AutoTestOrchestrator:
     def _effective_root_for_records(self) -> Path | None:
         return self._persist_root
 
+    def _coverage_for(self, spec: StrategySpec) -> tuple[datetime, datetime]:
+        """Resolve [first_bar_ts, last_bar_ts] for the spec's instrument.
+
+        The orchestrator always runs against the bar feature's full
+        coverage; holdout reservation is computed off this span.
+        """
+        bars = load_bar_stream(spec.market_scope.instrument)
+        cs = bars.row(0, named=True)["ts_utc"]
+        ce = bars.row(-1, named=True)["ts_utc"]
+        return cs, ce
+
     def _validate_and_dedup(
         self, variants: list[StrategySpec]
     ) -> tuple[list[StrategySpec], list[tuple[StrategySpec, str]]]:
@@ -295,8 +309,17 @@ class AutoTestOrchestrator:
             return
 
         try:
+            cs, ce = self._coverage_for(spec)
+            # Reserve the trailing N months as holdout; walk-forward
+            # only sees [cs, ce - N months) so the holdout truly is
+            # untouched by every fold of the gate.
+            wf_end = ce
+            if self._run_holdout and self._holdout_months > 0:
+                wf_end = ce - relativedelta(months=self._holdout_months)
             wf = run_walk_forward(
                 spec,
+                coverage_start=cs,
+                coverage_end=wf_end,
                 config=WalkForwardConfig(
                     train_years=3.0, test_years=1.0, roll_years=1.0,
                 ),
@@ -363,22 +386,90 @@ class AutoTestOrchestrator:
             summary.candidate_pool_ids.append(spec.metadata.id)
             return
 
-        # NOTE: holdout backtest path is structurally identical to
-        # the CLI's walk-forward holdout integration. We re-implement
-        # here rather than calling the CLI to avoid the typer
-        # exit-code path. The held-out window math is the same.
-        # For brevity we delegate to a single backtest on the trailing
-        # window after computing it from the harness data.
-        # (The full --holdout-months flow inside walk-forward is the
-        # production path; auto-gen reuses its semantics.)
-        # Implementation detail: skipped in Phase A; explicit holdout
-        # support arrives in Phase C alongside the CLI.
+        # The trailing-months window was reserved out of walk-forward
+        # above (wf saw [cs, ce - holdout_months)); now run a single
+        # backtest on the held-out tail and gate it at 0.5x walk-
+        # forward avg OOS Sharpe, mirroring cli._evaluate_holdout.
+        # 07_auto_generation.md:165 specifies the gate formula.
+        holdout_end = ce
+        holdout_start = ce - relativedelta(months=self._holdout_months)
+        try:
+            ho = run_backtest(
+                spec, start=holdout_start, end=holdout_end, cost=self._cost,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._persist(
+                spec=spec, sibling_ids=sibling_ids, summary=summary,
+                outcome=VariantOutcome.ERROR,
+                gate_results=GateResults(
+                    sanity=GateOutcome.PASSED,
+                    walk_forward=GateOutcome.PASSED,
+                ),
+                stats=stats,
+                fail_reason=f"holdout_backtest_raised:{exc!r}",
+            )
+            return
+
+        holdout_sharpe = ho.stats.sharpe if ho.stats else 0.0
+        ratio = self._h.gate_thresholds.holdout_sharpe_ratio_to_walk_forward
+        threshold = ratio * wf.avg_oos_sharpe
+        # Reference Sharpe must be positive for the holdout gate to mean
+        # anything — a negative wf.avg_oos_sharpe would produce a
+        # negative threshold any holdout could clear, which is the
+        # opposite of the gate's intent.
+        if wf.avg_oos_sharpe <= 0:
+            holdout_passed = False
+            ho_reason = (
+                f"reference walk-forward avg OOS sharpe "
+                f"{wf.avg_oos_sharpe:+.3f} ≤ 0; holdout gate cannot pass "
+                "without prior-stage edge"
+            )
+        else:
+            holdout_passed = holdout_sharpe >= threshold
+            ho_reason = (
+                f"holdout sharpe {holdout_sharpe:+.3f} "
+                f"{'≥' if holdout_passed else '<'} {ratio:g} × "
+                f"wf avg OOS ({wf.avg_oos_sharpe:+.3f}) = "
+                f"{threshold:+.3f}"
+            )
+
+        stats = VariantStats(
+            sanity_sharpe=stats.sanity_sharpe,
+            total_trades=stats.total_trades,
+            raw_sharpe=stats.raw_sharpe,
+            walk_forward_avg_oos_sharpe=stats.walk_forward_avg_oos_sharpe,
+            walk_forward_avg_in_sample_sharpe=stats.walk_forward_avg_in_sample_sharpe,
+            deflated_sharpe=stats.deflated_sharpe,
+            corrected_threshold=stats.corrected_threshold,
+            holdout_sharpe=holdout_sharpe,
+        )
+
+        if not holdout_passed:
+            self._persist(
+                spec=spec, sibling_ids=sibling_ids, summary=summary,
+                outcome=VariantOutcome.DISCARDED_AT_HOLDOUT,
+                gate_results=GateResults(
+                    sanity=GateOutcome.PASSED,
+                    walk_forward=GateOutcome.PASSED,
+                    holdout=GateOutcome.FAILED,
+                ),
+                stats=stats,
+                fail_reason=ho_reason,
+            )
+            return
+
         self._persist(
             spec=spec, sibling_ids=sibling_ids, summary=summary,
             outcome=VariantOutcome.PASSED,
-            gate_results=gate_results, stats=stats,
-            fail_reason="holdout_skipped_in_phase_a",
+            gate_results=GateResults(
+                sanity=GateOutcome.PASSED,
+                walk_forward=GateOutcome.PASSED,
+                holdout=GateOutcome.PASSED,
+            ),
+            stats=stats,
+            fail_reason="",
         )
+        summary.variants_passed_holdout += 1
         summary.candidate_pool_ids.append(spec.metadata.id)
 
     def _persist(
