@@ -1,7 +1,19 @@
 # Hypothesis System Spec
 
-**Status:** Draft for review
+**Status:** Draft for review (scanner Phase 1 — kill-record + market-structure observer — landed 2026-05-02)
 **Purpose:** Define the pipeline that produces, stores, triages, and promotes trading hypotheses. The hypothesis system is upstream of strategy development. It does not generate strategies — it generates the candidate ideas that the strategy pipeline then develops, or kills.
+
+## Implementation status
+
+| Section | Status | Code path |
+|---|---|---|
+| Hypothesis schema + YAML loader | ✅ implemented | `src/tradegy/auto_generation/hypothesis.py` |
+| LLM hypothesis generator (`tradegy hypothesize`) | ✅ implemented (Phase B) | `src/tradegy/auto_generation/anthropic_generators.py` |
+| Kill-record injection into LLM prompt | ✅ implemented (scanner Phase 1, 2026-05-02) — every hypothesis with `status: killed`/`retired` *or* whose variant log shows zero survivors is rendered as a "do not propose mechanistic near-duplicates" block in the hypothesis-generator system prompt. | `src/tradegy/auto_generation/kill_log.py` |
+| In-data market-structure observer | ✅ implemented (scanner Phase 1, 2026-05-02) — `tradegy market-scan` computes recent-vs-baseline observations on realized vol, overnight gap magnitude, session-position concentration of largest 1m moves, and session volume; the most-recent snapshot is rendered as a "current market-structure observations" block in the hypothesis prompt. **Note:** this is the implemented *in-data* observer (Polars over the materialised parquets), distinct from the planned *external* market-structure monitor described under "Ingestion sources" below (CME rule changes, SEC filings, index-methodology changes — those still require a vendor feed and are not implemented). | `src/tradegy/auto_generation/market_scan.py` |
+| Literature / event-calendar / anomaly / post-session / human-submission scanners | ⚠️ specced; not yet implemented | (none) |
+| Five-test scorer (automated triage) | ⚠️ schema fields exist; scorer not wired | (Phase C-pending) |
+| Embedding-based duplicate detection | ⚠️ content-hash dedup is the MVP placeholder | (Phase C-pending) |
 
 ---
 

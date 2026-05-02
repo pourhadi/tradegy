@@ -29,6 +29,8 @@ from tradegy.specs.schema import StrategySpec
 
 if TYPE_CHECKING:
     from tradegy.auto_generation.feature_stats import FeatureStats
+    from tradegy.auto_generation.kill_log import KilledHypothesisSummary
+    from tradegy.auto_generation.market_scan import MarketScanReport
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,22 @@ class GenerationContext:
     so the LLM proposes thresholds inside the live distribution.
     Empty dict → fall back to no-stats rendering (pre-2026-05-02
     behaviour)."""
+
+    kill_summaries: tuple["KilledHypothesisSummary", ...] = ()
+    """Recently-killed hypotheses (status=killed/retired or every
+    variant discarded). Rendered as a "do not propose mechanistic
+    near-duplicates" block in the hypothesis-generator prompt so the
+    LLM knows what's already been tried and failed. Empty tuple →
+    no kill block emitted (clean slate or test stub)."""
+
+    market_scan_report: "MarketScanReport | None" = None
+    """Snapshot of current-vs-baseline market-structure observations
+    (vol regime, gap behaviour, session-position concentration of
+    large moves, volume profile). Rendered as a "current market-
+    structure observations" block in the hypothesis-generator prompt
+    so the LLM is anchored in regimes that exist *now* rather than
+    canonical training-corpus patterns. None → no observation block
+    emitted."""
 
     instrument_scope: tuple[str, ...] = ("MES",)
     extra: dict[str, Any] = None  # type: ignore[assignment]

@@ -15,5 +15,6 @@ data/audits/
 data/evidence/
 data/auto_generation/
 data/feature_stats/
+data/market_scan/
 !data/.gitkeep
 !tests/fixtures/

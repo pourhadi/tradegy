@@ -81,8 +81,8 @@ quick-orient:
 | 03 | Strategy class registry | classes shipped: `compression_breakout`, `gap_fill_fade`, `momentum_breakout`, `range_break_continuation`, `range_break_fade`, `stand_down`, `volume_spike_fade`, `vwap_reversion` |
 | 04 | Spec schema | stable |
 | 05 | Backtest harness | Phases 3A/4/5/6A done — single, session-aware, walk-forward, CPCV |
-| 06 | Hypothesis system | manual hypothesis lifecycle done; **five-test triage scorer pending** |
-| 07 | Auto-generation | Phases A+B+C **shipped and verified**; Phase C-pending: embedding diversity, Deflated Sharpe Ratio, triage scorer integration, holdout in auto-test |
+| 06 | Hypothesis system | manual hypothesis lifecycle done; **five-test triage scorer pending**; scanner Phase 1 (kill-record + in-data market-structure observer) landed 2026-05-02 |
+| 07 | Auto-generation | Phases A+B+C **shipped and verified**; scanner Phase 1 landed 2026-05-02; Phase C-pending: embedding diversity, Deflated Sharpe Ratio, triage scorer integration, holdout in auto-test |
 | 08 | Development pipeline | docs only |
 | 09 | Selection layer | docs only |
 | 10 | Review / gap analysis | superseded by P0 doc sprint |
@@ -172,11 +172,18 @@ Round 4 doesn't require it but a clean Round 4 survivor would.
 Run order:
 ```bash
 uv run tradegy refresh-feature-stats          # only after re-ingest / new features
-uv run tradegy hypothesize --n 3              # LLM brainstorm; writes hypotheses/
+uv run tradegy market-scan                    # snapshot current regime → data/market_scan/
+uv run tradegy hypothesize --n 3              # LLM brainstorm; reads kill log + latest scan
 # inspect; manually flip status: proposed → promoted in YAML
 uv run tradegy auto-vary <hyp_id> --n 4       # writes strategies/
 uv run tradegy auto-test <hyp_id>             # sanity → walk-forward; JSONL records
 ```
+
+`hypothesize` automatically pulls (a) the kill log of every previously-
+failed hypothesis and (b) the most-recent `market-scan` snapshot, both
+injected as system-prompt blocks AFTER the cache breakpoint so neither
+invalidates the cached registry prefix. Run `market-scan` before
+`hypothesize` if you want the LLM anchored in the current regime.
 
 There is **no `tradegy promote` command** — promotion is a manual edit of
 the hypothesis YAML's `status` field. This is intentional: a human gate.

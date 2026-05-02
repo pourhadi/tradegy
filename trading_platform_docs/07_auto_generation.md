@@ -1,6 +1,6 @@
 # Auto-Generation Spec
 
-**Status:** Draft for review (Phase A + B implemented 2026-05-01; feature-stat injection landed 2026-05-02)
+**Status:** Draft for review (Phase A + B implemented 2026-05-01; feature-stat injection landed 2026-05-02; scanner Phase 1 — kill-record + market-structure injection — landed 2026-05-02)
 **Purpose:** Define the automated generation of strategy spec variants from promoted hypotheses. Auto-generation widens the development funnel without compromising rigor. It produces variants for early-stage evaluation; it does not produce live library strategies.
 
 ## Implementation status
@@ -17,6 +17,8 @@
 | `tradegy hypothesize` / `auto-vary` / `auto-test` / `hypothesis-list` CLI | ✅ implemented (Phase B) | `src/tradegy/cli.py` |
 | Per-feature distribution stats injected into the LLM prompt | ✅ implemented (Phase C, 2026-05-02) — for each registered feature, the cached registry block carries (rows, min, max, p10, median, p90) computed from the live parquet. Anchors LLM threshold proposals inside the actual distribution. | `src/tradegy/auto_generation/feature_stats.py` |
 | `tradegy refresh-feature-stats` CLI | ✅ implemented (Phase C) — pre-warms `data/feature_stats/<id>.json` from materialised features. `hypothesize` / `auto-vary` accept `--refresh-stats` to recompute on demand. | `src/tradegy/cli.py` |
+| Kill-record injection (scanner Phase 1) | ✅ implemented (2026-05-02) — every hypothesis with `status: killed`/`retired` *or* whose variant log shows zero survivors is rendered as a "do not propose mechanistic near-duplicates" block in the hypothesis-generator system prompt. Block is placed AFTER the cache breakpoint so churn doesn't invalidate the cached registry prefix. | `src/tradegy/auto_generation/kill_log.py` |
+| Market-structure monitor (scanner Phase 1) | ✅ implemented (2026-05-02) — `tradegy market-scan` computes recent-vs-baseline observations on realized vol, overnight gap magnitude, session-position concentration of largest 1m moves, and session volume; persists to `data/market_scan/market_scan_<ts>.json`; the most-recent snapshot is rendered as a "current market-structure observations" block in the hypothesis prompt to anchor the LLM in the regime that exists *now* rather than canonical training-corpus patterns. | `src/tradegy/auto_generation/market_scan.py` |
 | Embedding-based diversity check | ⚠️ Phase C-pending — content-hash dedup is the MVP placeholder | (Phase C) |
 | Deflated Sharpe Ratio (López de Prado) | ⚠️ Phase C-pending — Bonferroni is the MVP correction | (Phase C) |
 | Hypothesis triage / five-test scorer | ⚠️ Phase C-pending — schema fields exist, scorer not wired | (Phase C) |

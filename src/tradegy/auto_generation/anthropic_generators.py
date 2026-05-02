@@ -46,6 +46,8 @@ from tradegy.auto_generation.generators import (
     HypothesisGenerator,
     VariantGenerator,
 )
+from tradegy.auto_generation.kill_log import format_kill_summaries
+from tradegy.auto_generation.market_scan import format_market_scan_report
 from tradegy.auto_generation.hypothesis import (
     FiveTestScores,
     Hypothesis,
@@ -500,11 +502,23 @@ class AnthropicHypothesisGenerator(HypothesisGenerator):
     # ── Prompt assembly ─────────────────────────────────────────
 
     def _build_system(self, ctx: GenerationContext) -> list[dict]:
-        """Two-block system prompt: stable frame first, then the
-        cacheable registry context with `cache_control` on the last
-        block per `shared/prompt-caching.md`.
+        """System prompt assembly. Layout:
+
+          1. stable frame (hard constraints)
+          2. registry context (admitted classes/features/evaluators) —
+             carries `cache_control` so subsequent calls within the
+             5-minute TTL read at ~10% of input cost
+          3. kill log (recent failed hypotheses) — dynamic between
+             calls, placed AFTER the cache breakpoint so its churn
+             doesn't invalidate the cached prefix
+          4. market-scan observations — same dynamic-after-cache
+             treatment
+
+        Blocks 3 and 4 are emitted only when their context is
+        populated — this preserves backward compatibility with tests
+        that build a bare GenerationContext.
         """
-        return [
+        blocks: list[dict] = [
             {"type": "text", "text": _HYPOTHESIS_SYSTEM_FRAME},
             {
                 "type": "text",
@@ -512,6 +526,15 @@ class AnthropicHypothesisGenerator(HypothesisGenerator):
                 "cache_control": {"type": "ephemeral"},
             },
         ]
+        if ctx.kill_summaries:
+            kill_text = format_kill_summaries(ctx.kill_summaries)
+            if kill_text:
+                blocks.append({"type": "text", "text": kill_text})
+        if ctx.market_scan_report is not None:
+            scan_text = format_market_scan_report(ctx.market_scan_report)
+            if scan_text:
+                blocks.append({"type": "text", "text": scan_text})
+        return blocks
 
     def _build_user(self, *, seed: str, n: int) -> str:
         seed_section = (

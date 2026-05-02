@@ -27,6 +27,13 @@ from tradegy.auto_generation.feature_stats import (
 )
 from tradegy.auto_generation.generators import GenerationContext
 from tradegy.auto_generation.hypothesis import hypotheses_dir
+from tradegy.auto_generation.kill_log import load_kill_summaries
+from tradegy.auto_generation.market_scan import (
+    compute_market_scan,
+    market_scan_dir,
+    read_latest_market_scan,
+    write_market_scan,
+)
 from tradegy.auto_generation.records import read_records
 from tradegy.evidence import (
     build_packet,
@@ -874,6 +881,8 @@ def _build_generation_context(
     feature_stats = compute_all_feature_stats(
         feature_ids, refresh=refresh_feature_stats,
     )
+    kill_summaries = tuple(load_kill_summaries())
+    market_scan_report = read_latest_market_scan()
     return GenerationContext(
         available_class_ids=tuple(sorted(list_strategy_classes())),
         available_feature_ids=feature_ids,
@@ -881,6 +890,8 @@ def _build_generation_context(
         available_sizing_methods=tuple(sorted(list_sizing_classes())),
         available_stop_methods=tuple(sorted(list_stop_classes())),
         feature_stats=feature_stats,
+        kill_summaries=kill_summaries,
+        market_scan_report=market_scan_report,
         instrument_scope=("MES",),
     )
 
@@ -1168,6 +1179,67 @@ def refresh_feature_stats_cmd() -> None:
         else:
             table.add_row(fid, "0", "—", "—", "—", "—", "—", s.note)
     console.print(table)
+
+
+@app.command("market-scan")
+def market_scan_cmd(
+    bar_feature: Annotated[str, typer.Option(
+        "--bar-feature",
+        help="OHLCV bar feature id used as the data source.",
+    )] = "mes_1m_bars",
+    session_feature: Annotated[str, typer.Option(
+        "--session-feature",
+        help="RTH session-position feature id (0..1 within RTH, "
+             "out-of-session bars filtered out).",
+    )] = "mes_xnys_session_position",
+    recent_sessions: Annotated[int, typer.Option(
+        "--recent",
+        help="number of most-recent RTH sessions in the recent window",
+    )] = 60,
+    baseline_sessions: Annotated[int, typer.Option(
+        "--baseline",
+        help="number of RTH sessions in the trailing baseline window",
+    )] = 5 * 252,
+    instrument: Annotated[str, typer.Option(
+        "--instrument",
+    )] = "MES",
+) -> None:
+    """Compute current-vs-baseline market-structure observations.
+
+    Writes a timestamped JSON snapshot under `data/market_scan/` that
+    the auto-generator picks up via `read_latest_market_scan()`. Run
+    this before `tradegy hypothesize` so the LLM is anchored in the
+    current regime instead of generating canonical training-corpus
+    patterns.
+    """
+    console.print(
+        f"[bold]market-scan[/]  instrument={instrument}  "
+        f"recent={recent_sessions}  baseline={baseline_sessions}"
+    )
+    report = compute_market_scan(
+        bar_feature=bar_feature,
+        session_feature=session_feature,
+        recent_sessions=recent_sessions,
+        baseline_sessions=baseline_sessions,
+        instrument=instrument,
+    )
+    out_path = write_market_scan(report)
+
+    table = Table(title=f"market-structure scan (recent {recent_sessions} RTH sessions)")
+    table.add_column("metric")
+    table.add_column("recent", justify="right")
+    table.add_column("baseline", justify="right")
+    table.add_column("percentile", justify="right")
+    table.add_column("interpretation")
+    for o in report.observations:
+        recent_str = "—" if o.current_value != o.current_value else f"{o.current_value:.4g}"
+        baseline_str = "—" if o.baseline_value != o.baseline_value else f"{o.baseline_value:.4g}"
+        pct_str = "—" if o.percentile is None else f"p{o.percentile * 100:.0f}"
+        table.add_row(
+            o.metric, recent_str, baseline_str, pct_str, o.interpretation,
+        )
+    console.print(table)
+    console.print(f"\n[dim]wrote {out_path.relative_to(config.repo_root())}[/]")
 
 
 if __name__ == "__main__":

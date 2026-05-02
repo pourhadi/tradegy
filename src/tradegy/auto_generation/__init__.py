@@ -48,6 +48,19 @@ from tradegy.auto_generation.feature_stats import (
     read_stats,
     write_stats,
 )
+from tradegy.auto_generation.kill_log import (
+    KilledHypothesisSummary,
+    format_kill_summaries,
+    load_kill_summaries,
+)
+from tradegy.auto_generation.market_scan import (
+    MarketScanReport,
+    Observation,
+    compute_market_scan,
+    format_market_scan_report,
+    read_latest_market_scan,
+    write_market_scan,
+)
 from tradegy.auto_generation.generators import (
     HypothesisGenerator,
     StubHypothesisGenerator,
@@ -85,6 +98,9 @@ __all__ = [
     "HypothesisDraftBatch",
     "HypothesisGenerator",
     "HypothesisStatus",
+    "KilledHypothesisSummary",
+    "MarketScanReport",
+    "Observation",
     "StrategySpecBatch",
     "StubHypothesisGenerator",
     "StubVariantGenerator",
@@ -94,12 +110,18 @@ __all__ = [
     "append_record",
     "compute_all_feature_stats",
     "compute_feature_stats",
+    "compute_market_scan",
     "cost_for_usage",
     "format_cost_line",
     "format_feature_stats",
+    "format_kill_summaries",
+    "format_market_scan_report",
     "list_hypotheses",
     "load_hypothesis",
+    "load_kill_summaries",
+    "read_latest_market_scan",
     "read_records",
     "read_stats",
+    "write_market_scan",
     "write_stats",
 ]
