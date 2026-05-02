@@ -1,6 +1,6 @@
 id: hyp_lunchtime_range_break_fades_because_liquidity_is_20260502_083934_20666
 title: Lunchtime range-break fades because liquidity is thin and breakouts lack follow-through
-status: proposed
+status: killed
 source: llm_brainstorm
 created_date: '2026-05-02'
 last_modified_date: '2026-05-02'
@@ -61,4 +61,19 @@ five_test_scores:
   data_feasibility: 5
 parent_hypothesis_id: null
 notes: ''
-kill_reason: null
+kill_reason: |-
+  6/6 variants killed at sanity (2026-05-02 auto-test).
+  Trade counts ranged 482-991 (well above 30-trade floor — gates were
+  firing as designed); raw Sharpes -0.33 to -0.77 across the batch.
+  No runtime errors — the new ATR-gate prompt rule held: every variant
+  paired its atr_multiple stop with a feature_threshold gate on
+  mes_atr_14m, and no COVID-day blowups occurred.
+  The "lunch lull → fade range breaks" premise is wrong for MES.
+  Lunch-hour breakouts continue through the close more often than
+  they revert. Combined with kill #13 (open-drive exhaustion fade),
+  this is a meta-observation worth carrying forward: MES has
+  directional persistence that defeats fade-class mechanisms in both
+  early-RTH and midday windows. Future hypotheses should bias toward
+  continuation/breakout in MES unless the cross-asset or macro-event
+  context carries an explicit reversion driver. No post-hoc tuning
+  per anti-overfitting rules.

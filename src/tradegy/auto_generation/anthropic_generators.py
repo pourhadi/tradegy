@@ -398,6 +398,16 @@ def _registry_context_block(ctx: GenerationContext) -> str:
         '  * atr_multiple:  {"atr_feature_id": "mes_atr_14m", '
         '"multiplier": NUMBER, "max_distance_ticks": INT, '
         '"tick_size": 0.25}\n'
+        "\n  ATR-stop hard rule: when using atr_multiple, the spec MUST\n"
+        "  also include a feature_threshold gating_condition on the SAME\n"
+        "  ATR feature with operator=lt and threshold strictly less than\n"
+        "  (max_distance_ticks * tick_size / multiplier). Otherwise an\n"
+        "  extreme-vol bar (e.g. COVID 2020-03-16) will produce an\n"
+        "  ATR-derived stop offset > the cap, the harness will RAISE\n"
+        "  mid-backtest, and the variant scores as a runtime error\n"
+        "  instead of a real test. Pick max_distance_ticks generously\n"
+        "  AND gate the ATR feature explicitly — the cap is the\n"
+        "  fail-safe, the gate is the design.\n"
         f"\nInstrument scope: {', '.join(ctx.instrument_scope)}\n"
     )
 

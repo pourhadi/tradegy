@@ -1,0 +1,83 @@
+metadata:
+  id: hyp_lunchtime_range_break_fades_because_liquidity_is_20260502_083934_20666__variant_e
+  version: 0.1.0
+  schema_version: '1.0'
+  name: Low-vol-regime upside fade
+  status: draft
+  created_date: '2026-05-02'
+  last_modified_date: '2026-05-02'
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: null
+  description: Adds explicit low-ATR regime filter; only fade in genuinely quiet tape,
+    fixed-tick stop, early session lunch lo=0.4.
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+entry:
+  strategy_class: range_break_fade
+  parameters:
+    reference_high_feature: mes_or30_high
+    reference_low_feature: mes_or30_low
+    break_side: high
+    min_break_ticks: 1
+    tick_size: 0.25
+  direction: short
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+  - condition: time_of_session
+    parameters:
+      session_position_feature_id: mes_xnys_session_position
+      lo: 0.4
+      hi: 0.6
+  - condition: feature_threshold
+    parameters:
+      feature_id: mes_volume_zscore_20m
+      operator: lt
+      threshold: 0.0
+  - condition: feature_range
+    parameters:
+      feature_id: mes_atr_14m
+      lo: 0.5
+      hi: 2.5
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+stops:
+  initial_stop:
+    method: fixed_ticks
+    stop_ticks: 8
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 40
+  time_stop:
+    enabled: true
+    max_holding_bars: 15
+    action_at_time_stop: exit_market
+exits:
+  profit_targets: []
+  invalidation_conditions:
+  - condition: feature_threshold
+    parameters:
+      feature_id: mes_volume_zscore_20m
+      operator: gt
+      threshold: 1.5
+    action: exit_market
+  end_of_session: null
+parameter_envelope: null
+retirement_criteria: null
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only
