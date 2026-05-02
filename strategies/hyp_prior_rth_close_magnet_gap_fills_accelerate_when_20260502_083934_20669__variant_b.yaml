@@ -1,0 +1,66 @@
+metadata:
+  id: hyp_prior_rth_close_magnet_gap_fills_accelerate_when_20260502_083934_20669__variant_b
+  version: 0.1.0
+  schema_version: '1.0'
+  name: Last-hour gap fade — fixed-ticks stop, tight window
+  status: draft
+  created_date: '2026-05-02'
+  last_modified_date: '2026-05-02'
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: null
+  description: Tight last-hour-only window (xnys_session_position 0.80-0.95) with
+    deterministic fixed-ticks risk.
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+entry:
+  strategy_class: gap_fill_fade
+  parameters:
+    prior_close_feature_id: mes_prior_rth_close
+    atr_feature_id: mes_atr_14m
+    min_gap_distance_atr: 0.5
+    target_feature_id: mes_prior_rth_close
+  direction: both
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+  - condition: time_of_session
+    parameters:
+      session_position_feature_id: mes_xnys_session_position
+      lo: 0.8
+      hi: 0.95
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+stops:
+  initial_stop:
+    method: fixed_ticks
+    stop_ticks: 16
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 30
+  time_stop:
+    enabled: true
+    max_holding_bars: 45
+    action_at_time_stop: exit_market
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+parameter_envelope: null
+retirement_criteria: null
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only

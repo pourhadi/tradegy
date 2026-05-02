@@ -1,7 +1,7 @@
 id: hyp_prior_rth_close_magnet_gap_fills_accelerate_when_20260502_083934_20669
 title: 'Prior-RTH-close magnet: gap fills accelerate when overnight drift unwinds
   in last hour'
-status: proposed
+status: killed
 source: llm_brainstorm
 created_date: '2026-05-02'
 last_modified_date: '2026-05-02'
@@ -58,4 +58,22 @@ five_test_scores:
   data_feasibility: 5
 parent_hypothesis_id: null
 notes: ''
-kill_reason: null
+kill_reason: |-
+  6/6 variants killed at sanity (2026-05-02 auto-test --holdout-months 12).
+  Trade counts 1048-1402 (gates fired aggressively, well above 30-floor);
+  raw Sharpes -0.26 to -0.67 across the batch. No runtime errors —
+  the ATR-gate prompt rule held.
+  The "late-session gap-fill into MOC imbalance" premise is wrong for
+  MES. By session_position > 0.75 either the gap has already filled
+  (no edge to capture) or the move has gone the other way (chasing
+  the wrong direction). MOC imbalance is real but doesn't pull MES
+  futures back to prior close in the way gap_fill_fade implements it.
+  Third consecutive fade kill: open-drive exhaustion (trade-count 482-
+  991, Sharpe -0.27 to -0.77), lunchtime range-break fade (trade-count
+  482-991, Sharpe -0.33 to -0.77), and now late-session gap-fill
+  magnet (trade-count 1048-1402, Sharpe -0.26 to -0.67). The meta-
+  observation is robust across three intraday regimes: MES exhibits
+  directional persistence and fade-class mechanisms are systematically
+  unprofitable in 1m bars. Future hypothesize batches should be biased
+  away from intraday-fade mechanisms unless cross-asset or macro-event
+  context provides an explicit reversion driver. No post-hoc tuning.
