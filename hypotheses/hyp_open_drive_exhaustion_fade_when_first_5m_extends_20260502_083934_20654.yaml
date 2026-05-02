@@ -1,0 +1,65 @@
+id: hyp_open_drive_exhaustion_fade_when_first_5m_extends_20260502_083934_20654
+title: Open-drive exhaustion fade when first 5m extends >1.5 ATR with volume climax
+status: proposed
+source: llm_brainstorm
+created_date: '2026-05-02'
+last_modified_date: '2026-05-02'
+author: claude-opus-4-7
+observation: Recent regime shows the biggest 1m move clustering at session_pos~0.00
+  (open-drive). When the very first 5m bar extends more than ~1.5x ATR(14) and prints
+  a volume z-score >1.5, MES tends to mean-revert toward VWAP within the next 30 minutes.
+mechanism: At the RTH open, MOO imbalance and overnight-position unwinds drive a fast
+  directional impulse. Liquidity providers step aside during the first minute, then
+  re-engage once size is absorbed. When the impulse is unusually large relative to
+  ATR AND volume climaxes (z>1.5), the marginal buyer/seller is exhausted; market-makers
+  who absorbed inventory now lean against the move to flatten back to VWAP, producing
+  a fade.
+falsification: Across >=50 qualifying open-drive events, fading the impulse toward
+  VWAP within 30 minutes yields Sharpe <= 0.2 or hit-rate <= 50% at a 1R stop. Also
+  refuted if conditional 30-minute reversion magnitude is statistically indistinguishable
+  from unconditional opens (t<1).
+counterparty: Market-makers absorbing MOO imbalance flatten inventory; momentum chasers
+  who entered late provide exit liquidity.
+instrument_scope:
+- MES
+feature_dependencies:
+- mes_vwap
+- mes_atr_14m
+- mes_volume_zscore_20m
+- mes_xnys_session_position
+- mes_true_range_1m
+parameter_envelope:
+- name: volume_zscore_min
+  min: 1.0
+  max: 2.5
+  step: 0.25
+- name: atr_extension_mult
+  min: 1.0
+  max: 2.5
+  step: 0.25
+- name: session_pos_hi
+  min: 0.02
+  max: 0.08
+  step: 0.01
+- name: stop_atr_mult
+  min: 0.75
+  max: 2.0
+  step: 0.25
+variant_budget: 6
+gate_thresholds:
+  sanity_min_trades: 30
+  sanity_min_in_sample_sharpe: 0.0
+  walk_forward_oos_in_sample_ratio: 0.5
+  walk_forward_min_in_sample_sharpe: 0.0
+  cpcv_median_sharpe_threshold: 0.8
+  cpcv_max_pct_paths_negative: 0.2
+  holdout_sharpe_ratio_to_walk_forward: 0.5
+five_test_scores:
+  mechanism: 4
+  falsifiability: 4
+  novelty: 3
+  economic_plausibility: 4
+  data_feasibility: 5
+parent_hypothesis_id: null
+notes: ''
+kill_reason: null

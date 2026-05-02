@@ -1,0 +1,61 @@
+id: hyp_prior_rth_close_magnet_gap_fills_accelerate_when_20260502_083934_20669
+title: 'Prior-RTH-close magnet: gap fills accelerate when overnight drift unwinds
+  in last hour'
+status: proposed
+source: llm_brainstorm
+created_date: '2026-05-02'
+last_modified_date: '2026-05-02'
+author: claude-opus-4-7
+observation: When MES opens with a moderate gap (recent gap magnitudes are at p71
+  of baseline) and price is still on the gap side of prior_rth_close late in the session
+  (session_position > 0.75), the path back toward prior close is faster and more reliable
+  than earlier in the day.
+mechanism: Index funds and basis traders rebalance against prior settlement; closing-auction-related
+  flow on cash equities references prior close as an anchor. As the close approaches,
+  residual short-gamma dealer hedging and MOC imbalance estimation pull the futures
+  back toward the equity reference price. A late-day position still on the gap side
+  faces concentrated reversion flow into the last hour.
+falsification: Gap_fill_fade variants gated to xnys_session_position > 0.75 with price
+  still > X ATR from prior_rth_close yield Sharpe <= 0.2 over >=50 trades, OR conditional
+  60m reversion to prior_rth_close is not larger (t<1) than reversion conditional
+  on the same distance earlier in the session (0.25-0.50).
+counterparty: MOC imbalance estimators and index rebalancers anchored to cash settlement;
+  overnight-momentum holders forced to flatten.
+instrument_scope:
+- MES
+feature_dependencies:
+- mes_prior_rth_close
+- mes_xnys_session_position
+- mes_atr_14m
+- mes_vwap
+parameter_envelope:
+- name: session_pos_min
+  min: 0.7
+  max: 0.85
+  step: 0.05
+- name: gap_distance_atr
+  min: 0.5
+  max: 2.5
+  step: 0.5
+- name: stop_atr_mult
+  min: 1.0
+  max: 2.5
+  step: 0.25
+variant_budget: 6
+gate_thresholds:
+  sanity_min_trades: 30
+  sanity_min_in_sample_sharpe: 0.0
+  walk_forward_oos_in_sample_ratio: 0.5
+  walk_forward_min_in_sample_sharpe: 0.0
+  cpcv_median_sharpe_threshold: 0.8
+  cpcv_max_pct_paths_negative: 0.2
+  holdout_sharpe_ratio_to_walk_forward: 0.5
+five_test_scores:
+  mechanism: 4
+  falsifiability: 4
+  novelty: 3
+  economic_plausibility: 4
+  data_feasibility: 5
+parent_hypothesis_id: null
+notes: ''
+kill_reason: null

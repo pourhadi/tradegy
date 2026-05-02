@@ -1,0 +1,64 @@
+id: hyp_lunchtime_range_break_fades_because_liquidity_is_20260502_083934_20666
+title: Lunchtime range-break fades because liquidity is thin and breakouts lack follow-through
+status: proposed
+source: llm_brainstorm
+created_date: '2026-05-02'
+last_modified_date: '2026-05-02'
+author: claude-opus-4-7
+observation: Between session_position ~0.45 and ~0.65 (US lunch hour for XNYS), volume
+  z-score is typically negative and breakouts of the prior 30-minute range disproportionately
+  fail to extend, retracing back into the range within 15 minutes.
+mechanism: During the lunch lull, real-money flow pauses; remaining participants are
+  HFTs and small directional players. Stop-runs can pierce local highs/lows but there
+  is no follow-on institutional flow to sustain the break. Liquidity providers fade
+  the extension knowing imbalance is transient. After ~15 minutes price typically
+  returns inside the prior range.
+falsification: Variants of range_break_fade gated to xnys_session_position in [0.45,0.65]
+  with mes_volume_zscore_20m < 0 produce Sharpe <= 0.2 over >=50 trades, OR median
+  15m reversion conditional on the break is <= median unconditional reversion in same
+  window.
+counterparty: Stop-runners and momentum algos providing liquidity to mean-reverting
+  market-makers.
+instrument_scope:
+- MES
+feature_dependencies:
+- mes_xnys_session_position
+- mes_volume_zscore_20m
+- mes_or30_high
+- mes_or30_low
+- mes_atr_14m
+parameter_envelope:
+- name: session_pos_lo
+  min: 0.4
+  max: 0.5
+  step: 0.05
+- name: session_pos_hi
+  min: 0.6
+  max: 0.7
+  step: 0.05
+- name: volume_zscore_max
+  min: -0.5
+  max: 0.5
+  step: 0.25
+- name: stop_atr_mult
+  min: 0.75
+  max: 2.0
+  step: 0.25
+variant_budget: 6
+gate_thresholds:
+  sanity_min_trades: 30
+  sanity_min_in_sample_sharpe: 0.0
+  walk_forward_oos_in_sample_ratio: 0.5
+  walk_forward_min_in_sample_sharpe: 0.0
+  cpcv_median_sharpe_threshold: 0.8
+  cpcv_max_pct_paths_negative: 0.2
+  holdout_sharpe_ratio_to_walk_forward: 0.5
+five_test_scores:
+  mechanism: 4
+  falsifiability: 5
+  novelty: 3
+  economic_plausibility: 4
+  data_feasibility: 5
+parent_hypothesis_id: null
+notes: ''
+kill_reason: null
