@@ -16,7 +16,7 @@ in `src/tradegy/specs/`:
 |---|---|
 | `metadata` | implemented |
 | `market_scope` | implemented |
-| `entry` | implemented (registry-resolved class + parameter validation) |
+| `entry` | implemented (registry-resolved class + parameter validation; `gating_conditions[]` mechanically enforced as of 2026-04-30) |
 | `sizing` | implemented |
 | `stops` (initial_stop, adjustment_rules, hard_max, time_stop) | implemented |
 | `exits` (profit_targets, invalidation_conditions, end_of_session) | implemented |
@@ -178,6 +178,17 @@ entry:
   direction: "both"                         # long | short | both
   entry_order_type: "limit"                 # limit | market | stop
   limit_offset_ticks: 1                     # if limit, how aggressive
+  gating_conditions:                        # OPTIONAL — all must hold to allow on_bar()
+    - condition: "feature_range"
+      parameters:
+        feature_id: "mes_realized_vol_30m"
+        lo: 0.08
+        hi: 0.22
+    - condition: "time_of_session"
+      parameters:
+        session_position_feature_id: "mes_session_position"
+        lo: 0.10
+        hi: 0.85
 ```
 
 **Registered class invariant:** `strategy_class` must resolve to an implementation in
@@ -186,6 +197,17 @@ way to define a novel strategy class in YAML — that requires a code change, a 
 test suite for the class, and a class-registry PR review.
 
 This is deliberate. The friction is the feature.
+
+**Gating conditions** (added 2026-04-30). `entry.gating_conditions[]` is a list of
+registered condition evaluators that the harness evaluates BEFORE calling the
+strategy class's `on_bar`. All must return True for the strategy to see the bar at
+all — a False from any one short-circuits and skips this bar entirely (no entry
+attempt, no counter increment). Empty list means no gate (legacy behavior). This
+is the mechanical pre-filter that `context_conditions` (above) is not — gating
+conditions are harness-enforced; context conditions are LLM-read prose.
+
+Distinct from `exits.invalidation_conditions[]`, which fire AFTER entry to flatten
+an open position. Same evaluator registry; different lifecycle moment.
 
 ---
 
@@ -584,8 +606,9 @@ A few things that might seem obvious to include but are intentionally out:
 6. **Multi-timeframe specs.** The current schema assumes a single entry timeframe.
    Should we support strategies that combine, e.g., 5-min entry triggers with
    daily-timeframe regime filters? Daily filters are currently expressed via
-   `context_conditions`, which is LLM-readable but not mechanically enforced. May
-   need a `gating_conditions` mechanical section.
+   `context_conditions`, which is LLM-readable but not mechanically enforced.
+   `entry.gating_conditions[]` (added 2026-04-30) covers the same-timeframe gating
+   case mechanically; cross-timeframe gating is still open.
 
 ---
 

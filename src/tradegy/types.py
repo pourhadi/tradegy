@@ -53,7 +53,7 @@ class AuditEntry(_Strict):
     notes: str = ""
 
 
-IngestFormat = Literal["generic_csv", "sierra_chart_csv"]
+IngestFormat = Literal["generic_csv", "sierra_chart_csv", "databento_ohlcv_csv"]
 
 
 class IngestSpec(_Strict):

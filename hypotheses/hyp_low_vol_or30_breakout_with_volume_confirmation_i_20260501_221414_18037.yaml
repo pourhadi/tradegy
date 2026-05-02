@@ -1,0 +1,76 @@
+id: hyp_low_vol_or30_breakout_with_volume_confirmation_i_20260501_221414_18037
+title: Low-vol OR30 breakout with volume confirmation in first hour holds because
+  dealer gamma is short
+status: promoted
+source: llm_brainstorm
+created_date: '2026-05-01'
+last_modified_date: '2026-05-01'
+author: claude-opus-4-7
+observation: On mornings when realized 30m vol is in the bottom tercile of recent
+  sessions AND price breaks the OR30 high/low within the first 60 minutes of NYSE
+  on a volume z-score >1.5, the breakout tends to extend rather than fade through
+  midday.
+mechanism: Quiet overnight sessions compress dealer hedging needs; an OR30 break accompanied
+  by a genuine volume surge (z>1.5) signals real directional flow rather than noise.
+  Because vol was suppressed, options dealers are net short gamma around the prior
+  close, so they must chase the move (buy highs / sell lows) to rehedge, which mechanically
+  extends the breakout into the late morning before midday VWAP magnetism reasserts.
+  The triple gate (low vol regime + early session + volume confirmation) selects for
+  the regime where dealer hedging dominates, not random noise breaks.
+falsification: Across >=80 qualifying signals, if the average MAE-adjusted return
+  from breakout entry to xnys_session_position=0.5 (midday) is <= 0.10 * mes_atr_14m,
+  or hit-rate of the breakout direction reaching 1*ATR before -0.5*ATR is <= 50%,
+  the hypothesis is refuted. Also refuted if removing the volume-z gate does not degrade
+  performance (i.e., the volume condition adds no information).
+counterparty: Short-gamma options dealers rehedging into the move, and overnight mean-reversion
+  traders being stopped out.
+instrument_scope:
+- MES
+feature_dependencies:
+- mes_realized_vol_30m
+- mes_xnys_session_position
+- mes_or30_high
+- mes_or30_low
+- mes_volume_zscore_20m
+- mes_atr_14m
+- mes_vwap
+parameter_envelope:
+- name: vol_tercile_threshold
+  min: 0.2
+  max: 0.4
+  step: 0.05
+- name: session_pos_max
+  min: 0.1
+  max: 0.3
+  step: 0.05
+- name: volume_z_min
+  min: 1.0
+  max: 2.5
+  step: 0.25
+- name: profit_target_atr
+  min: 0.75
+  max: 2.0
+  step: 0.25
+- name: stop_atr
+  min: 0.4
+  max: 1.0
+  step: 0.1
+variant_budget: 8
+gate_thresholds:
+  sanity_min_trades: 30
+  sanity_min_in_sample_sharpe: 0.0
+  walk_forward_oos_in_sample_ratio: 0.5
+  walk_forward_min_in_sample_sharpe: 0.0
+  cpcv_median_sharpe_threshold: 0.8
+  cpcv_max_pct_paths_negative: 0.2
+  holdout_sharpe_ratio_to_walk_forward: 0.5
+five_test_scores:
+  mechanism: 4
+  falsifiability: 5
+  novelty: 4
+  economic_plausibility: 4
+  data_feasibility: 5
+parent_hypothesis_id: null
+notes: Maps to momentum_breakout or range_break_continuation class. Selectivity comes
+  from triple gate; addresses round 1-3 lesson.
+kill_reason: null

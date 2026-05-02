@@ -175,7 +175,15 @@ Lighter packet:
 
 - Root-cause analysis of the disable trigger.
 - Fresh validation packet (walk-forward at minimum, CPCV when shipped,
-  per `00_master_architecture.md:179`).
+  per `00_master_architecture.md:179`). The harness writes signed
+  evidence packets to `data/evidence/` automatically; `tradegy
+  validate-evidence <packet.json>` verifies the signature.
+- For promotion to `live` tier the packet MUST be HMAC-signed
+  (`TRADEGY_EVIDENCE_KEY` set when the harness ran). SHA256-only
+  packets are rejected for governance-grade decisions because the
+  digest is recomputable and not unforgeable; the packet itself
+  carries a `warning` field that flags this. See
+  `05_backtest_harness.md` § Evidence signing for the implementation.
 - Operator sign-off that the underlying condition is resolved.
 - Owner sign-off.
 

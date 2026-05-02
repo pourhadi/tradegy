@@ -246,12 +246,13 @@ Initial entries:
 
 ### Condition evaluator registry
 
-Registered, composable conditions referenced in `context_conditions.structured` and `exits.invalidation_conditions`. Conditions evaluate against the feature stream and return boolean.
+Registered, composable conditions referenced in `entry.gating_conditions` (harness-enforced pre-entry gates), `context_conditions.structured` (LLM-readable prose), and `exits.invalidation_conditions` (post-entry flatten triggers). Conditions evaluate against the feature stream and return boolean.
 
-Initial entries:
+Initial entries (✅ implemented, otherwise planned):
 
-- **`feature_threshold`** — `feature X > threshold Y`
-- **`feature_range`** — `feature X in [min, max]`
+- ✅ **`feature_threshold`** — `feature X > threshold Y` (operators: gt | gte | lt | lte | eq)
+- ✅ **`feature_range`** — `feature X in [lo, hi]` (inclusive bounds; either lo, hi, or both)
+- ✅ **`time_of_session`** — `session_position in [lo, hi]` (canonical time-of-day gate, sugar over `feature_range` keyed on `mes_session_position`)
 - **`feature_delta`** — change in feature X over window Y > threshold Z
 - **`calendar_event`** — within N minutes of declared event type
 - **`regime_probability`** — regime probability > threshold
@@ -262,7 +263,7 @@ Initial entries:
 - **`opposite_direction_break`** — price has broken specified level in opposite direction with volume
 - **`sentiment_shock`** — sentiment feature delta exceeds threshold (only usable once a sentiment source has been admitted against the universal bar in the feature pipeline)
 
-Conditions can be composed with `and`, `or`, `not` in the spec.
+Conditions can be composed with `and`, `or`, `not` in the spec. The harness applies `entry.gating_conditions[]` as an implicit AND — all must be True for the strategy class's `on_bar` to be invoked.
 
 ---
 
@@ -286,14 +287,18 @@ For the starting library of 4–6 strategies, the minimum set of classes to impl
 
 **Strategy classes (Phase 1):**
 
-- `range_break_fade` — fades failed breakouts of a defined range
-- `range_break_continuation` — enters on confirmed range break with volume
-- `vwap_reversion` — fades deviations from VWAP in range-bound sessions
-- `stand_down` — trivial "do nothing" class; first-class selectable option for the LLM
+- ✅ `range_break_fade` — fades failed breakouts of a defined range (implemented 2026-04-30; round-2 H1, killed at sanity)
+- ✅ `range_break_continuation` — enters on confirmed range break with volume (implemented 2026-04-30; round-2 H3, killed at sanity)
+- ✅ `vwap_reversion` — fades deviations from VWAP in range-bound sessions
+- ✅ `momentum_breakout` — long-only continuation entry on positive momentum (added during Phase 2B, not in original catalog)
+- ✅ `gap_fill_fade` — fades RTH-open gaps toward prior-session close (implemented 2026-05-01; round-3 N1, killed at sanity — best of the round-3 batch at -0.17 Sharpe)
+- ✅ `compression_breakout` — enters on the next bar's break of a volatility-compressed bar (implemented 2026-05-01; round-3 N2, killed at sanity)
+- ✅ `volume_spike_fade` — fades extreme single-bar volume z-scores when follow-through fails (implemented 2026-05-01; round-3 N3, killed at sanity)
+- ✅ `stand_down` — trivial "do nothing" class; first-class selectable option for the LLM
 
 **Sizing classes:** `fixed_contracts`, `fixed_fractional_risk`
 
-**Stop classes:** `fixed_ticks`, `opposite_range_extreme`, `atr_multiple`
+**Stop classes:** ✅ `fixed_ticks`, ✅ `atr_multiple` (implemented 2026-05-01 with ATR-feature read from FeatureSnapshot at entry bar + max_distance_ticks runtime cap), `opposite_range_extreme`
 
 **Stop adjustments:** `move_to_breakeven`, `trail_by_atr`
 

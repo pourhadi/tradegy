@@ -1,0 +1,90 @@
+# Data source registry entry for MES (Micro E-mini S&P 500) 1-minute OHLCV
+# bars from databento, ingested with no-lookahead front-month rolling.
+#
+# Added 2026-04-30 to replace mes_5s_ohlcv as the bar source for derived
+# features. mes_5s_ohlcv covers only a partial intraday window (~14:00–
+# 20:00 ET) and is unusable for strategy classes anchored on the RTH
+# 9:30 ET open. This source carries continuous 24h coverage at 1m cadence.
+#
+# Trade-offs vs. mes_5s_ohlcv:
+#   + 24h coverage (every UTC hour populated each session day)
+#   + 7-year span 2019-05-06 → 2026-04-29
+#   - 1m cadence (vs. 5s) — strategies needing sub-minute precision must
+#     wait for a finer-grained databento source or use mes_5s_ohlcv
+#   - No back-adjustment: price levels step up/down at quarterly roll
+#     boundaries by the calendar-spread between the old and new front
+#     month. Intraday strategies are insulated; cross-session absolute-
+#     price strategies are not.
+#   - No signed-flow proxies (no num_trades / bid_volume / ask_volume) —
+#     databento OHLCV-1m does not carry those.
+
+id: mes_1m_ohlcv
+version: v1
+description: >
+  Micro E-mini S&P 500 (MES) front-month 1-minute OHLCV bars from
+  databento. Front-month chosen by previous-day total volume per
+  contract (no-lookahead). Price levels are NOT back-adjusted — at
+  quarterly roll boundaries the absolute close-to-close can step by
+  the calendar spread.
+type: market_data
+provider: databento
+revisable: false
+revision_policy: never_revised
+admission_rationale: >
+  Databento OHLCV-1m bars are append-only and venue-canonical. The
+  ingest path's roll method is documented and deterministic: at the
+  start of date D the front month is the contract with the highest
+  total volume on date (D-1). For the very first day in the file the
+  same-day pick is used because no prior is available. Lookahead-free
+  by construction.
+coverage:
+  start_date: 2019-05-06
+  end_date: 2026-04-29
+  gaps: []
+cadence: 1m
+fields:
+  - {name: ts_utc, type: timestamp}
+  - {name: open, type: float}
+  - {name: high, type: float}
+  - {name: low, type: float}
+  - {name: close, type: float}
+  - {name: volume, type: int}
+  - {name: symbol, type: string}
+  - {name: instrument_id, type: int}
+ingest:
+  format: databento_ohlcv_csv
+  timestamp_columns: [ts_event]
+session_calendar: CMES
+# MES at 1m cadence prints every minute when the contract is liquid; the
+# overnight thin window can stretch a few minutes between bars on an
+# otherwise-active contract. The 1-week ceiling reflects the longest
+# CME closure (Christmas/New Year/Good Friday combined) and is the same
+# value as mes_5s_ohlcv.
+max_inactivity_seconds: 604800
+availability_latency:
+  median_seconds: 0.0
+  p99_seconds: 60.0
+  notes: >
+    Historical CSV has zero replay latency. There is no live adapter
+    paired with this databento source yet; live trading would need a
+    1m-bar live feed (databento live or IBKR-aggregated) registered
+    against this source id under the live/historical parity contract.
+licensing:
+  live_use: false   # no live adapter wired yet for this source
+  backtest_use: true
+  redistribution: false
+known_issues:
+  - >
+    Front-month roll discontinuity: at each quarterly roll the absolute
+    price level can step by the calendar spread between the old and new
+    front month. Returns / volatility / intraday-relative features are
+    accurate; features anchored on absolute price levels across roll
+    boundaries (round-number magnets, percentile-of-historical-price
+    thresholds) are not.
+  - >
+    Front-month chosen by previous-day volume rank. Contract changeover
+    happens at the UTC date boundary (00:00 UTC) — for some products
+    this can land mid-session. For MES this lands during the late
+    globex evening / Asian thin window, so most active-session bars
+    use a stable contract for the full session.
+audit_history: []

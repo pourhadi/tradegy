@@ -125,6 +125,7 @@ declared tolerance; receipt metadata complete.
 
 **Activities:**
 - **Gap detection** — compare observed timestamps to expected cadence; catalog gaps
+- **Coverage-by-hour** — calendar-aware tally of UTC-hour-of-day distribution; flag any in-session hour with zero rows or with density < 5% of the median in-session hour. Catches the silent partial-day-export failure that bypassed gap detection in 2026-04 (Sierra Chart MES had only ~14:00–20:00 ET coverage but `coverage.gaps:[]` reported no anomaly because intraday gaps fit inside `max_inactivity_seconds`). Implemented in `src/tradegy/audit/basic.py` as `_check_coverage_by_hour`.
 - **Revision detection** — if updating prior data, identify changed historical values; flag sources that revise
 - **Latency characterization** — measure (receipt_time − observation_time); build distribution
 - **Cross-source reconciliation** — if multiple sources cover same signal, check consistency
@@ -141,6 +142,7 @@ acceptance before source can be used for live trading.
 - Revisions going undetected (silent contamination of historical features)
 - Latency assumed constant when actually variable
 - Missing data forward-filled without audit trail
+- **Silent partial-day exports** — caught by coverage-by-hour as of 2026-05-01.
 
 ### Stage 3: Source admission
 
@@ -256,6 +258,47 @@ reset and the weighted-mean math), feature YAML, materialize,
 no-lookahead audit, reproducibility check. End-to-end backtest of the
 strategy then ran successfully against the new feature, demonstrating
 the hybrid push/pull model in operation.*
+
+*Round 2 of the signal-hunt sprint (2026-04-30) added two more pull-
+driven features under the same gates: `mes_or30_high` and `mes_or30_low`,
+the first-30-min RTH session high/low carried forward through the rest
+of the session, used by the `range_break_fade` (H1) and
+`range_break_continuation` (H3) classes. The transform
+(`opening_range_levels`) is parameterized by `level` (high|low),
+`or_window_minutes` (default 30), and `session_calendar` (default
+`XNYS` — close enough to ES/MES RTH at the open, where the OR forms).
+Both features pass no-lookahead and reproducibility audits. They are
+non-null only for post-OR RTH bars (~628k of the 2.46M-bar series).*
+
+*Round 3 of the signal-hunt sprint (2026-05-01) added two more pull-
+driven features under the same gates:*
+*  - `mes_prior_rth_close` — close price of the prior XNYS session,
+    carried forward across the next session (transform
+    `prior_session_close`). 681k rows, no-lookahead PASS,
+    reproducibility PASS.*
+*  - `mes_xnys_session_position` — fraction-through-current-XNYS-session
+    (mirror of the existing CMES-aligned `mes_session_position`, swapped
+    calendar to `XNYS`). 681k rows, no-lookahead PASS, reproducibility
+    PASS.*
+*Both feed the round-3 hypotheses (gap_fill_fade, compression_breakout,
+volume_spike_fade), all of which were killed at sanity — see
+`06_hypothesis_system.md`. The features themselves are correct and
+remain available to any future strategy that keys on inter-session
+reference levels or RTH time-of-day.*
+
+*The same Round 2 work also surfaced and fixed a major data gap:
+`mes_5s_ohlcv` (Sierra Chart export) covers only the ~14:00–20:00 ET
+window each session day, missing the RTH morning open. The basic-
+audit gap detector did not flag it because intraday partial coverage
+falls inside the configured `max_inactivity_seconds` ceiling. A new
+data source `mes_1m_ohlcv` (databento OHLCV-1m, 24h coverage,
+2019-05-06 → 2026-04-29) was admitted with a no-lookahead front-month
+roll (previous-day-volume rule), and `mes_1m_bars` was repointed at
+it. All MES derived features were recomputed against the new bar
+series; the 5s source remains in the registry for callers needing
+back-adjusted continuous prices specifically. Open follow-up: add a
+coverage-by-hour audit so future ingestions cannot silently miss
+intraday windows.*
 
 
 
@@ -417,6 +460,8 @@ verified; model artifact serializable and deterministic on reload.
 **Gate:** Human review of registration packet for features destined for live use.
 Automated registration acceptable only for features remaining in the
 `in_development` or `research` lifecycle state.
+
+**Distribution stats sidecar (added 2026-05-02):** every materialised feature can have a per-feature distribution snapshot at `data/feature_stats/<feature_id>.json` — `(rows, min, max, p10, p25, median, p75, p90)` computed from the parquet. The auto-generator (`07_auto_generation.md`) injects these into the LLM prompt so threshold proposals are grounded in the live distribution. Refresh with `tradegy refresh-feature-stats` after any re-ingest or new feature materialisation. Lazily computed on first read otherwise (cached forever until a schema-version bump or explicit refresh). Stats live under `data/`, gitignored — see `src/tradegy/auto_generation/feature_stats.py`.
 
 ---
 

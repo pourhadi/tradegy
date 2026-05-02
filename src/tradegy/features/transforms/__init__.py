@@ -49,6 +49,8 @@ def list_transforms() -> list[str]:
 # Registration side effects. Importing this package wires up the registry.
 from tradegy.features.transforms import (  # noqa: E402,F401
     log_return,
+    opening_range_levels,
+    prior_session_close,
     resample_ohlcv,
     resample_ohlcv_bars,
     rolling_mean,

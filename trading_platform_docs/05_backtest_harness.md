@@ -35,7 +35,8 @@ Phase 3A shipped the MVP single-spec single-window driver in
 | CPCV | **implemented (Phase 6A)** — combinatorial paths over `N` equal-width folds with `k` test folds per path (`C(N, k)` paths); per-path trades concatenated and aggregated; cross-path distribution reports median Sharpe, IQR, pct-paths-negative; gate per doc 05:343 (configurable). `purge_days` / `embargo_days` are accepted but no-op in this MVP — they activate when within-train fitting is added |
 | Stress periods | NOT implemented |
 | Leakage audit (recompute features at sampled T) | covered already by `tradegy validate <feature>` at the feature-pipeline layer; harness-side audit deferred |
-| Evidence signing | NOT implemented |
+| Evidence signing | **implemented (2026-05-01)** — every `backtest` / `walk-forward` / `cpcv` run writes a signed packet to `data/evidence/`. HMAC-SHA256 when `TRADEGY_EVIDENCE_KEY` is set (governance-grade, unforgeable); plain SHA256 otherwise (tamper-evident, with a recorded warning). `tradegy validate-evidence <packet.json>` re-signs and constant-time-compares; mismatched packets exit code 7. See `src/tradegy/evidence/` |
+| Holdout window (CLI) | **implemented (2026-05-01)** — `--holdout-months N` on `walk-forward` and `cpcv` reserves the trailing N months from all folds, then runs a single backtest on the held-out window. Gates at 0.5× the avg OOS Sharpe (walk-forward) or median CPCV Sharpe per `07_auto_generation.md:165` |
 | Run modes | `single`, `walk_forward`, and `cpcv` shipped (CLI: `tradegy backtest`, `tradegy walk-forward`, `tradegy cpcv`); `sensitivity` / `variant_sweep` / `regression` / `batch` deferred |
 | Multi-strategy simulation | NOT implemented |
 | Live replay drift detection | NOT implemented |
@@ -48,18 +49,30 @@ prints aggregate stats. `tradegy walk-forward <spec_id>` runs rolling
 plus the distribution gate. End-to-end runs on real MES data (2019-05
 → 2025-06, 609,923 1m bars):
 
-| Spec | Single-mode trades | Single-mode expectancy R | Walk-forward (3y/1y/1y) gate | Notes |
-|---|---|---|---|---|
-| `mes_momentum_breakout` | 9,719 | -0.29 | FAIL (avg in-sample Sharpe -0.15, OOS -0.18) | naive momentum continuation |
-| `mes_vwap_reversion` | 1,512 | -0.56 | FAIL (avg in-sample Sharpe -0.31, OOS -0.26) | naive long-only fade |
+| Spec | Bar source | Trades | Expectancy R | Walk-forward gate | Notes |
+|---|---|---|---|---|---|
+| `mes_momentum_breakout` | mes_5s_ohlcv (partial-day) | 9,719 | -0.29 | FAIL | naive momentum continuation |
+| `mes_vwap_reversion` | mes_5s_ohlcv (partial-day) | 1,512 | -0.56 | FAIL (avg IS Sharpe -0.31, OOS -0.26) | naive long-only fade |
+| `mes_vwap_reversion_gated` (H2) | mes_5s_ohlcv (partial-day) | 565 | +0.0513 | FAIL (gate ratio -2.58) | gates raise IS Sharpe but OOS still negative |
+| `mes_vwap_reversion_gated` (H2 re-test) | mes_1m_ohlcv (24h) | 1,486 | -0.659 | n/a (FAIL sanity, IS Sharpe -0.380) | re-test on full-coverage data; "barely positive" prior result was an artifact of partial-coverage filtering out morning RTH |
+| `mes_orb_failure_fade` (H1) | mes_1m_ohlcv (24h) | 2,718 | -0.526 | n/a (FAIL sanity, IS Sharpe -0.238) | range-break fade with 12-tick fixed stop; trigger fires too easily on minor wicks |
+| `mes_orb_continuation` (H3) | mes_1m_ohlcv (24h) | 3,000 | -0.598 | n/a (FAIL sanity, IS Sharpe -0.386) | inverse mechanism of H1; volume-confirmed range break + 12-tick fixed stop |
 
-Both strategies fail the walk-forward gate at the "no in-sample edge"
-check — they are unprofitable both in-sample and out-of-sample. The
-expected shape for
-naive entry rules without regime filters / volatility gating /
-time-of-day discipline. Surfacing this honestly is the point of the
-harness; finding a strategy with actual edge is the next iteration's
-work.
+**Round-2 sprint outcome (2026-04-30):** All three pre-registered hypotheses (H1, H2 re-test, H3) failed the sanity gate (raw IS Sharpe ≤ 0). Hypothesis budget exhausted (3/3). Common failure mode: ~20-23% win rate with avg_loss near full stop, indicating the fixed-tick stop framework + ~2.2-tick cost overhead per round trip eats the asymmetric R/R distribution. The 12-tick stop is too tight relative to MES intraday true-range. Per sprint anti-overfitting rules, no parameter tuning permitted.
+
+**Round-3 sprint outcome (2026-05-01):** Three new hypotheses (gap-fill fade, compression breakout, volume-spike fade) with 3 pre-registered variants each (9 total, within the 12-variant budget). All used the new `atr_multiple` stop class to test whether wider ATR-scaled stops fix the round-2 failure mode. **All 9/9 variants killed at sanity.** Best raw result: `mes_gap_fill_a` at -0.174 Sharpe. The compression and volume-spike variants fired 3500-3600 times each over 7 years, indicating selectivity — not stop sizing — is the binding constraint. ATR-multiple stops shifted avg_loss from ~-1.3R (round 2) to ~-2.0R (round 3) without lifting win rates. See `06_hypothesis_system.md` § Cross-sprint synthesis for the full record.
+
+| Round 3 spec | Trades | IS Sharpe | Sanity |
+|---|---|---|---|
+| `mes_gap_fill_a` (0.3% gap) | 1453 | -0.174 | FAIL |
+| `mes_gap_fill_b` (0.5%) | 1080 | -0.205 | FAIL |
+| `mes_gap_fill_c` (1.0%) | 481 | -0.329 | FAIL |
+| `mes_compression_breakout_a` (TR<0.3×ATR) | — | ERROR | ATR cap exceeded 2020-03-16 (peak COVID vol) |
+| `mes_compression_breakout_b` (TR<0.4) | 3602 | -0.691 | FAIL |
+| `mes_compression_breakout_c` (TR<0.5) | 3604 | -0.661 | FAIL |
+| `mes_volume_spike_fade_a` (z≥2.0) | 3593 | -0.658 | FAIL |
+| `mes_volume_spike_fade_b` (z≥2.5) | 3537 | -0.633 | FAIL |
+| `mes_volume_spike_fade_c` (z≥3.0) | 3261 | -0.622 | FAIL |
 
 ---
 
@@ -373,13 +386,17 @@ Each harness run produces an evidence packet. The packet is deterministic in:
 - Input data versions (hash)
 - Random seed (where applicable)
 
-The packet is signed via:
+The packet is signed via (implemented 2026-05-01 — see `src/tradegy/evidence/`):
 
 ```
-signature = sha256(harness_version || spec_hash || data_versions_hash || seed || stats_canonical_json)
+canonical = canonical_json(packet_envelope_minus_signature)
+signature = HMAC-SHA256(TRADEGY_EVIDENCE_KEY, canonical)   # governance-grade
+       OR = SHA256(canonical)                              # tamper-evident, with warning
 ```
 
-The `backtest_evidence.harness_signature` field in the strategy spec is this signature. Any human edit to the stats breaks the signature. The spec loader refuses to load specs whose signatures don't verify.
+When `TRADEGY_EVIDENCE_KEY` is set, the harness signs with HMAC — unforgeable without the key, required for promotion to `live` tier per `13_governance_process.md`. Without the key, it falls back to plain SHA256: any post-hoc edit invalidates the digest, but the digest is recomputable, so it's tamper-*evident*, not unforgeable. The packet records `algorithm` so downstream tools can reject unauthenticated packets at governance gates.
+
+`tradegy validate-evidence <packet.json>` performs constant-time signature comparison; mismatch exits with code 7. The full backtest_evidence section in the strategy spec is rebuilt from the packet at promotion time; the live spec stores the packet's signature in `backtest_evidence.harness_signature`. The spec loader refuses to load specs whose signatures don't verify.
 
 ---
 

@@ -1,0 +1,94 @@
+# N2 / variant c — compression breakout with TR < 0.5 × ATR + 2.0×ATR stop.
+#
+# Pre-registered 2026-05-01 as part of round 3's 9-spec batch.
+#
+# Variant axis: compression_ratio (current bar TR / ATR_14m).
+#   * a: 0.30 (very tight compression)
+#   * b: 0.40
+#   * c: 0.50
+
+metadata:
+  id: mes_compression_breakout_c
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES Compression Breakout (TR<0.5×ATR)
+  status: draft
+  created_date: 2026-05-01
+  last_modified_date: 2026-05-01
+  author: dan
+  reviewers: []
+  parent_strategy_id: null
+  description: >
+    Enter on the next bar's break of a compressed bar (TR < 0.50 × ATR_14m)
+    on MES. ATR-multiple stop (2.0× mes_atr_14m), 60-bar time-stop, 1
+    attempt per direction per session. Both directions armed. Gated to
+    the bulk of the CMES session (skip first/last 10%) to avoid the
+    overnight-handover thin window.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: compression_breakout
+  parameters:
+    true_range_feature_id: mes_true_range_1m
+    atr_feature_id: mes_atr_14m
+    compression_ratio: 0.50
+    confirmation_buffer_ticks: 1
+    tick_size: 0.25
+    max_attempts_per_session: 1
+    direction_mode: both
+  direction: both
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    - condition: time_of_session
+      parameters:
+        session_position_feature_id: mes_session_position
+        lo: 0.10
+        hi: 0.90
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: atr_multiple
+    atr_feature_id: mes_atr_14m
+    multiplier: 2.0
+    max_distance_ticks: 200
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 200
+  time_stop:
+    enabled: true
+    max_holding_bars: 60
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only

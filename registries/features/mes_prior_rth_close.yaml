@@ -1,0 +1,33 @@
+# Hypothesis-driven feature (N1 of signal-hunt sprint round 3): prior
+# XNYS-session close price for MES, carried forward across the next
+# session.
+#
+# Used by gap_fill_fade strategy class to anchor the gap reference
+# level. At each post-session-open bar of session N, this feature
+# carries the close price from session (N-1). The gap is computed by
+# the strategy class as (entry_bar.open - prior_close).
+
+id: mes_prior_rth_close
+version: v1
+description: >
+  Close price of the prior XNYS session, carried forward into all bars
+  of the current session. For MES front-month continuous (per
+  mes_1m_ohlcv). Bars outside any XNYS session emit no value. The
+  earliest session in the data emits no value (no prior to consult).
+type: derived
+inputs:
+  - feature_id: mes_1m_bars
+computation:
+  type: registered_transform
+  transform_id: prior_session_close
+  parameters:
+    session_calendar: XNYS
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 100000.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

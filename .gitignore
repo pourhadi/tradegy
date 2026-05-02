@@ -12,5 +12,8 @@ data/raw/
 data/raw_csv/
 data/features/
 data/audits/
+data/evidence/
+data/auto_generation/
+data/feature_stats/
 !data/.gitkeep
 !tests/fixtures/

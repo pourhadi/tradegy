@@ -1,15 +1,19 @@
-# 5-minute OHLCV bars for MES, aggregated from the 5-second source bars.
+# 5-minute OHLCV bars for MES, aggregated from the databento 1m source.
 # Building block for tactical-horizon features (5m returns, etc.).
+#
+# Switched 2026-04-30 from mes_5s_ohlcv to mes_1m_ohlcv (databento) for
+# 24h coverage and a longer span; see mes_1m_bars.yaml for context.
 
 id: mes_5m_bars
 version: v1
 description: >
-  5-minute OHLCV bars for MES front-month continuous, aggregated from the
-  mes_5s_ohlcv source via resample_ohlcv_bars. Right-labeled close,
-  left-closed window so each bar's ts_utc is the bar-close instant.
+  5-minute OHLCV bars for MES front-month, aggregated from the
+  mes_1m_ohlcv data source via resample_ohlcv_bars. Right-labeled
+  close, left-closed window so each bar's ts_utc is the bar-close
+  instant. 24h coverage, 2019-05-06 → 2026-04-29.
 type: derived
 inputs:
-  - source_id: mes_5s_ohlcv
+  - source_id: mes_1m_ohlcv
 computation:
   type: registered_transform
   transform_id: resample_ohlcv_bars

@@ -61,12 +61,28 @@ class MarketScopeSpec(_Strict):
     day_of_week_filter: list[str] = Field(default_factory=list)
 
 
+class GatingCondition(_Strict):
+    """Boolean gate that must hold at the candidate-entry bar before the
+    strategy class is allowed to fire. Distinct from `context_conditions`
+    (LLM-readable prose, not mechanically enforced) and from
+    `exits.invalidation_conditions` (which fire AFTER entry to flatten).
+
+    Per `04_strategy_spec_schema.md:587-588` ("May need a `gating_conditions`
+    mechanical section"). All conditions in the list must evaluate True
+    on the same bar; an empty list means no gate (current behavior).
+    """
+
+    condition: str
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
 class EntrySpec(_Strict):
     strategy_class: str
     parameters: dict[str, Any] = Field(default_factory=dict)
     direction: Literal["long", "short", "both"] = "long"
     entry_order_type: Literal["limit", "market", "stop"] = "market"
     limit_offset_ticks: int = 0
+    gating_conditions: list[GatingCondition] = Field(default_factory=list)
 
 
 class SizingSpec(_Strict):

@@ -1,12 +1,79 @@
 # Execution Layer Spec
 
-**Status:** Draft for review
+**Status:** Draft for review (Phase 1 implemented 2026-05-01)
 **Purpose:** Define the deterministic broker-facing execution layer that
 sits between the tactical layer and Interactive Brokers. The execution
 layer owns the order lifecycle, broker reconciliation, account state, and
 hard risk enforcement. It contains no intelligence — every decision about
 *whether* to trade lives upstream. This spec turns the intent statements
 in `00_master_architecture.md:65-71` into an enforceable contract.
+
+## Implementation status
+
+| Section | Status | Code path |
+|---|---|---|
+| Order lifecycle FSM (states + transitions) | ✅ implemented (Phase 1, 2026-05-01) | `src/tradegy/execution/lifecycle.py` |
+| Idempotency keys + dedup window | ✅ implemented (Phase 1) | `src/tradegy/execution/idempotency.py` |
+| Append-only transition log | ✅ implemented (Phase 1) | `src/tradegy/execution/log.py` |
+| Pre-flight risk-cap gate | ✅ implemented (Phase 2, 2026-05-01) | `src/tradegy/execution/risk_caps.py` |
+| Global kill-switch | ✅ implemented (Phase 2) — trip / clear / mark_reconciled lifecycle with audit history | `src/tradegy/execution/kill_switch.py` |
+| Session-boundary flatten plan | ✅ implemented (Phase 2) — pure-function plan builder; orchestration deferred to Phase 3 | `src/tradegy/execution/session_flatten.py` |
+| Broker-agnostic order router (ABC) | ✅ implemented (Phase 3A, 2026-05-01) | `src/tradegy/execution/router.py` |
+| IBKR order router (place / cancel / query) | ✅ implemented (Phase 3A) — drives FSM via ib_async statusEvent / fillEvent; dependency-injected IB client for testability | `src/tradegy/execution/ibkr_router.py` |
+| IBKR status string → OrderState mapping | ✅ implemented (Phase 3A) — defensive (unknown→UNKNOWN) | `src/tradegy/execution/ibkr_status.py` |
+| Broker reconciliation: divergence detector | ✅ implemented (Phase 3B, 2026-05-01) — pure-function detector covering all 5 divergence types from §227-237 | `src/tradegy/execution/divergence.py` |
+| Broker reconciliation: async orchestration loop | ✅ implemented (Phase 3C, 2026-05-01) — cadence-driven `tick(now)` + `run_forever()`; cadences match §218-223 | `src/tradegy/execution/reconciliation.py` |
+| Margin / heartbeat live wiring | ⚠️ pre-flight slots wired; live inputs piped via the orchestration handler in production | (paper-account test) |
+| Paper-account integration test | ⚠️ not wired — Phase 3A/3B/3C unit-tests use a `MockIB`; live paper test requires TWS/Gateway running | (deferred to user-run) |
+
+Phase 1 shipped the broker-agnostic FSM core. Phase 2 added the
+deterministic enforcement gates that sit on top of it: pre-flight risk
+caps (the doc 11 §263-273 checklist in order), the kill-switch with the
+restart contract from §306-313, and the session-flatten plan builder
+from §264-281. All Phase 2 modules are pure functions or pure-state
+classes — no broker required, fully testable.
+
+Phase 3A adds the IBKR-specific order router (`ibkr_router.py`) and the
+broker-agnostic `BrokerRouter` ABC. The router drives the FSM in
+response to ib_async `statusEvent` / `fillEvent` callbacks; the IBKR
+status mapping is centralised in `ibkr_status.py` so future broker
+ports only re-implement that table. The IB client is dependency-
+injected so unit tests can use a `MockIB` without a real TWS connection
+(33 Phase 3A tests cover happy path, partial fills, terminal-state
+ignore, idempotent re-emission, query_* methods, and handler
+exception isolation).
+
+Phase 3B adds the divergence detector (`divergence.py`) — a pure
+function over `(local_orders, broker_orders, local_positions,
+broker_positions, broker_account)` that emits a structured list of
+`DivergenceEvent`s with severity (HIGH | CRITICAL) and a recommended
+action. All five divergence types from doc 11 §227-237 are covered:
+order missing at broker, local FILLED but broker WORKING, local
+position with broker flat, local flat with broker position, signed
+quantity mismatch, plus margin breach at the account level. 17 Phase
+3B tests cover every row of the resolution table including the
+"local terminal not in broker.openTrades" non-divergence case.
+Phase 3C closes the execution layer's broker-agnostic surface area
+with `ReconciliationLoop` (`reconciliation.py`). The loop's `tick(now)`
+method inspects last-run timestamps against configurable cadences
+(`DEFAULT_CADENCES`: 1s open-orders, 5s positions, 30s account, 60s
+PnL — exactly the table in §218-223), runs whichever checks are due,
+and dispatches every detected divergence to two registered handlers:
+a `divergence_handler` for every event (logging / governance audit)
+and an `escalation_handler` for CRITICAL events only (kill-switch
+trip / session-flatten). The `tick(now)` / `run_forever(sleep_s)`
+split keeps real-time scheduling out of unit tests — tests advance
+`now` by hand. 14 Phase 3C tests cover first-tick fan-out, cadence
+respect, custom cadences, dispatch routing, handler-exception
+isolation, and the `run_forever` continues-through-error behaviour.
+
+**138 execution-layer tests total** (33 Phase 1 + 41 Phase 2 + 33
+Phase 3A + 17 Phase 3B + 14 Phase 3C). The execution layer's
+broker-agnostic core is now feature-complete; the only outstanding
+work is the live paper-account integration test against TWS/Gateway,
+which is deferred to user-run (a real IBKR paper account requires
+the TWS or IB Gateway running locally and is intentionally out of
+the unit-test path).
 
 ---
 

@@ -1,10 +1,39 @@
 # Live Monitoring Spec
 
-**Status:** Draft for review
+**Status:** Draft for review (Phase 1 implemented 2026-05-01)
 **Purpose:** Define the health checks, SLOs, alerts, and auto-halt
 policies that determine whether the runtime system is healthy enough to
 trade. Several other docs assume monitoring will exist — this one makes
 it concrete.
+
+## Implementation status
+
+| Section | Status | Code path |
+|---|---|---|
+| Health-check framework (ABC + registry) | ✅ implemented (Phase 1, 2026-05-01) | `src/tradegy/monitoring/check.py` |
+| HealthCheckRunner + RunReport | ✅ implemented (Phase 1) | `src/tradegy/monitoring/runner.py` |
+| AlertRouter with severity-matrix dispatch + dedup | ✅ implemented (Phase 1) — DEFAULT_COOLDOWNS match §117-118 (15 min WARNING, 5 min CRITICAL) | `src/tradegy/monitoring/alerts.py` |
+| Broker-connectivity check | ✅ implemented (Phase 1) — heartbeat thresholds 2s WARNING / 5s CRITICAL | `src/tradegy/monitoring/checks/broker_connectivity.py` |
+| Live-data freshness (5s + 1s cadences) | ✅ implemented (Phase 1) — outside-session skip; per-instance `id` for dedup | `src/tradegy/monitoring/checks/data_freshness.py` |
+| Time-skew vs broker | ✅ implemented (Phase 1) — bidirectional; `broker_now=None` is WARNING (not CRITICAL) | `src/tradegy/monitoring/checks/time_skew.py` |
+| Process liveness (watchdog) | ✅ implemented (Phase 1) — `heartbeat()` + `check()` API; no-heartbeat-yet starts as WARNING | `src/tradegy/monitoring/checks/process_liveness.py` |
+| Auto-halt action enum | ✅ implemented (Phase 1) — NO_NEW_ENTRY / FLATTEN_AND_HALT_STRATEGY / GLOBAL_KILL_SWITCH per §128-148 | `src/tradegy/monitoring/types.AlertAction` |
+| Feature compute lag | ⚠️ Phase 2 — needs feature-engine emit timestamps | (Phase 2) |
+| Feature drift vs historical | ⚠️ Phase 2 — drift detector + ±2σ rolling distribution | (Phase 2) |
+| Model freshness | ⚠️ Phase 2 — needs model registry metadata | (Phase 2) |
+| Position vs broker | ✅ already shipped via `execution.divergence` (doc 11 Phase 3B) | `src/tradegy/execution/divergence.py` |
+| Account margin headroom | ⚠️ Phase 2 — wire `BrokerAccountState` snapshot into a check | (Phase 2) |
+| Daily / weekly loss caps | ✅ already shipped via `execution.risk_caps` pre-flight (doc 11 Phase 2) | `src/tradegy/execution/risk_caps.py` |
+| Selection-layer cycle / LLM availability | ⚠️ Phase 3 — needs the selection layer (doc 09) | (Phase 3, blocked) |
+
+Phase 1 ships the deterministic core: a registry-driven runner, an
+alert router with the correct severity-matrix cooldowns, four
+broker- and source-agnostic concrete checks, plus the `AlertAction`
+enum that the auto-halt orchestrator (production wiring on top of the
+kill-switch in `11_execution_layer_spec.md`) consumes. **35 Phase 1
+tests** cover each check's threshold ladder and exception path, the
+runner's exception-to-CRITICAL behaviour, and the router's dedup +
+multi-handler dispatch.
 
 ---
 
