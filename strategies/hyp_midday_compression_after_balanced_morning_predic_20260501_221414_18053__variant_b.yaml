@@ -1,0 +1,87 @@
+metadata:
+  id: hyp_midday_compression_after_balanced_morning_predic_20260501_221414_18053__variant_b
+  version: 0.1.0
+  schema_version: '1.0'
+  name: Midday compression breakout (compression_breakout class, stricter volume gate)
+  status: draft
+  created_date: '2026-05-02'
+  last_modified_date: '2026-05-02'
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: null
+  description: Uses compression_breakout class triggered by 5m/30m vol compression,
+    with stricter volume z-score gate and wider break confirmation.
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+entry:
+  strategy_class: compression_breakout
+  parameters:
+    vol_short_feature_id: mes_realized_vol_5m
+    vol_long_feature_id: mes_realized_vol_30m
+    compression_ratio: 0.5
+    upper_feature_id: mes_or30_high
+    lower_feature_id: mes_or30_low
+    break_confirm_ticks: 6
+    tick_size: 0.25
+  direction: both
+  entry_order_type: stop
+  limit_offset_ticks: 0
+  gating_conditions:
+  - condition: time_of_session
+    parameters:
+      session_position_feature_id: mes_xnys_session_position
+      lo: 0.5
+      hi: 0.8
+  - condition: feature_threshold
+    parameters:
+      feature_id: mes_volume_zscore_20m
+      operator: lt
+      threshold: -1.0
+  - condition: feature_range
+    parameters:
+      feature_id: mes_realized_vol_30m
+      lo: 0.025
+      hi: 0.14
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+stops:
+  initial_stop:
+    method: atr_multiple
+    atr_feature_id: mes_atr_14m
+    multiplier: 0.8
+    max_distance_ticks: 100
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 160
+  time_stop:
+    enabled: true
+    max_holding_bars: 120
+    action_at_time_stop: exit_market
+exits:
+  profit_targets: []
+  invalidation_conditions:
+  - condition: feature_threshold
+    parameters:
+      feature_id: mes_volume_zscore_20m
+      operator: gt
+      threshold: 1.5
+    action: exit_market
+  end_of_session: null
+parameter_envelope: null
+retirement_criteria: null
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only
