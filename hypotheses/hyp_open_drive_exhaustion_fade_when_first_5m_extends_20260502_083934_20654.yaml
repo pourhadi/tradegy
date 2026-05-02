@@ -1,6 +1,6 @@
 id: hyp_open_drive_exhaustion_fade_when_first_5m_extends_20260502_083934_20654
 title: Open-drive exhaustion fade when first 5m extends >1.5 ATR with volume climax
-status: proposed
+status: killed
 source: llm_brainstorm
 created_date: '2026-05-02'
 last_modified_date: '2026-05-02'
@@ -62,4 +62,15 @@ five_test_scores:
   data_feasibility: 5
 parent_hypothesis_id: null
 notes: ''
-kill_reason: null
+kill_reason: |-
+  6/6 variants killed at sanity (2026-05-02 auto-test).
+  Outcomes: 3 runtime errors on 2020-03-16 COVID-day extreme-vol bars
+  (atr_multiple cap exceeded — separate harness-robustness issue);
+  variant_b 2 trades (gates too restrictive); variants c+e finished
+  with 118 / 155 trades and Sharpe -0.42 / -0.27 respectively.
+  The exhaustion-fade premise is wrong as expressed: at the open,
+  fading a 1.5x-ATR + volume-climax extension toward VWAP loses
+  money — the impulses tend to continue, not revert. Pre-FOMC drift
+  literature (Lucca-Moench-style) supports continuation, not fade,
+  in the early-RTH window. No post-hoc tuning per anti-overfitting
+  rules.

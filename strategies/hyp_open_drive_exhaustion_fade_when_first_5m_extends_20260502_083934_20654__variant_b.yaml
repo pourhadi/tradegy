@@ -1,0 +1,73 @@
+metadata:
+  id: hyp_open_drive_exhaustion_fade_when_first_5m_extends_20260502_083934_20654__variant_b
+  version: 0.1.0
+  schema_version: '1.0'
+  name: Open-drive volume-spike fade — strict climax
+  status: draft
+  created_date: '2026-05-02'
+  last_modified_date: '2026-05-02'
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: null
+  description: Volume-spike-fade class with stricter z-score climax, looser ATR requirement.
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+entry:
+  strategy_class: volume_spike_fade
+  parameters:
+    volume_zscore_feature_id: mes_volume_zscore_20m
+    target_feature_id: mes_vwap
+  direction: long
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+  - condition: time_of_session
+    parameters:
+      session_position_feature_id: mes_xnys_session_position
+      lo: 0.02
+      hi: 0.06
+  - condition: feature_threshold
+    parameters:
+      feature_id: mes_volume_zscore_20m
+      operator: gt
+      threshold: 2.25
+  - condition: feature_threshold
+    parameters:
+      feature_id: mes_true_range_1m
+      operator: gt
+      threshold: 1.5
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+stops:
+  initial_stop:
+    method: fixed_ticks
+    stop_ticks: 24
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 200
+  time_stop:
+    enabled: true
+    max_holding_bars: 30
+    action_at_time_stop: exit_market
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+parameter_envelope: null
+retirement_criteria: null
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only
