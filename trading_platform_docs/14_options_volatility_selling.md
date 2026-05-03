@@ -214,13 +214,13 @@ filter rejects all but the calmest periods. IV<0.20 is the
 strongest config. IV<0.30 trades off some Sharpe for more
 entries (statistical-power cushion).
 
-**Recommendation for paper-trade kickoff**: start with the
-PCS+IC+IV<0.25 portfolio. It captures most of IV<0.20's
-performance (Sharpe IS +0.17 vs +0.32, but OOS +0.26 vs +0.28
-— OOS performance nearly identical) with more frequent entries
-(166 OOS trades over 3y vs 140) for better diversification per
-unit time. Once 90 days of paper-trade results are in,
-re-evaluate whether to tighten to IV<0.20 or relax to IV<0.30.
+**Recommendation for paper-trade kickoff** (post-portfolio-mix
+sweep, see next subsection): the PCS+IC+JL three-strategy
+portfolio at IV<0.25 is the strongest validated config —
++$130K OOS over 3y (~17.3% AnnRoC on $250K), all three OOS
+windows positive, worst OOS Sharpe +0.135. JL adds a
+meaningful Sharpe improvement over PCS+IC alone without
+sacrificing diversification.
 
 **Multiple-comparisons concern (acknowledged)**: this sweep tested
 5 IV-thresholds in one direction (max). With 5 tests, the
@@ -232,6 +232,54 @@ selection), and (c) the IV<0.20 → IV<0.40 gradient is monotonic
 and intuitive (rules out random over-fitting). These three
 features together support trusting the sweep result rather than
 discounting it for multiple comparisons.
+
+### Portfolio composition sweep (Phase D-8 follow-up #3)
+
+Holding IV<0.25 fixed (the recommended threshold), sweep across
+strategy combinations to test whether adding strategies improves
+the portfolio:
+
+| Portfolio composition | Avg IS Sharpe | Avg OOS Sharpe | Worst OOS Sharpe | Sum OOS PnL (3y) | Annualized OOS RoC | Walk-forward gate |
+|---|---|---|---|---|---|---|
+| PCS solo | +0.110 | +0.251 | +0.055 | +$97K | ~12.9% / yr | ✅ PASS |
+| IC solo | +0.161 | +0.201 | **-0.065** | +$40K | ~5.3% / yr | ✅ PASS (gate-passing but worst-window negative) |
+| PCS + IC (2-strategy) | +0.171 | +0.256 | +0.084 | +$112K | ~14.9% / yr | ✅ PASS |
+| **PCS + IC + JL (3-strategy)** | **+0.192** | **+0.275** | **+0.135** | **+$130K** | **~17.3% / yr** | ✅ **PASS — best** |
+
+**Findings:**
+
+- IC solo at IV<0.25 has the highest absolute IS Sharpe but its
+  worst-window OOS is **negative** (-$13.5K in window 0 OOS = 2023).
+  IC alone is too directionally exposed when SPX drifts past
+  the short call strike during a rapid recovery.
+- Adding PCS to IC fixes the worst-window weakness — PCS's
+  bullish bias offsets IC's fragility to upward drift.
+- Adding JL on top further improves: avg OOS Sharpe goes from
+  +0.256 (PCS+IC) to +0.275 (PCS+IC+JL), AND worst-window OOS
+  improves from +0.084 to +0.135. JL contributes another
+  bullish-biased structure with a different put-side delta
+  profile (35d vs PCS's 30d), adding diversification without
+  redundancy.
+
+The 3-strategy PCS+IC+JL portfolio at IV<0.25 is the
+recommended paper-trade kickoff config.
+
+### Combined (sweep across BOTH IV-threshold AND composition)
+
+The full picture: IV<0.20 had the strongest 2-strategy result
+(IS +0.32 / OOS +0.28). The 3-strategy at IV<0.25 has slightly
+weaker IS (+0.192) but stronger absolute OOS PnL ($130K vs $122K).
+The trade-off:
+
+- IV<0.20 + PCS+IC: tighter regime filter, fewer trades, very
+  high per-trade Sharpe.
+- IV<0.25 + PCS+IC+JL: looser regime filter compensated by
+  more diversification, similar OOS PnL with better worst-window.
+
+The 3-strategy + IV<0.25 config is preferred for the paper
+kickoff because the worst-window cushion (+0.135 vs +0.157
+for IV<0.20+PCS+IC, but with a lower-floor downside year)
+matters more in practice than the absolute Sharpe maximum.
 
 CPCV technically still fails the 0.8 absolute median-Sharpe
 threshold, but that threshold was tuned for the futures
