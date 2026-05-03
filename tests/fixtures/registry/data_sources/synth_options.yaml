@@ -1,7 +1,7 @@
 # Test-only options chain source mirroring the ORATS Pro shape so
 # csv_orats / chain_io can be exercised without the production
-# spx_options_chain registry entry. Same ingest format, smaller
-# coverage window, no live adapter.
+# spx_options_chain registry entry. Same ingest format as the
+# production source; smaller coverage; no live adapter.
 id: synth_options
 version: v1
 description: Synthetic options chain for tests; ORATS-shaped CSV ingest.
@@ -23,30 +23,29 @@ fields:
   - {name: dte, type: int}
   - {name: strike, type: float}
   - {name: stock_price, type: float}
+  - {name: spot_price, type: float}
   - {name: residual_rate, type: float}
   - {name: smv_vol, type: float}
+  - {name: quote_date, type: string}
+  - {name: expiry_tod, type: string}
   - {name: call_bid, type: float}
   - {name: call_ask, type: float}
   - {name: call_value, type: float}
   - {name: call_iv, type: float}
-  - {name: call_delta, type: float}
-  - {name: call_gamma, type: float}
-  - {name: call_theta, type: float}
-  - {name: call_vega, type: float}
-  - {name: call_rho, type: float}
+  - {name: call_bid_iv, type: float}
+  - {name: call_ask_iv, type: float}
   - {name: call_volume, type: int}
   - {name: call_open_interest, type: int}
   - {name: put_bid, type: float}
   - {name: put_ask, type: float}
   - {name: put_value, type: float}
   - {name: put_iv, type: float}
-  - {name: put_delta, type: float}
-  - {name: put_gamma, type: float}
-  - {name: put_theta, type: float}
-  - {name: put_vega, type: float}
-  - {name: put_rho, type: float}
+  - {name: put_bid_iv, type: float}
+  - {name: put_ask_iv, type: float}
   - {name: put_volume, type: int}
   - {name: put_open_interest, type: int}
+  - {name: vendor_call_delta, type: float}
+  - {name: vendor_gamma, type: float}
 ingest:
   format: orats_strikes_csv
   timestamp_columns: [tradeDate]

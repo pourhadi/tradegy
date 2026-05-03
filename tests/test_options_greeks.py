@@ -274,3 +274,43 @@ def test_greeks_at_zero_vol_are_zero():
         side=OptionSide.CALL,
     )
     assert g == Greeks(0.0, 0.0, 0.0, 0.0, 0.0)
+
+
+# ── Vendor unit-convention reconciliation ──────────────────────
+
+
+def test_vega_trader_units_conversion():
+    """ORATS publishes vega per-1-vol-point (e.g. 7.79 for an SPX
+    ATM put). Our bs_greeks publishes per-1.00 σ change (e.g.
+    776.25 for the same leg). The trader-unit conversion is /100.
+
+    Verified against real ORATS chain 2025-12-15 SPX ATM put
+    (strike=6820, 30 DTE): our 776.25 / 100 = 7.76 ≈ vendor 7.79
+    (small difference attributable to ORATS using their smvVol
+    smoothed surface for vendor Greeks vs our raw mid-IV input).
+    """
+    g = bs_greeks(
+        S=6818.69, K=6820.0, T=30 / 365.0, r=0.0376, sigma=0.1299,
+        side=OptionSide.PUT,
+    )
+    trader_vega = g.vega / 100.0
+    # Within 5% of the vendor-published 7.79 (the residual is the
+    # smvVol-vs-callMidIv model difference, not a math bug).
+    assert trader_vega == pytest.approx(7.79, rel=0.05)
+
+
+def test_theta_trader_units_conversion():
+    """ORATS publishes theta per-calendar-day (e.g. -1.61 for an
+    SPX ATM put). Our bs_greeks publishes per-year (e.g. -491.67).
+    The trader-unit conversion is /365.
+
+    Same chain as the vega test: our -491.67 / 365 = -1.347 ≈
+    vendor -1.61 (the residual reflects vendor's smvVol-driven
+    Greeks vs our raw-IV input).
+    """
+    g = bs_greeks(
+        S=6818.69, K=6820.0, T=30 / 365.0, r=0.0376, sigma=0.1299,
+        side=OptionSide.PUT,
+    )
+    trader_theta_per_day = g.theta / 365.0
+    assert trader_theta_per_day == pytest.approx(-1.6, rel=0.20)

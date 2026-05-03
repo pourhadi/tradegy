@@ -59,8 +59,25 @@ from tradegy.ingest._common import (
 from tradegy.types import DataSource
 
 
-# Vendor → canonical column name mapping. Anything not in this map
-# is dropped on ingest (we want a known schema, not a passthrough).
+# Vendor → canonical column name mapping. Verified against the
+# actual ORATS /datav2/hist/strikes JSON response 2026-05-03 — the
+# schema differs from the public docs in two important ways:
+#
+# 1. There is no callDelta/putDelta. ORATS publishes a single
+#    `delta`/`gamma`/`theta`/`vega`/`rho`/`phi` per row which is
+#    the CALL-side Greek (put delta = call_delta - 1 for European
+#    options). We rename to vendor_call_delta etc. to make the
+#    "this is the call leg's Greek" explicit and to avoid any
+#    illusion that the same value applies to both legs.
+# 2. There is no callImpliedVol/putImpliedVol. ORATS publishes
+#    callBidIv/callMidIv/callAskIv (and the put equivalents) so
+#    the per-side IV from quotes is preserved. We use callMidIv/
+#    putMidIv as the canonical "leg IV" (mapped to call_iv /
+#    put_iv) since strategies need a single IV per leg; the bid/
+#    ask IVs are kept for spread-quality analysis.
+#
+# Anything not in this map is dropped on ingest (we want a known
+# schema, not a passthrough).
 _ORATS_COLUMN_MAP: dict[str, str] = {
     "ticker": "ticker",
     "tradeDate": "trade_date",
@@ -68,38 +85,51 @@ _ORATS_COLUMN_MAP: dict[str, str] = {
     "dte": "dte",
     "strike": "strike",
     "stockPrice": "stock_price",
+    "spotPrice": "spot_price",
     "residualRate": "residual_rate",
     "smvVol": "smv_vol",
+    "extSmvVol": "ext_smv_vol",
+    "quoteDate": "quote_date",
+    "expiryTod": "expiry_tod",       # "am" or "pm" — matters for SOQ
     # Call leg
     "callBidPrice": "call_bid",
     "callAskPrice": "call_ask",
     "callValue": "call_value",
-    "callImpliedVol": "call_iv",
-    "callDelta": "call_delta",
-    "callGamma": "call_gamma",
-    "callTheta": "call_theta",
-    "callVega": "call_vega",
-    "callRho": "call_rho",
+    "callBidIv": "call_bid_iv",
+    "callMidIv": "call_iv",          # canonical per-leg IV (mid)
+    "callAskIv": "call_ask_iv",
+    "callBidSize": "call_bid_size",
+    "callAskSize": "call_ask_size",
     "callVolume": "call_volume",
     "callOpenInterest": "call_open_interest",
+    "extCallValue": "ext_call_value",
     # Put leg
     "putBidPrice": "put_bid",
     "putAskPrice": "put_ask",
     "putValue": "put_value",
-    "putImpliedVol": "put_iv",
-    "putDelta": "put_delta",
-    "putGamma": "put_gamma",
-    "putTheta": "put_theta",
-    "putVega": "put_vega",
-    "putRho": "put_rho",
+    "putBidIv": "put_bid_iv",
+    "putMidIv": "put_iv",            # canonical per-leg IV (mid)
+    "putAskIv": "put_ask_iv",
+    "putBidSize": "put_bid_size",
+    "putAskSize": "put_ask_size",
     "putVolume": "put_volume",
     "putOpenInterest": "put_open_interest",
+    "extPutValue": "ext_put_value",
+    # Vendor Greeks (call-side per ORATS — we prefix to make this
+    # explicit and to discourage downstream consumption). Strategies
+    # recompute via tradegy.options.greeks.bs_greeks; vendor Greeks
+    # are kept for cross-check audits only.
+    "delta": "vendor_call_delta",
+    "gamma": "vendor_gamma",
+    "theta": "vendor_call_theta",
+    "vega": "vendor_vega",
+    "rho": "vendor_call_rho",
+    "phi": "vendor_phi",
+    "driftlessTheta": "vendor_driftless_theta",
 }
 
 # Hard requirements — if any of these are missing the input is not
-# usable and we refuse to ingest. The remaining map keys are nice-
-# to-have (vendor Greeks, smvVol) and the harness can tolerate
-# missing columns by leaving them null.
+# usable and we refuse to ingest. Everything else is nice-to-have.
 _REQUIRED_VENDOR_COLS: frozenset[str] = frozenset({
     "tradeDate",
     "expirDate",
@@ -107,10 +137,10 @@ _REQUIRED_VENDOR_COLS: frozenset[str] = frozenset({
     "stockPrice",
     "callBidPrice",
     "callAskPrice",
-    "callImpliedVol",
+    "callMidIv",
     "putBidPrice",
     "putAskPrice",
-    "putImpliedVol",
+    "putMidIv",
 })
 
 # US/Eastern is the SPX cash-options session zone. End-of-day chain
@@ -161,22 +191,34 @@ def ingest_orats_strikes_csv(
         {v_col: _ORATS_COLUMN_MAP[v_col] for v_col in keep_vendor}
     )
 
-    # Parse dates. ORATS publishes YYYY-MM-DD strings.
+    # Parse trade/expir dates. ORATS publishes YYYY-MM-DD strings.
     canon = canon.with_columns([
         pl.col("trade_date").str.to_date(format="%Y-%m-%d", strict=True),
         pl.col("expir_date").str.to_date(format="%Y-%m-%d", strict=True),
     ])
 
-    # Compose ts_utc from trade_date @ 16:00 America/New_York → UTC.
-    # zoneinfo handles DST so March/November transitions are correct.
-    def _to_utc(d) -> datetime:
-        local_dt = datetime.combine(d, _SESSION_CLOSE_LOCAL, _SESSION_TZ)
-        return local_dt.astimezone(timezone.utc)
+    # Compose ts_utc. Prefer the per-row `quote_date` ORATS publishes
+    # (e.g. "2025-12-15T20:46:00Z" — the actual snapshot moment) so
+    # backtests reflect when the chain was *actually* observable.
+    # When that column is absent (older vintages, partial schema)
+    # fall back to trade_date @ 16:00 America/New_York → UTC.
+    if "quote_date" in canon.columns:
+        canon = canon.with_columns(
+            pl.col("quote_date")
+            .str.to_datetime(time_unit="ns", time_zone="UTC", strict=True)
+            .alias("ts_utc")
+        )
+    else:
+        def _to_utc(d) -> datetime:
+            local_dt = datetime.combine(d, _SESSION_CLOSE_LOCAL, _SESSION_TZ)
+            return local_dt.astimezone(timezone.utc)
 
-    ts_utc_values = [_to_utc(d) for d in canon.get_column("trade_date").to_list()]
-    canon = canon.with_columns(
-        pl.Series("ts_utc", ts_utc_values).cast(pl.Datetime("ns", "UTC"))
-    )
+        ts_utc_values = [
+            _to_utc(d) for d in canon.get_column("trade_date").to_list()
+        ]
+        canon = canon.with_columns(
+            pl.Series("ts_utc", ts_utc_values).cast(pl.Datetime("ns", "UTC"))
+        )
 
     # Drop exact (ts_utc, expir_date, strike) duplicates. ORATS
     # normally emits one row per key but back-published vintages can

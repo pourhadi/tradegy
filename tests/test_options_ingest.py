@@ -41,47 +41,65 @@ def _build_orats_csv(
     expiries: list[date],
     strikes: list[float],
     stock_price: float = 4500.0,
+    include_quote_date: bool = True,
 ) -> Path:
-    """Write a minimal-but-valid ORATS-shaped CSV. Vendor camelCase
-    headers (matching their /datav2/hist/strikes endpoint).
+    """Write a minimal-but-valid ORATS-shaped CSV.
+
+    Vendor camelCase headers matching the actual /datav2/hist/strikes
+    response shape (verified against real ORATS data 2026-05-03 — see
+    csv_orats.py for the full schema notes). Single `delta`/`gamma`/
+    `theta`/`vega`/`rho`/`phi` per row (call-side, NOT side-prefixed).
+    `callMidIv`/`putMidIv` instead of `callImpliedVol`/`putImpliedVol`.
     """
     rows: list[dict] = []
     for td in trade_dates:
         for ex in expiries:
             dte = (ex - td).days
             for k in strikes:
-                rows.append({
+                row = {
                     "ticker": "SPX",
                     "tradeDate": td.isoformat(),
                     "expirDate": ex.isoformat(),
                     "dte": dte,
                     "strike": k,
                     "stockPrice": stock_price,
+                    "spotPrice": stock_price,
                     "residualRate": 0.045,
                     "smvVol": 0.18,
+                    "expiryTod": "pm",
                     "callBidPrice": max(stock_price - k, 0) + 5.0,
                     "callAskPrice": max(stock_price - k, 0) + 5.4,
                     "callValue": max(stock_price - k, 0) + 5.2,
-                    "callImpliedVol": 0.18,
-                    "callDelta": 0.55,
-                    "callGamma": 0.001,
-                    "callTheta": -0.50,
-                    "callVega": 5.0,
-                    "callRho": 1.2,
+                    "callBidIv": 0.175,
+                    "callMidIv": 0.18,
+                    "callAskIv": 0.185,
+                    "callBidSize": 10,
+                    "callAskSize": 10,
                     "callVolume": 1000,
                     "callOpenInterest": 5000,
                     "putBidPrice": max(k - stock_price, 0) + 5.0,
                     "putAskPrice": max(k - stock_price, 0) + 5.4,
                     "putValue": max(k - stock_price, 0) + 5.2,
-                    "putImpliedVol": 0.20,
-                    "putDelta": -0.45,
-                    "putGamma": 0.001,
-                    "putTheta": -0.45,
-                    "putVega": 5.0,
-                    "putRho": -1.0,
+                    "putBidIv": 0.195,
+                    "putMidIv": 0.20,
+                    "putAskIv": 0.205,
+                    "putBidSize": 8,
+                    "putAskSize": 8,
                     "putVolume": 1500,
                     "putOpenInterest": 7000,
-                })
+                    "delta": 0.55,
+                    "gamma": 0.001,
+                    "theta": -0.50,
+                    "vega": 5.0,
+                    "rho": 1.2,
+                    "phi": -0.001,
+                    "driftlessTheta": -0.49,
+                }
+                if include_quote_date:
+                    # Match real ORATS shape: ISO-Z timestamp at the
+                    # actual snapshot moment.
+                    row["quoteDate"] = f"{td.isoformat()}T20:46:00Z"
+                rows.append(row)
     df = pl.DataFrame(rows)
     df.write_csv(path)
     return path
@@ -158,13 +176,39 @@ def test_ingest_raises_on_missing_required_columns(tmp_path, workspace):
         )
 
 
-def test_ts_utc_is_session_close_in_eastern(tmp_path, workspace):
-    """trade_date 2026-01-02 (winter, EST) → 16:00 ET = 21:00 UTC."""
+def test_ts_utc_uses_quote_date_when_present(tmp_path, workspace):
+    """When ORATS publishes per-row `quoteDate` (the actual snapshot
+    moment, e.g. '2025-12-15T20:46:00Z' = 15:46 ET) we use it
+    directly rather than synthesizing 16:00 ET from trade_date.
+    """
     src_path = _build_orats_csv(
         tmp_path / "orats.csv",
         trade_dates=[date(2026, 1, 2)],
         expiries=[date(2026, 2, 20)],
         strikes=[4500.0],
+        include_quote_date=True,
+    )
+    source = load_data_source("synth_options")
+    ingest_orats_strikes_csv(src_path, source, out_dir=workspace["raw"])
+    df = load_chain_frames("synth_options", root=workspace["raw"])
+    ts = df.row(0, named=True)["ts_utc"]
+    # _build_orats_csv stamps quoteDate at 20:46:00Z.
+    expected = datetime(2026, 1, 2, 20, 46, 0, tzinfo=timezone.utc)
+    assert ts == expected
+
+
+def test_ts_utc_falls_back_to_session_close_when_no_quote_date_winter(
+    tmp_path, workspace,
+):
+    """Older ORATS vintages may not have quoteDate; fall back to
+    trade_date @ 16:00 America/New_York → UTC. Winter (EST) → 21:00 UTC.
+    """
+    src_path = _build_orats_csv(
+        tmp_path / "orats.csv",
+        trade_dates=[date(2026, 1, 2)],
+        expiries=[date(2026, 2, 20)],
+        strikes=[4500.0],
+        include_quote_date=False,
     )
     source = load_data_source("synth_options")
     ingest_orats_strikes_csv(src_path, source, out_dir=workspace["raw"])
@@ -174,13 +218,16 @@ def test_ts_utc_is_session_close_in_eastern(tmp_path, workspace):
     assert ts == expected
 
 
-def test_ts_utc_is_session_close_in_eastern_dst(tmp_path, workspace):
-    """trade_date 2026-06-15 (summer, EDT) → 16:00 ET = 20:00 UTC."""
+def test_ts_utc_falls_back_to_session_close_when_no_quote_date_summer(
+    tmp_path, workspace,
+):
+    """Summer (EDT) fallback → 20:00 UTC."""
     src_path = _build_orats_csv(
         tmp_path / "orats.csv",
         trade_dates=[date(2026, 6, 15)],
         expiries=[date(2026, 7, 17)],
         strikes=[4500.0],
+        include_quote_date=False,
     )
     source = load_data_source("synth_options")
     ingest_orats_strikes_csv(src_path, source, out_dir=workspace["raw"])

@@ -49,43 +49,58 @@ admission_rationale: >
   to and including D's close.
 coverage:
   start_date: 2007-01-03   # ORATS Pro coverage floor for SPX
-  end_date: ""              # rolling — refreshed on each ingest
+  end_date: 2026-12-31     # rolling — bumped on each multi-month ingest
   gaps: []
 cadence: 1d
 fields:
-  - {name: ts_utc, type: timestamp}             # tradeDate at session close UTC
+  - {name: ts_utc, type: timestamp}             # quoteDate (per-row), UTC
   - {name: ticker, type: string}
   - {name: trade_date, type: date}
   - {name: expir_date, type: date}
   - {name: dte, type: int}
   - {name: strike, type: float}
   - {name: stock_price, type: float}            # underlying close
-  - {name: residual_rate, type: float}          # ORATS' implied risk-free
+  - {name: spot_price, type: float}             # underlying spot at quote
+  - {name: residual_rate, type: float}          # ORATS implied risk-free
   - {name: smv_vol, type: float}                # ORATS smoothed market vol
+  - {name: ext_smv_vol, type: float}            # ORATS extended smoothed vol
+  - {name: quote_date, type: string}            # raw ORATS ISO timestamp
+  - {name: expiry_tod, type: string}            # "am" / "pm" — SOQ vs close
   # Call leg
   - {name: call_bid, type: float}
   - {name: call_ask, type: float}
-  - {name: call_value, type: float}             # ORATS mid
-  - {name: call_iv, type: float}
-  - {name: call_delta, type: float}             # ORATS Greeks; reference only
-  - {name: call_gamma, type: float}
-  - {name: call_theta, type: float}
-  - {name: call_vega, type: float}
-  - {name: call_rho, type: float}
+  - {name: call_value, type: float}             # ORATS mid (theoretical)
+  - {name: call_iv, type: float}                # callMidIv — canonical leg IV
+  - {name: call_bid_iv, type: float}
+  - {name: call_ask_iv, type: float}
+  - {name: call_bid_size, type: int}
+  - {name: call_ask_size, type: int}
   - {name: call_volume, type: int}
   - {name: call_open_interest, type: int}
+  - {name: ext_call_value, type: float}
   # Put leg
   - {name: put_bid, type: float}
   - {name: put_ask, type: float}
   - {name: put_value, type: float}
-  - {name: put_iv, type: float}
-  - {name: put_delta, type: float}
-  - {name: put_gamma, type: float}
-  - {name: put_theta, type: float}
-  - {name: put_vega, type: float}
-  - {name: put_rho, type: float}
+  - {name: put_iv, type: float}                 # putMidIv — canonical leg IV
+  - {name: put_bid_iv, type: float}
+  - {name: put_ask_iv, type: float}
+  - {name: put_bid_size, type: int}
+  - {name: put_ask_size, type: int}
   - {name: put_volume, type: int}
   - {name: put_open_interest, type: int}
+  - {name: ext_put_value, type: float}
+  # Vendor Greeks (call-side per ORATS — single delta/gamma/theta/
+  # vega/rho/phi per row is the call-side; put deltas etc. are
+  # derivable). Kept for cross-check audits, NOT consumed by
+  # strategies (which recompute via tradegy.options.greeks.bs_greeks).
+  - {name: vendor_call_delta, type: float}
+  - {name: vendor_gamma, type: float}
+  - {name: vendor_call_theta, type: float}
+  - {name: vendor_vega, type: float}
+  - {name: vendor_call_rho, type: float}
+  - {name: vendor_phi, type: float}
+  - {name: vendor_driftless_theta, type: float}
 ingest:
   format: orats_strikes_csv
   timestamp_columns: [tradeDate]
