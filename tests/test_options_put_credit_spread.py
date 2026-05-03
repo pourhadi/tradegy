@@ -166,7 +166,8 @@ def test_pcs_portfolio_greeks_signs(real_spx_chain_snapshots):
     strat = PutCreditSpread45dteD30()
     snap_entry = real_spx_chain_snapshots[0]
     snap_fill = real_spx_chain_snapshots[1]
-    snap_last = real_spx_chain_snapshots[-1]
+    mark_index = min(5, len(real_spx_chain_snapshots) - 1)
+    snap_mark = real_spx_chain_snapshots[mark_index]
 
     order = strat.on_chain(snap_entry, ())
     assert order is not None
@@ -175,7 +176,7 @@ def test_pcs_portfolio_greeks_signs(real_spx_chain_snapshots):
     )
     assert pos is not None
 
-    g = compute_portfolio_greeks([pos], snap_last)
+    g = compute_portfolio_greeks([pos], snap_mark)
     assert g.delta_dollars > 0, (
         "put credit spread is bullish → delta should be POSITIVE; "
         f"got {g.delta_dollars:.2f}"

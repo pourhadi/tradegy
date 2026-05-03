@@ -134,14 +134,15 @@ def test_calendar_pnl_pct_of_debit_is_real(real_spx_chain_snapshots):
     """
     snap_entry = real_spx_chain_snapshots[0]
     snap_fill = real_spx_chain_snapshots[1]
-    snap_last = real_spx_chain_snapshots[-1]
+    mark_index = min(3, len(real_spx_chain_snapshots) - 1)
+    snap_mark = real_spx_chain_snapshots[mark_index]
     order = PutCalendar30_60AtmDeb().on_chain(snap_entry, ())
     pos = _open_position_from_order(
         order, snap_fill, OptionCostModel(), position_id="cal",
     )
     assert pos is not None
-    pct_credit = pos.pnl_pct_of_max_credit(snap_last)
-    pct_debit = pos.pnl_pct_of_debit(snap_last)
+    pct_credit = pos.pnl_pct_of_max_credit(snap_mark)
+    pct_debit = pos.pnl_pct_of_debit(snap_mark)
     assert pct_credit != pct_credit  # NaN for credit-side metric
     assert pct_debit == pct_debit    # real number for debit-side
 
@@ -150,18 +151,19 @@ def test_should_close_dispatches_to_debit_branch(real_spx_chain_snapshots):
     """When the position is a debit calendar AND ManagementRules
     has profit_take_pct_of_debit set AND the position has decayed
     enough, should_close fires `profit_take_debit`. Use a tight
-    threshold to force the trigger on the available 5-day data.
+    threshold to force the trigger on real data.
     """
     snap_entry = real_spx_chain_snapshots[0]
     snap_fill = real_spx_chain_snapshots[1]
-    snap_last = real_spx_chain_snapshots[-1]
+    mark_index = min(3, len(real_spx_chain_snapshots) - 1)
+    snap_mark = real_spx_chain_snapshots[mark_index]
     order = PutCalendar30_60AtmDeb().on_chain(snap_entry, ())
     pos = _open_position_from_order(
         order, snap_fill, OptionCostModel(), position_id="cal",
     )
     assert pos is not None
 
-    pnl_pct = pos.pnl_pct_of_debit(snap_last)
+    pnl_pct = pos.pnl_pct_of_debit(snap_mark)
     # Set the profit-take threshold below the actual current pct
     # if positive, OR set the loss-stop threshold above the
     # actual current loss if negative — in either case the
@@ -172,7 +174,7 @@ def test_should_close_dispatches_to_debit_branch(real_spx_chain_snapshots):
             profit_take_pct_of_debit=pnl_pct * 0.5,
             loss_stop_pct_of_debit=10.0,
         )
-        reason = should_close(pos, snap_last, rules)
+        reason = should_close(pos, snap_mark, rules)
         assert reason is not None and "profit_take_debit" in reason
     else:
         rules = ManagementRules(
@@ -180,7 +182,7 @@ def test_should_close_dispatches_to_debit_branch(real_spx_chain_snapshots):
             profit_take_pct_of_debit=10.0,
             loss_stop_pct_of_debit=abs(pnl_pct) * 0.5,
         )
-        reason = should_close(pos, snap_last, rules)
+        reason = should_close(pos, snap_mark, rules)
         assert reason is not None and "loss_stop_debit" in reason
 
 

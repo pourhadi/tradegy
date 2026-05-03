@@ -116,12 +116,18 @@ def test_per_expiration_cap_rejects_concentration(real_spx_chain_snapshots):
 # ── Tail-event halt — short history ────────────────────────────
 
 
-def test_tail_event_halt_inactive_when_history_too_short(
+def test_tail_event_halt_inactive_at_low_threshold_history(
     real_spx_chain_snapshots,
 ):
-    """5-snapshot fixture is well below the default min_history_for_
-    rv_halt=63. The halt check must return None (no halt) so day-1
-    backtests don't false-halt on insufficient data.
+    """The halt is OFF for the first `min_history_for_rv_halt`
+    snapshots regardless of regime — without sufficient history,
+    realized-vol percentile can't be computed and we default to
+    permissive (no halt) so day-1 backtests don't false-halt on
+    insufficient data.
+
+    We verify by setting min_history_for_rv_halt larger than the
+    fixture's snapshot count: regardless of how many real days
+    we have, the halt cannot fire because history < minimum.
     """
     strat = IronCondor45dteD16()
     risk = RiskManager(RiskConfig(
@@ -129,11 +135,11 @@ def test_tail_event_halt_inactive_when_history_too_short(
         max_capital_at_risk_pct=0.50,
         max_per_expiration_pct=0.50,
         suspend_above_rv_pct=0.95,
+        min_history_for_rv_halt=10_000,  # impossibly large — disables halt
     ))
     result = run_options_backtest(
         strategy=strat, snapshots=real_spx_chain_snapshots, risk=risk,
     )
-    # No tail-event halt rejections (history is too short).
     assert not any(
         "tail_event_halt" in r.reason for r in result.rejected_orders
     )
@@ -170,19 +176,14 @@ def test_portfolio_greeks_after_real_iron_condor_entry(
     ))
     # Run; pull the open position out of the runner state via
     # snap_pnl + reconstruct via direct access.
-    # Simpler: rerun with no risk and compute Greeks ourselves at
-    # the last snap.
-    result = run_options_backtest(
-        strategy=strat, snapshots=real_spx_chain_snapshots, risk=risk,
-    )
-    # We need access to live open positions. The runner's API
-    # exposes snapshot P&L but not the position objects. For this
-    # test we re-derive: take the strategy's order, fill it via the
-    # cost model, build the multi-leg position, compute Greeks at
-    # the last snap.
-    snap_entry = real_spx_chain_snapshots[0]  # day 0: strategy decides
-    snap_fill = real_spx_chain_snapshots[1]    # day 1: order fills
-    snap_last = real_spx_chain_snapshots[-1]
+    # We compute Greeks against snap[5] (within the position's
+    # 45-DTE lifecycle, regardless of whether the fixture has 5
+    # days or 250+). Marking against snap[-1] would mark a Jan-
+    # opened position against Dec which is past expiry.
+    snap_entry = real_spx_chain_snapshots[0]
+    snap_fill = real_spx_chain_snapshots[1]
+    mark_index = min(5, len(real_spx_chain_snapshots) - 1)
+    snap_mark = real_spx_chain_snapshots[mark_index]
 
     order = strat.on_chain(snap_entry, ())
     assert order is not None
@@ -193,7 +194,7 @@ def test_portfolio_greeks_after_real_iron_condor_entry(
     )
     assert pos is not None
 
-    g = compute_portfolio_greeks([pos], snap_last)
+    g = compute_portfolio_greeks([pos], snap_mark)
     # All Greeks finite numbers.
     assert g.delta_dollars == g.delta_dollars
     assert g.gamma_dollars == g.gamma_dollars

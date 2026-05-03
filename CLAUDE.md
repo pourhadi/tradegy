@@ -97,7 +97,7 @@ quick-orient:
 | 11 | Execution layer | Phases 1+2+3A+3B+3C **fully shipped** — FSM, idempotency, transition log, risk caps, kill-switch, session-flatten, IBKR router, divergence detector, reconciliation loop |
 | 12 | Live monitoring | Phase 1 shipped (framework + `broker_connectivity`, `data_freshness`, `time_skew`, `process_liveness`); **Phase 2+ pending** |
 | 13 | Governance | docs only |
-| 14 | Options vol selling | scope 2026-05-02; **Phase A complete 2026-05-03** — chain dataclasses + Black-Scholes Greeks + ORATS strikes ingest + chain reader + download script + chain feature transforms (atm_iv, term_structure_slope, put_call_skew_25d, expected_move_to_expiry, iv_rank_252d, iv_percentile_252d, realized_vol_30d) all shipped + verified on real SPX data; next: Phase B (multi-leg harness extension) |
+| 14 | Options vol selling | scope 2026-05-02; **Phases A + B + C complete + first Phase D real backtest 2026-05-03**. Full 2025 SPX (250 days) ingested. First backtest of all 4 strategies surfaced + fixed a critical close-P&L sign bug (pre-fix: 100% hit rate / $163K P&L / $0 drawdown — impossible). Post-fix realistic results: PutCreditSpread30d +7.7% RoC (winner — 2025 SPX bull trend), IronCondor16d -0.3%, PutCalendar -0.4%, ShortStrangle25d -9.7%. 534 tests passing. Next: Phase D-3 formal walk-forward + multi-year pull. |
 
 ---
 

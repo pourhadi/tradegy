@@ -357,14 +357,26 @@ def _close_position(
 ) -> ClosedTrade:
     """Compute close fills + realized P&L for `pos` at `snap`.
 
-    Each leg is closed at the cost-model's mid ± offset using the
-    OPPOSITE signed quantity (closing reverses direction). The
-    closed credit per share is `-sum(close cash flow per share)` —
-    same convention as entry credit. Realized per-share P&L is
-    entry_credit - close_credit (we received entry_credit, paid
-    close_credit; net = profit if entry > close).
+    Math (consistent with MultiLegPosition.mark_to_market):
+
+      For each leg: close_cost_per_share = -quantity * close_price
+        — positive when we pay net (closing a short position),
+          negative when we receive net (closing a long).
+      total_close_cost_per_share = sum over legs.
+      pnl_per_share = entry_credit_per_share - total_close_cost_per_share
+        — equals mark_to_market(snap) at close time. See the bug
+          report 2026-05-03: an earlier formulation negated
+          close_cost into "closed_credit" then subtracted, which
+          produced the OPPOSITE sign of the actual P&L. The full-
+          year backtest discovered it (100% hit rate is not real).
+
+    closed_credit_per_share is reported in ClosedTrade as the
+    negation of close_cost (i.e. "credit received on close",
+    positive when we received) for parity with entry_credit_per_
+    share — a convenience for downstream reporting, NOT used in
+    the P&L formula.
     """
-    close_per_share = 0.0
+    close_cost_per_share = 0.0
     n_legs = len(pos.legs)
     multiplier = pos.legs[0].multiplier if pos.legs else 100
 
@@ -380,11 +392,11 @@ def _close_position(
         else:
             # Closing reverses sign.
             close_px = cost.fill_price(chain_leg, signed_quantity=-leg.quantity)
-        # Closing cash flow per share for this leg = -quantity * close_px.
-        close_per_share += -leg.quantity * close_px
+        # Per-leg cost to close = -quantity * close_px.
+        close_cost_per_share += -leg.quantity * close_px
 
-    closed_credit = -close_per_share  # convention: + means we received on close
-    pnl_per_share = pos.entry_credit_per_share - closed_credit
+    pnl_per_share = pos.entry_credit_per_share - close_cost_per_share
+    closed_credit = -close_cost_per_share  # report-only; mirror of entry sign
     pnl_dollars_gross = pnl_per_share * multiplier * pos.contracts
 
     open_commission = cost.commission_for_legs(n_legs, contracts=pos.contracts)

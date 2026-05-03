@@ -150,7 +150,8 @@ def test_strangle_portfolio_greeks_signs(real_spx_chain_snapshots):
     """
     snap_entry = real_spx_chain_snapshots[0]
     snap_fill = real_spx_chain_snapshots[1]
-    snap_last = real_spx_chain_snapshots[-1]
+    mark_index = min(5, len(real_spx_chain_snapshots) - 1)
+    snap_mark = real_spx_chain_snapshots[mark_index]
 
     order = ShortStrangleDefined45dteD25().on_chain(snap_entry, ())
     assert order is not None
@@ -158,7 +159,7 @@ def test_strangle_portfolio_greeks_signs(real_spx_chain_snapshots):
         order, snap_fill, OptionCostModel(), position_id="g",
     )
     assert pos is not None
-    g = compute_portfolio_greeks([pos], snap_last)
+    g = compute_portfolio_greeks([pos], snap_mark)
     assert g.theta_dollars > 0
     assert g.vega_dollars < 0
 
