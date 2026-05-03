@@ -71,3 +71,37 @@ def closest_delta(
             best = leg
             best_diff = diff
     return best
+
+
+def closest_strike_at_offset(
+    candidates: list[OptionLeg], *,
+    body_strike: float,
+    offset_dollars: float,
+    direction: int,
+) -> OptionLeg | None:
+    """Return the leg whose strike is closest to `body_strike +
+    direction * offset_dollars`.
+
+    `direction` is +1 (target sits above body — for call wings) or
+    -1 (target sits below body — for put wings). Candidates are
+    pre-filtered to the proper side of body before distance
+    comparison so a closer strike on the wrong side never wins.
+
+    Used as the fixed-dollar-width counterpart to delta-anchored
+    wing selection. Addresses the C-1 finding: 5-delta wings on
+    SPX put-skew produce $775-wide spreads with poor credit/risk;
+    fixed-$25-width wings produce credit/risk consistent with
+    practitioner-typical 20-30%.
+    """
+    if not candidates:
+        return None
+    if direction not in (-1, +1):
+        raise ValueError(f"direction must be +1 or -1; got {direction}")
+    if direction > 0:
+        valid = [l for l in candidates if l.strike > body_strike]
+    else:
+        valid = [l for l in candidates if l.strike < body_strike]
+    if not valid:
+        return None
+    target = body_strike + direction * offset_dollars
+    return min(valid, key=lambda l: abs(l.strike - target))

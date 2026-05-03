@@ -40,6 +40,7 @@ from tradegy.options.chain import ChainSnapshot, OptionLeg, OptionSide
 from tradegy.options.positions import LegOrder, MultiLegOrder, MultiLegPosition
 from tradegy.options.strategies._helpers import (
     closest_delta,
+    closest_strike_at_offset,
     is_fillable,
     pick_expiry_closest_to_dte,
 )
@@ -48,17 +49,24 @@ from tradegy.options.strategy import OptionStrategy
 
 @dataclass(frozen=True)
 class PutCreditSpread45dteD30(OptionStrategy):
-    """Put credit spread with delta-anchored short + long legs.
+    """Put credit spread with delta-anchored short leg + dual-mode
+    wing selection.
 
-    Default: 45 DTE, short put at -0.30 delta, long put at -0.05
-    delta. The wide delta gap between short and long is what makes
-    the position a credit spread (collect more on the short than
-    we pay on the long).
+    Default: 45 DTE, short put at -0.30 delta, long wing at -0.05
+    delta.
+
+    Optional `wing_width_dollars`: when set (non-None), overrides
+    `wing_delta` and selects the long-wing strike as the closest
+    available to (short_strike - wing_width_dollars). Addresses
+    the 2026-05-03 real-data finding that 5-delta wings on SPX
+    put-skew produce $775-wide spreads with only 9% credit/risk
+    vs the practitioner-typical 20-30%.
     """
 
     target_dte: int = 45
     short_delta: float = 0.30
     wing_delta: float = 0.05
+    wing_width_dollars: float | None = None
     contracts: int = 1
     id: str = "put_credit_spread_45dte_d30"
 
@@ -96,13 +104,21 @@ class PutCreditSpread45dteD30(OptionStrategy):
             puts, target=-self.short_delta,
             S=snapshot.underlying_price, T=T, r=snapshot.risk_free_rate,
         )
-        # Long put at -wing_delta (the lower strike, OTM further).
-        # Restrict candidates to strikes BELOW the short.
-        below_short = [p for p in puts if p.strike < short_put.strike]
-        long_put = closest_delta(
-            below_short, target=-self.wing_delta,
-            S=snapshot.underlying_price, T=T, r=snapshot.risk_free_rate,
-        )
+        # Long-wing selection: width-anchored if wing_width_dollars
+        # is set; otherwise delta-anchored (default).
+        if self.wing_width_dollars is not None:
+            long_put = closest_strike_at_offset(
+                puts,
+                body_strike=short_put.strike,
+                offset_dollars=self.wing_width_dollars,
+                direction=-1,
+            )
+        else:
+            below_short = [p for p in puts if p.strike < short_put.strike]
+            long_put = closest_delta(
+                below_short, target=-self.wing_delta,
+                S=snapshot.underlying_price, T=T, r=snapshot.risk_free_rate,
+            )
 
         if short_put is None or long_put is None:
             return None

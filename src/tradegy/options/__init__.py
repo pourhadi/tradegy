@@ -52,7 +52,10 @@ from tradegy.options.runner import (
     run_options_backtest,
 )
 from tradegy.options.strategies import (
+    CallCreditSpread45dteD30,
+    IronButterfly45dteAtm,
     IronCondor45dteD16,
+    JadeLizard45dte,
     PutCalendar30_60AtmDeb,
     PutCreditSpread45dteD30,
     ShortStrangleDefined45dteD25,
@@ -83,10 +86,13 @@ from tradegy.options.greeks import (
 )
 
 __all__ = [
+    "CallCreditSpread45dteD30",
     "ChainSnapshot",
     "ClosedTrade",
     "Greeks",
+    "IronButterfly45dteAtm",
     "IronCondor45dteD16",
+    "JadeLizard45dte",
     "LegOrder",
     "ManagementRules",
     "MultiLegOrder",

@@ -35,6 +35,7 @@ from tradegy.options.chain import ChainSnapshot, OptionLeg, OptionSide
 from tradegy.options.positions import LegOrder, MultiLegOrder, MultiLegPosition
 from tradegy.options.strategies._helpers import (
     closest_delta,
+    closest_strike_at_offset,
     is_fillable,
     pick_expiry_closest_to_dte,
 )
@@ -47,12 +48,16 @@ class IronCondor45dteD16(OptionStrategy):
     long wings, 1 contract per entry.
 
     Subclassable for variants — e.g. IronCondor45dteD10 with
-    short_delta=0.10, IronCondor30dteD16 with target_dte=30, etc.
+    short_delta=0.10, IronCondor30dteD16 with target_dte=30.
+    Optional `wing_width_dollars` overrides delta-anchored wings
+    with width-anchored — see PutCreditSpread for the rationale
+    (5-delta wings on SPX put-skew yield poor credit/risk).
     """
 
     target_dte: int = 45
     short_delta: float = 0.16
     wing_delta: float = 0.05
+    wing_width_dollars: float | None = None
     contracts: int = 1
     id: str = "iron_condor_45dte_d16"
 
@@ -96,16 +101,26 @@ class IronCondor45dteD16(OptionStrategy):
             puts, target=-self.short_delta,
             S=snapshot.underlying_price, T=T, r=snapshot.risk_free_rate,
         )
-        long_call = closest_delta(
-            [c for c in calls if c.strike > short_call.strike],
-            target=self.wing_delta,
-            S=snapshot.underlying_price, T=T, r=snapshot.risk_free_rate,
-        )
-        long_put = closest_delta(
-            [p for p in puts if p.strike < short_put.strike],
-            target=-self.wing_delta,
-            S=snapshot.underlying_price, T=T, r=snapshot.risk_free_rate,
-        )
+        if self.wing_width_dollars is not None:
+            long_call = closest_strike_at_offset(
+                calls, body_strike=short_call.strike,
+                offset_dollars=self.wing_width_dollars, direction=+1,
+            )
+            long_put = closest_strike_at_offset(
+                puts, body_strike=short_put.strike,
+                offset_dollars=self.wing_width_dollars, direction=-1,
+            )
+        else:
+            long_call = closest_delta(
+                [c for c in calls if c.strike > short_call.strike],
+                target=self.wing_delta,
+                S=snapshot.underlying_price, T=T, r=snapshot.risk_free_rate,
+            )
+            long_put = closest_delta(
+                [p for p in puts if p.strike < short_put.strike],
+                target=-self.wing_delta,
+                S=snapshot.underlying_price, T=T, r=snapshot.risk_free_rate,
+            )
 
         if (
             short_call is None or short_put is None

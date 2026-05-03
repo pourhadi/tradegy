@@ -41,7 +41,27 @@ strategy classes*, not for hypothesis ideation.
 | Phase D-0 — full-year ORATS SPX pull | ✅ 2026-05-03 — 250 trade days (2025-01-02 → 2025-12-31), 1.5 GB CSV, 2.7M unique rows after dedup ingested into 250 date partitions | (data) |
 | Phase D-1 — close-P&L sign bug fix | ✅ 2026-05-03 — first full-year backtest produced impossible 100% hit rate / $163K P&L / $0 drawdown. Inspection: trade 5 fired loss_stop at -239% of credit but recorded +$22.6K P&L. Root cause: `_close_position` had `closed_credit = -close_per_share` then `pnl = entry_credit - closed_credit` which produced `pnl = entry_credit + close_cost` (opposite sign of actual realized P&L). Fixed by computing `pnl = entry_credit - close_cost` directly (matches mark_to_market formula). Added regression tests `test_options_pnl_invariants.py`: close P&L MUST agree in sign with mark_to_market; full-year backtest hit rate < 100% AND max drawdown < 0 (the bug signature). | `src/tradegy/options/runner.py`, `tests/test_options_pnl_invariants.py` |
 | Phase D-2 — first real backtest of all 4 strategies | ✅ 2026-05-03 (post-fix) — realistic numbers within practitioner-expected ranges. Iron Condor 16d: 67% hit / -0.3% RoC. PutCreditSpread 30d: 85% hit / +7.7% RoC (benefited from 2025 SPX bull trend). ShortStrangleDefined 25d: 53% hit / -9.7% RoC (narrow-body underperformed). PutCalendar 30/60 ATM: 75% hit / -0.4% RoC with tightly-controlled drawdown ($4.8K vs $32K for credit spreads). All exhibit fat-left-tailed return distributions characteristic of vol selling. | (Phase D) |
-| Phase D-3 — formal walk-forward + parameter sweep | ⏳ next — current backtest is single-window 2025; walk-forward needs multi-year data (5+ years for proper rolling-window validation) | (Phase D) |
+| Phase C-extended — three new strategy classes (CCS, IBF, JL) + width-variant parameterization (PCS, CCS, IC, Strangle) | ✅ shipped 2026-05-03. CallCreditSpread (bearish mirror of PCS), IronButterfly (concentrated condor at ATM), JadeLizard (asymmetric defined-risk targeting no-upside-loss when credit ≥ call wing width). Plus optional `wing_width_dollars` on the four credit-spread classes — when set, replaces delta-anchored wings with fixed-dollar-width selection (addresses the C-1 finding that 5-delta SPX wings produce $400-700 wide spreads with poor c/r). 7 → 7+4 = 11 effective strategy variants. | `src/tradegy/options/strategies/{call_credit_spread,iron_butterfly,jade_lizard}.py` + parameterized existing classes |
+| Phase D-3 — multi-strategy real-data backtest | ✅ run 2026-05-03 on full 2025 SPX. RESULT TABLE below documents the relative outcomes — **only PutCreditSpread (delta-anchored) was profitable** (+7.7% RoC, benefited from SPX bull trend). All other strategies ranged from break-even (IC, CCS, calendar) to lossy (Strangle -9.7%, Butterfly -9.9%). Width-anchored variants had MUCH smaller drawdowns ($5K vs $22-50K) but also smaller per-trade credits → underperformed delta-anchored in 2025's benign regime. The trade-off would invert in stress years (2018, 2020, 2022). Multi-year walk-forward needed to validate. | `tests/test_options_*.py` + scripted comparisons |
+| Phase D-4 — formal walk-forward + multi-year pull | ⏳ next — current data is 2025 only. Walk-forward + parameter sensitivity sweep needs 5+ years (2020-2024) to span multiple vol regimes (COVID 2020, trending 2021, bear 2022, recovery 2023, bull 2024-25). | (Phase D) |
+
+### 2025 backtest result table (250 trade days, $250K capital, default management)
+
+| Strategy | Trades | Hit% | P&L | Max DD | RoC |
+|---|---|---|---|---|---|
+| **PutCreditSpread 30d (delta wing)** | **20** | **85%** | **+$19,241** | -$32,718 | **+7.7%** |
+| IronCondor 16d (delta wing) | 18 | 67% | -$626 | -$22,500 | -0.3% |
+| PutCalendar 30/60 ATM | 36 | 75% | -$904 | -$4,799 | -0.4% |
+| CallCreditSpread 30d (delta wing) | 21 | 71% | -$1,822 | -$25,622 | -0.7% |
+| PutCreditSpread 30d (width $50) | 19 | 74% | -$2,343 | -$8,022 | -0.9% |
+| PutCreditSpread 30d (width $25) | 18 | 72% | -$3,249 | -$6,264 | -1.3% |
+| IronCondor 16d (width $50) | 15 | 60% | -$3,929 | -$5,036 | -1.6% |
+| CallCreditSpread 30d (width $25) | 18 | 56% | -$5,479 | -$7,079 | -2.2% |
+| ShortStrangle 25d (width $50) | 14 | 50% | -$6,286 | -$7,350 | -2.5% |
+| IronCondor 16d (width $100) | 15 | 53% | -$8,579 | -$10,656 | -3.4% |
+| JadeLizard 45dte | 16 | 81% | -$10,617 | -$50,948 | -4.2% |
+| ShortStrangle 25d (delta wing) | 15 | 53% | -$24,348 | -$39,270 | -9.7% |
+| IronButterfly ATM (delta wing) | 14 | 43% | -$24,689 | -$35,935 | -9.9% |
 | Phase D — backtest + walk-forward validation | ⏳ planned | (Phase D) |
 | Phase E — paper trading via IBKR combo orders | ⏳ planned | `src/tradegy/execution/` |
 | Phase F — 90-day live soak | ⏳ planned | (Phase F) |

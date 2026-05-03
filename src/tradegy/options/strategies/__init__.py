@@ -10,7 +10,10 @@ Phase B-2 ships the iron condor as the first concrete strategy so
 the runner has something to backtest end-to-end. The other three
 classes follow once B-2 has shipped.
 """
+from tradegy.options.strategies.call_credit_spread import CallCreditSpread45dteD30
+from tradegy.options.strategies.iron_butterfly import IronButterfly45dteAtm
 from tradegy.options.strategies.iron_condor import IronCondor45dteD16
+from tradegy.options.strategies.jade_lizard import JadeLizard45dte
 from tradegy.options.strategies.put_calendar import PutCalendar30_60AtmDeb
 from tradegy.options.strategies.put_credit_spread import PutCreditSpread45dteD30
 from tradegy.options.strategies.short_strangle_defined import (
@@ -18,7 +21,10 @@ from tradegy.options.strategies.short_strangle_defined import (
 )
 
 __all__ = [
+    "CallCreditSpread45dteD30",
+    "IronButterfly45dteAtm",
     "IronCondor45dteD16",
+    "JadeLizard45dte",
     "PutCalendar30_60AtmDeb",
     "PutCreditSpread45dteD30",
     "ShortStrangleDefined45dteD25",
