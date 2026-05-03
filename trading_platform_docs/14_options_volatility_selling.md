@@ -43,9 +43,45 @@ strategy classes*, not for hypothesis ideation.
 | Phase D-2 — first real backtest of all 4 strategies | ✅ 2026-05-03 (post-fix) — realistic numbers within practitioner-expected ranges. Iron Condor 16d: 67% hit / -0.3% RoC. PutCreditSpread 30d: 85% hit / +7.7% RoC (benefited from 2025 SPX bull trend). ShortStrangleDefined 25d: 53% hit / -9.7% RoC (narrow-body underperformed). PutCalendar 30/60 ATM: 75% hit / -0.4% RoC with tightly-controlled drawdown ($4.8K vs $32K for credit spreads). All exhibit fat-left-tailed return distributions characteristic of vol selling. | (Phase D) |
 | Phase C-extended — three new strategy classes (CCS, IBF, JL) + width-variant parameterization (PCS, CCS, IC, Strangle) | ✅ shipped 2026-05-03. CallCreditSpread (bearish mirror of PCS), IronButterfly (concentrated condor at ATM), JadeLizard (asymmetric defined-risk targeting no-upside-loss when credit ≥ call wing width). Plus optional `wing_width_dollars` on the four credit-spread classes — when set, replaces delta-anchored wings with fixed-dollar-width selection (addresses the C-1 finding that 5-delta SPX wings produce $400-700 wide spreads with poor c/r). 7 → 7+4 = 11 effective strategy variants. | `src/tradegy/options/strategies/{call_credit_spread,iron_butterfly,jade_lizard}.py` + parameterized existing classes |
 | Phase D-3 — multi-strategy real-data backtest | ✅ run 2026-05-03 on full 2025 SPX. RESULT TABLE below documents the relative outcomes — **only PutCreditSpread (delta-anchored) was profitable** (+7.7% RoC, benefited from SPX bull trend). All other strategies ranged from break-even (IC, CCS, calendar) to lossy (Strangle -9.7%, Butterfly -9.9%). Width-anchored variants had MUCH smaller drawdowns ($5K vs $22-50K) but also smaller per-trade credits → underperformed delta-anchored in 2025's benign regime. The trade-off would invert in stress years (2018, 2020, 2022). Multi-year walk-forward needed to validate. | `tests/test_options_*.py` + scripted comparisons |
-| Phase D-4 — formal walk-forward + multi-year pull | 🚧 in progress 2026-05-03 — multi-year ORATS pull (2020-01-01 → 2024-12-31) running in background. Walk-forward + parameter sensitivity sweep waits on the data. | (Phase D) |
-| IV-gated strategy wrapper | ✅ shipped 2026-05-03 — `IvGatedStrategy(base, min_iv_rank, max_iv_rank, target_dte, window_days, min_history_days)` composes any OptionStrategy with an entry gate based on rolling ATM-IV rank. Stateful internally (tracks ATM-IV history per snap); presents stateless ABC to the runner. id derived from base + gate params for audit-trail clarity. | `src/tradegy/options/strategies/iv_gated.py` |
-| IV-gating real-data finding (2025) | ⚠️ counter-intuitive: practitioner-canon "sell vol when IV is high" UNDERPERFORMED on 2025 SPX. PCS with IV>0.50 gate: 1 trade entered, 0% hit, -8.7% RoC. PCS with IV<0.30 gate: 10 trades, **90% hit, +10.2% RoC, only $3K max DD vs $37K for bare PCS**. Likely 2025-regime-specific: SPX trended up steadily; IV stayed compressed; the rare spikes coincided with sell-offs that hurt short-vol. Multi-year validation needed before any conclusion. Width-anchored IC + IV>0.50 gate: 5/5 winning trades, $0 drawdown — promising but tiny sample. | (D-4 candidate) |
+| Phase D-4 — multi-year backtest (6 years, 2020-2025) | ✅ shipped 2026-05-03 — 1508 trade-day partitions, 7.5GB CSV ingested. All 12 strategy + IV-gating variants backtested on the full window. Per-year breakdown of top-3 (PCS, JL, IC) shows real regime sensitivity. | (Phase D) |
+| Phase D-5 — formal walk-forward (rolling-window) + multi-instrument | ⏳ next | (Phase D) |
+| IV-gated strategy wrapper | ✅ shipped 2026-05-03 — `IvGatedStrategy(base, min_iv_rank, max_iv_rank, target_dte, window_days, min_history_days)` composes any OptionStrategy with an entry gate based on rolling ATM-IV rank. | `src/tradegy/options/strategies/iv_gated.py` |
+| 2025-only IV-gating findings | ❌ NOT validated by multi-year. The 2025-only "PCS+IV<0.30 → +10.2% RoC, 90% hit" was regime-local; on 6 years it drops to +7.4% with $49K max DD. The "IC width $50 + IV>0.50 → 5/5 perfect" was sample-noise; on 6 years it's -2.7% RoC, 43% hit. Lesson: don't infer from one year. | (validated against multi-year) |
+
+### Multi-year (2020-2025) backtest results — single-strategy, $250K, default management
+
+| Strategy | Trades | Hit% | P&L | MaxDD | Sharpe | RoC |
+|---|---|---|---|---|---|---|
+| **PutCreditSpread 30d (delta wing)** | **132** | **81%** | **+$45,038** | -$48,716 | **+0.34** | **+18.0%** ← winner |
+| JadeLizard 45dte | 95 | 63% | +$23,652 | -$55,945 | +0.17 | +9.5% |
+| IronCondor 16d (delta wing) | 104 | 60% | +$14,760 | -$24,645 | +0.19 | +5.9% |
+| IronCondor 16d (width $50) | 94 | 46% | -$16,011 | -$17,117 | -0.75 | -6.4% |
+| PCS + IV>0.50 (canonical practitioner rule) | 50 | 70% | -$8,094 | -$32,212 | -0.09 | -3.2% |
+| PCS + IV<0.30 (the 2025 "winner") | 95 | 82% | +$18,444 | -$48,745 | +0.21 | +7.4% |
+| PutCalendar 30/60 ATM | 214 | 60% | -$6,700 | -$10,436 | -0.31 | -2.7% |
+| IC + IV>0.50 (60d) | 43 | 56% | -$30,827 | -$51,462 | -0.42 | -12.3% |
+| IC width $50 + IV>0.50 (the "perfect 5/5") | 42 | 43% | -$6,777 | -$9,089 | -0.49 | -2.7% |
+| ShortStrangle 25d | 94 | 50% | -$32,145 | -$71,879 | -0.27 | -12.9% |
+| CallCreditSpread 30d (bull years dominated) | 125 | 53% | -$59,524 | -$71,658 | -0.53 | -23.8% |
+| IronButterfly ATM | 88 | 60% | -$73,365 | -$102,348 | -0.42 | -29.3% |
+
+### Per-year breakdown (top 3)
+
+| | 2020 (COVID) | 2021 (bull) | 2022 (bear) | 2023 (recovery) | 2024 (bull) | 2025 (bull) | Pos years |
+|---|---|---|---|---|---|---|---|
+| **PCS bare** | +2.8% | +11.8% | **-15.4%** | +5.7% | +10.7% | +2.4% | **5/6** |
+| JadeLizard | -0.9% | +9.8% | +6.0% | +5.6% | -1.5% | -9.6% | 3/6 |
+| IronCondor 16d | -3.6% | +2.7% | **+7.7%** | -5.5% | +3.0% | +1.6% | 4/6 |
+
+PCS is consistent except in bear years (2022 took ~-15%). IronCondor was POSITIVE in 2022 when PCS lost — natural regime hedge. JadeLizard inconsistent.
+
+### Real findings (validated across 6 years)
+
+1. **PutCreditSpread bare is the only consistently profitable single-strategy** at ~3% annualized RoC, 5/6 positive years, Sharpe 0.34.
+2. **Width-anchored variants all lost** across 6 years — small per-trade credit didn't compound past the rare max-loss events. Their drawdown advantage doesn't compensate for the credit reduction. Useful for stress-only deployment perhaps.
+3. **IV-gating UNDERPERFORMED bare strategies** across 6 years. Both directions (IV>0.50 and IV<0.30) hurt PCS relative to the bare strategy. The canonical "sell vol when IV is high" rule didn't help on SPX 2020-2025.
+4. **2025-only findings did not generalize.** The +10.2% / 90% hit / $3K DD result for PCS+IV<0.30 was regime-local; the "perfect 5/5" for IC+width+IV-gate was sample-noise.
+5. **IC is the natural regime hedge for PCS.** When PCS loses (2022 bear), IC was its best year. A combined portfolio is the obvious next experiment but requires careful capital-allocation design (single-position concentration limits make naive 50/50 allocation underperform single-strategy with full capital).
 
 ### 2025 backtest result table (250 trade days, $250K capital, default management)
 
