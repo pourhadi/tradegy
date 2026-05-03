@@ -29,6 +29,15 @@ from tradegy.options.chain import (
     OptionLeg,
     OptionSide,
 )
+from tradegy.options.chain_features import (
+    atm_iv,
+    expected_move_to_expiry,
+    iv_percentile_252d,
+    iv_rank_252d,
+    put_call_skew_25d,
+    realized_vol_30d,
+    term_structure_slope,
+)
 from tradegy.options.chain_io import (
     iter_chain_snapshots,
     load_chain_frames,
@@ -45,9 +54,16 @@ __all__ = [
     "OptionLeg",
     "OptionSide",
     "Greeks",
+    "atm_iv",
     "bs_greeks",
     "bs_price",
+    "expected_move_to_expiry",
     "implied_vol",
     "iter_chain_snapshots",
+    "iv_percentile_252d",
+    "iv_rank_252d",
     "load_chain_frames",
+    "put_call_skew_25d",
+    "realized_vol_30d",
+    "term_structure_slope",
 ]

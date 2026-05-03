@@ -97,7 +97,7 @@ quick-orient:
 | 11 | Execution layer | Phases 1+2+3A+3B+3C **fully shipped** — FSM, idempotency, transition log, risk caps, kill-switch, session-flatten, IBKR router, divergence detector, reconciliation loop |
 | 12 | Live monitoring | Phase 1 shipped (framework + `broker_connectivity`, `data_freshness`, `time_skew`, `process_liveness`); **Phase 2+ pending** |
 | 13 | Governance | docs only |
-| 14 | Options vol selling | scope adopted 2026-05-02; Phase A scaffolding (options module + Black-Scholes Greeks + chain dataclasses) shipped 2026-05-03 — vendor-blocked items deferred until ORATS/CBOE decision |
+| 14 | Options vol selling | scope 2026-05-02; **Phase A complete 2026-05-03** — chain dataclasses + Black-Scholes Greeks + ORATS strikes ingest + chain reader + download script + chain feature transforms (atm_iv, term_structure_slope, put_call_skew_25d, expected_move_to_expiry, iv_rank_252d, iv_percentile_252d, realized_vol_30d) all shipped + verified on real SPX data; next: Phase B (multi-leg harness extension) |
 
 ---
 
