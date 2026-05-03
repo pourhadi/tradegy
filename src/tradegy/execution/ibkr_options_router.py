@@ -73,6 +73,7 @@ _log = logging.getLogger(__name__)
 # uses IND. /ES futures options would use FOP. Mapped per ticker.
 _UNDERLYING_SECTYPE = {
     "SPX": "IND",
+    "XSP": "IND",
     "SPY": "STK",
     "NDX": "IND",
     "QQQ": "STK",
@@ -84,6 +85,7 @@ _UNDERLYING_SECTYPE = {
 # CBOE; for ETF options it's SMART (let IBKR's smart router pick).
 _OPTION_EXCHANGE = {
     "SPX": "CBOE",
+    "XSP": "CBOE",
     "NDX": "CBOE",
     "RUT": "CBOE",
 }
@@ -102,6 +104,7 @@ _DEFAULT_OPTION_EXCHANGE = "SMART"
 # qualified contract.
 _OPTION_TRADING_CLASS = {
     "SPX": "SPXW",
+    "XSP": "XSP",   # XSP trades all cycles under the same trading class
     "NDX": "NDXP",
     "RUT": "RUTW",
 }

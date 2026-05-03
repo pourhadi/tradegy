@@ -1,0 +1,157 @@
+# Data source registry entry for XSP (Mini-SPX cash index) options
+# end-of-day chain snapshots, sourced from ORATS Pro.
+#
+# Added 2026-05-03 to support vol-selling at retail-account-sized
+# capital ($25K target) per trading_platform_docs/14_options_
+# volatility_selling.md.
+#
+# XSP is the CBOE Mini-SPX option product:
+#   + Same underlying index dynamics as SPX (S&P 500 cash index)
+#   + Multiplier $10 (vs SPX's $100) — 1/10 the dollar-equivalent
+#     exposure per contract.
+#   + Strike values are 1/10 of SPX (so XSP at 681 ≈ SPX at 6810)
+#   + Same European-style cash-settled mechanics as SPX (no early
+#     assignment risk, no underlying delivery)
+#   + Liquid chain on CBOE; subset of SPX's depth (especially in
+#     deep-OTM strikes), but sufficient for credit-spread / iron-
+#     condor / butterfly structures at $25K-account sizing.
+# Trade-off vs SPX:
+#   - Smaller ORATS history depth than SPX (XSP launched 2005,
+#     ORATS Pro coverage typically begins 2010+).
+#   - Wider relative bid-ask spreads on deep wings (proportionally
+#     similar but smaller absolute dollar impact).
+#
+# IBKR routing (live phase):
+#   - Trading class: "XSP" (no XSPW weekly equivalent — XSP itself
+#     trades both monthly and weekly cycles under the same class).
+#   - Exchange: CBOE.
+#
+# Same vendor-Greeks-not-consumed convention as the SPX source.
+
+id: xsp_options_chain
+version: v1
+description: >
+  Mini-SPX (XSP) end-of-day options chain snapshots from ORATS Pro.
+  One row per (tradeDate, expirDate, strike) with both call and put
+  leg fields side-by-side. Strike values are 1/10 SPX equivalents;
+  multiplier is $10 per point (vs SPX's $100), making XSP the
+  retail-sized version of the same underlying index dynamics.
+type: market_data
+provider: orats
+revisable: true
+revision_policy: revised_with_vintages
+admission_rationale: >
+  ORATS Pro provides ORATS-snapshotted SPX options end-of-day chains
+  with reasonably tight bid/ask + vendor IV computed from a smoothed
+  market vol surface. ORATS occasionally re-publishes back-dated
+  snapshots (cleaner IV when their surface model is recalibrated).
+  We pin a vintage timestamp on every ingest so a backtest can be
+  re-run against the historical vintage that was on disk at
+  decision time. Lookahead-free at the snapshot date — the
+  end-of-day chain at date D contains only quotes observable up
+  to and including D's close.
+coverage:
+  start_date: 2010-01-04   # ORATS Pro coverage floor for XSP (later than SPX)
+  end_date: 2026-12-31     # rolling — bumped on each multi-month ingest
+  gaps: []
+cadence: 1d
+fields:
+  - {name: ts_utc, type: timestamp}             # quoteDate (per-row), UTC
+  - {name: ticker, type: string}
+  - {name: trade_date, type: date}
+  - {name: expir_date, type: date}
+  - {name: dte, type: int}
+  - {name: strike, type: float}
+  - {name: stock_price, type: float}            # underlying close
+  - {name: spot_price, type: float}             # underlying spot at quote
+  - {name: residual_rate, type: float}          # ORATS implied risk-free
+  - {name: smv_vol, type: float}                # ORATS smoothed market vol
+  - {name: ext_smv_vol, type: float}            # ORATS extended smoothed vol
+  - {name: quote_date, type: string}            # raw ORATS ISO timestamp
+  - {name: expiry_tod, type: string}            # "am" / "pm" — SOQ vs close
+  # Call leg
+  - {name: call_bid, type: float}
+  - {name: call_ask, type: float}
+  - {name: call_value, type: float}             # ORATS mid (theoretical)
+  - {name: call_iv, type: float}                # callMidIv — canonical leg IV
+  - {name: call_bid_iv, type: float}
+  - {name: call_ask_iv, type: float}
+  - {name: call_bid_size, type: int}
+  - {name: call_ask_size, type: int}
+  - {name: call_volume, type: int}
+  - {name: call_open_interest, type: int}
+  - {name: ext_call_value, type: float}
+  # Put leg
+  - {name: put_bid, type: float}
+  - {name: put_ask, type: float}
+  - {name: put_value, type: float}
+  - {name: put_iv, type: float}                 # putMidIv — canonical leg IV
+  - {name: put_bid_iv, type: float}
+  - {name: put_ask_iv, type: float}
+  - {name: put_bid_size, type: int}
+  - {name: put_ask_size, type: int}
+  - {name: put_volume, type: int}
+  - {name: put_open_interest, type: int}
+  - {name: ext_put_value, type: float}
+  # Vendor Greeks (call-side per ORATS — single delta/gamma/theta/
+  # vega/rho/phi per row is the call-side; put deltas etc. are
+  # derivable). Kept for cross-check audits, NOT consumed by
+  # strategies (which recompute via tradegy.options.greeks.bs_greeks).
+  - {name: vendor_call_delta, type: float}
+  - {name: vendor_gamma, type: float}
+  - {name: vendor_call_theta, type: float}
+  - {name: vendor_vega, type: float}
+  - {name: vendor_call_rho, type: float}
+  - {name: vendor_phi, type: float}
+  - {name: vendor_driftless_theta, type: float}
+ingest:
+  format: orats_strikes_csv
+  timestamp_columns: [tradeDate]
+session_calendar: XNYS
+# SPX options trade RTH 9:30-16:15 ET. End-of-day snapshots are
+# typically published shortly after the 16:15 ET cash close. Allow
+# generous slack for ORATS API publication latency, holiday weeks,
+# and any backfill batches.
+max_inactivity_seconds: 604800
+availability_latency:
+  median_seconds: 3600.0     # ~1 hour after close
+  p99_seconds: 86400.0       # ORATS occasionally back-publishes by next day
+  notes: >
+    ORATS' /datav2/hist/strikes endpoint serves end-of-day
+    snapshots; they typically post within 1-2 hours of the cash
+    close. Their Pro tier permits historical bulk pulls back to
+    2007 for SPX without per-pull metering, making backtest
+    rebuilds straightforward.
+licensing:
+  live_use: false   # no live ORATS adapter wired yet
+  backtest_use: true
+  redistribution: false
+known_issues:
+  - >
+    ORATS-published Greeks come from their smoothed market vol
+    surface (`smvVol`) which interpolates and extrapolates across
+    strikes/expiries to fill missing or wide-spread quotes. We
+    do NOT consume those Greeks — every strategy in the harness
+    recomputes via tradegy.options.greeks.bs_greeks from the
+    per-leg IV, the underlying close, and the residual rate.
+    The vendor Greeks columns are kept for reference + audit
+    cross-check.
+  - >
+    `residual_rate` is ORATS' implied risk-free rate from put-call
+    parity on the SPX chain. It is not a published Treasury yield
+    and may diverge slightly during stress windows. The harness
+    uses it as the BS r input rather than pulling SOFR/Treasury
+    separately, so the rate environment in backtest matches the
+    rate ORATS used to compute their own IVs (which we then re-
+    extract).
+  - >
+    SPX uses the cash index as underlying. Cash-settled European-
+    style; no early assignment, no pin risk in the underlying-
+    delivery sense. PM-settled (Friday weeklies) vs AM-settled
+    (third-Friday monthlies) is a real distinction at expiration:
+    AM-settled SPX has open-print SOQ pricing that diverges from
+    the cash close. Strategy classes that hold to expiration must
+    handle the SOQ vs close gap; the in-scope strategies (close
+    at 50% / 21 DTE) never carry to expiry so this is moot for
+    Phase B.
+audit_history: []

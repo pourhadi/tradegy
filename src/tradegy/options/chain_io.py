@@ -31,11 +31,16 @@ from tradegy.options.chain import (
 )
 
 
-# SPX / cash-index multiplier. Futures-options multipliers (e.g. /ES
-# = 50) are added when a /ES options source lands; for now this is
-# scoped to SPX cash-index options per the doc 14 Phase A decision.
+# Cash-index option multipliers. SPX/NDX/RUT use the standard $100
+# multiplier; XSP is the CBOE Mini-SPX product with $10 multiplier
+# (1/10 size, retail-friendly). SPY is an ETF with $100 multiplier
+# but each strike is ~1/10 of SPX's, so per-contract dollar exposure
+# is naturally 1/10 SPX too.
+# Futures-options multipliers (e.g. /ES = 50) are added when an
+# /ES options source lands.
 _DEFAULT_MULTIPLIER_BY_TICKER: dict[str, int] = {
     "SPX": 100,
+    "XSP": 10,
     "SPY": 100,
     "NDX": 100,
     "RUT": 100,
