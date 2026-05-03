@@ -13,6 +13,7 @@ classes follow once B-2 has shipped.
 from tradegy.options.strategies.call_credit_spread import CallCreditSpread45dteD30
 from tradegy.options.strategies.iron_butterfly import IronButterfly45dteAtm
 from tradegy.options.strategies.iron_condor import IronCondor45dteD16
+from tradegy.options.strategies.iv_gated import IvGatedStrategy
 from tradegy.options.strategies.jade_lizard import JadeLizard45dte
 from tradegy.options.strategies.put_calendar import PutCalendar30_60AtmDeb
 from tradegy.options.strategies.put_credit_spread import PutCreditSpread45dteD30
@@ -24,6 +25,7 @@ __all__ = [
     "CallCreditSpread45dteD30",
     "IronButterfly45dteAtm",
     "IronCondor45dteD16",
+    "IvGatedStrategy",
     "JadeLizard45dte",
     "PutCalendar30_60AtmDeb",
     "PutCreditSpread45dteD30",
