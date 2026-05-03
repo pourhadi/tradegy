@@ -53,6 +53,7 @@ from tradegy.options.runner import (
 )
 from tradegy.options.strategies import (
     CallCreditSpread45dteD30,
+    CallDiagonal30_60,
     IronButterfly45dteAtm,
     IronCondor45dteD16,
     IvGatedStrategy,
@@ -61,7 +62,10 @@ from tradegy.options.strategies import (
     PutCalendar30_60AtmDeb,
     PutCreditSpread45dteD30,
     PutDiagonal30_60,
+    ReverseIronCondor45dteD30,
     ShortStrangleDefined45dteD25,
+    SkewGatedStrategy,
+    TermStructureGatedStrategy,
 )
 from tradegy.options.strategy import (
     ManagementRules,
@@ -90,6 +94,7 @@ from tradegy.options.greeks import (
 
 __all__ = [
     "CallCreditSpread45dteD30",
+    "CallDiagonal30_60",
     "ChainSnapshot",
     "ClosedTrade",
     "Greeks",
@@ -112,12 +117,15 @@ __all__ = [
     "PutCalendar30_60AtmDeb",
     "PutCreditSpread45dteD30",
     "PutDiagonal30_60",
+    "ReverseIronCondor45dteD30",
     "RejectedOrder",
     "RiskConfig",
     "RiskDecision",
     "RiskManager",
     "ShortStrangleDefined45dteD25",
+    "SkewGatedStrategy",
     "SnapshotPnL",
+    "TermStructureGatedStrategy",
     "atm_iv",
     "bs_greeks",
     "bs_price",
