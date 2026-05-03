@@ -102,6 +102,12 @@ class _MockIB:
             out.append(c)
         return out
 
+    async def qualifyContractsAsync(self, *contracts) -> list:
+        # Mock async path mirrors the sync one — the real IB has
+        # both and the router uses the async variant from inside
+        # the runner's event loop.
+        return self.qualifyContracts(*contracts)
+
     def placeOrder(self, contract, order) -> _MockTrade:
         order.orderId = self._next_orderid
         self._next_orderid += 1
@@ -129,6 +135,7 @@ def _stub_ib_async(monkeypatch):
         right: str = ""
         exchange: str = ""
         currency: str = ""
+        tradingClass: str = ""
         conId: int = 0
 
     @dataclass

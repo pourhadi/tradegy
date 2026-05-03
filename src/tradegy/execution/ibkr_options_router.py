@@ -89,14 +89,38 @@ _OPTION_EXCHANGE = {
 }
 _DEFAULT_OPTION_EXCHANGE = "SMART"
 
+# Trading class per underlying. Critical for SPX/NDX/RUT because
+# those underlyings have multiple option series with different
+# settlement semantics:
+#   SPX (standard) — third-Friday monthlies, AM-settled (SOQ
+#                    open-print pricing). Limited weekly support.
+#   SPXW           — weeklies + Friday-AM-and-PM, PM-settled.
+#                    Most current dates trade as SPXW.
+# Verified 2026-05-03 against the IBKR paper account: passing
+# tradingClass="SPX" for non-third-Friday dates returns
+# "No security definition has been found"; SPXW returns the
+# qualified contract.
+_OPTION_TRADING_CLASS = {
+    "SPX": "SPXW",
+    "NDX": "NDXP",
+    "RUT": "RUTW",
+}
+
 
 class _IBLike(Protocol):
     """Subset of ib_async.IB the options router uses. Keeps tests
     free of ib_async at import time.
+
+    Note: the contract qualification is awaited as
+    `qualifyContractsAsync` because the SYNC `qualifyContracts`
+    internally calls `ib.run()` which deadlocks when invoked from
+    inside an already-running asyncio event loop (the runner's
+    place_combo path is async, so it would deadlock).
     """
 
     def isConnected(self) -> bool: ...
-    def qualifyContracts(self, *contracts) -> list: ...
+    def qualifyContracts(self, *contracts) -> list: ...   # sync (test path)
+    async def qualifyContractsAsync(self, *contracts) -> list: ...  # async (live path)
     def placeOrder(self, contract, order) -> Any: ...
     def cancelOrder(self, order) -> None: ...
 
@@ -182,7 +206,9 @@ class IbkrOptionsRouter:
                     f"not present in chain snapshot — refuse to submit"
                 )
             leg_chain.append(chain_leg)
-            contract = self._get_contract(snapshot.underlying, leg_order)
+            contract = await self._get_contract_async(
+                snapshot.underlying, leg_order,
+            )
             leg_contracts.append(contract)
 
         # Compute net price + action.
@@ -292,32 +318,48 @@ class IbkrOptionsRouter:
         # Net credit position — we receive. SELL the combo as defined.
         return (-signed_cost, "SELL")
 
+    async def _get_contract_async(
+        self, underlying: str, leg_order: LegOrder,
+    ) -> Any:
+        """Async version: uses ib.qualifyContractsAsync. Required
+        for the runner's place_combo path which itself runs under
+        an asyncio event loop — calling sync qualifyContracts from
+        inside the loop deadlocks via ib.run().
+        """
+        contract, key = self._build_unqualified_contract(underlying, leg_order)
+        if key in self._contract_cache:
+            return self._contract_cache[key]
+        qualified = await self._ib.qualifyContractsAsync(contract)
+        return self._cache_qualified(key, qualified, underlying, leg_order)
+
     def _get_contract(
         self, underlying: str, leg_order: LegOrder,
     ) -> Any:
-        """Build (and cache) a qualified ib_async Option contract for
-        one leg.
-
-        Cached by (underlying, expiry, strike, side) so re-fills /
-        management closes hit the cache.
+        """Sync version. Safe to call from sync test code that has
+        no asyncio event loop running. Calling from inside an event
+        loop will deadlock — use `_get_contract_async` there.
         """
+        contract, key = self._build_unqualified_contract(underlying, leg_order)
+        if key in self._contract_cache:
+            return self._contract_cache[key]
+        qualified = self._ib.qualifyContracts(contract)
+        return self._cache_qualified(key, qualified, underlying, leg_order)
+
+    def _build_unqualified_contract(
+        self, underlying: str, leg_order: LegOrder,
+    ) -> tuple[Any, tuple]:
+        # Lazy import: ib_async excluded from unit-test path.
+        from ib_async import Option
+
         key = (
             underlying, leg_order.expiry,
             leg_order.strike, leg_order.side,
         )
-        if key in self._contract_cache:
-            return self._contract_cache[key]
-
-        # Lazy import: ib_async excluded from unit-test path.
-        from ib_async import Option
-
         right = "C" if leg_order.side == OptionSide.CALL else "P"
         # IBKR option expiry format: YYYYMMDD (no dashes).
         expiry_str = leg_order.expiry.strftime("%Y%m%d")
         exchange = _OPTION_EXCHANGE.get(underlying, _DEFAULT_OPTION_EXCHANGE)
-        # SPX uses IND tradingClass; ib_async Option ctor takes the
-        # underlying ticker directly and infers from sectype lookup.
-        contract = Option(
+        contract_kwargs = dict(
             symbol=underlying,
             lastTradeDateOrContractMonth=expiry_str,
             strike=leg_order.strike,
@@ -325,14 +367,27 @@ class IbkrOptionsRouter:
             exchange=exchange,
             currency="USD",
         )
-        # Server-side qualify to populate conId. Required for combo
-        # leg references.
-        qualified = self._ib.qualifyContracts(contract)
-        if not qualified:
+        # Trading class — required for SPX/NDX/RUT to disambiguate
+        # weekly (SPXW/NDXP/RUTW) vs monthly (SPX/NDX/RUT) series.
+        # Defaults to weekly because that's where most current-dated
+        # contracts live; operator can override per-strategy if they
+        # specifically want monthlies.
+        if underlying in _OPTION_TRADING_CLASS:
+            contract_kwargs["tradingClass"] = _OPTION_TRADING_CLASS[underlying]
+        return Option(**contract_kwargs), key
+
+    def _cache_qualified(
+        self, key: tuple, qualified: list,
+        underlying: str, leg_order: LegOrder,
+    ) -> Any:
+        if not qualified or qualified[0] is None or getattr(qualified[0], "conId", 0) == 0:
             raise ValueError(
-                f"IbkrOptionsRouter: qualifyContracts returned empty "
-                f"for {underlying} {expiry_str} {leg_order.strike} "
-                f"{right} — IBKR doesn't recognize the contract"
+                f"IbkrOptionsRouter: qualifyContracts returned empty / "
+                f"unrecognized for {underlying} "
+                f"{leg_order.expiry.strftime('%Y%m%d')} "
+                f"{leg_order.strike} {leg_order.side.value} — IBKR "
+                "doesn't recognize the contract (check tradingClass + "
+                "exchange + that the expiry is alive)"
             )
         result = qualified[0]
         self._contract_cache[key] = result
