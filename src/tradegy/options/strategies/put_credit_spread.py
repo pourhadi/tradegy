@@ -37,8 +37,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from tradegy.options.chain import ChainSnapshot, OptionLeg, OptionSide
-from tradegy.options.greeks import bs_greeks
 from tradegy.options.positions import LegOrder, MultiLegOrder, MultiLegPosition
+from tradegy.options.strategies._helpers import (
+    closest_delta,
+    is_fillable,
+    pick_expiry_closest_to_dte,
+)
 from tradegy.options.strategy import OptionStrategy
 
 
@@ -69,7 +73,7 @@ class PutCreditSpread45dteD30(OptionStrategy):
         if open_positions:
             return None
 
-        expiry = self._pick_expiry(snapshot)
+        expiry = pick_expiry_closest_to_dte(snapshot, self.target_dte)
         if expiry is None:
             return None
         dte = (expiry - snapshot.ts_utc.date()).days
@@ -80,7 +84,7 @@ class PutCreditSpread45dteD30(OptionStrategy):
         puts = sorted(
             [
                 l for l in snapshot.for_expiry(expiry)
-                if l.side == OptionSide.PUT and self._is_fillable(l)
+                if l.side == OptionSide.PUT and is_fillable(l)
             ],
             key=lambda l: l.strike,
         )
@@ -88,14 +92,14 @@ class PutCreditSpread45dteD30(OptionStrategy):
             return None
 
         # Short put at -short_delta (the higher of the two strikes).
-        short_put = self._closest_delta(
+        short_put = closest_delta(
             puts, target=-self.short_delta,
             S=snapshot.underlying_price, T=T, r=snapshot.risk_free_rate,
         )
         # Long put at -wing_delta (the lower strike, OTM further).
         # Restrict candidates to strikes BELOW the short.
         below_short = [p for p in puts if p.strike < short_put.strike]
-        long_put = self._closest_delta(
+        long_put = closest_delta(
             below_short, target=-self.wing_delta,
             S=snapshot.underlying_price, T=T, r=snapshot.risk_free_rate,
         )
@@ -121,44 +125,3 @@ class PutCreditSpread45dteD30(OptionStrategy):
             ),
         )
 
-    # ── Internals (shared shape with IronCondor45dteD16; refactor
-    # to a base class in a future round if a third strategy lands
-    # the same shape) ──────────────────────────────────────────
-
-    def _pick_expiry(self, snapshot: ChainSnapshot):
-        snap_date = snapshot.ts_utc.date()
-        expiries = snapshot.expiries()
-        if not expiries:
-            return None
-        best = expiries[0]
-        best_dist = abs((best - snap_date).days - self.target_dte)
-        for e in expiries[1:]:
-            d = (e - snap_date).days
-            dist = abs(d - self.target_dte)
-            if dist < best_dist or (dist == best_dist and e > best):
-                best = e
-                best_dist = dist
-        return best
-
-    @staticmethod
-    def _is_fillable(leg: OptionLeg) -> bool:
-        return leg.iv > 0.0 and (leg.bid > 0.0 or leg.ask > 0.0)
-
-    @staticmethod
-    def _closest_delta(
-        candidates: list[OptionLeg], *,
-        target: float, S: float, T: float, r: float,
-    ) -> OptionLeg | None:
-        if not candidates:
-            return None
-        best = candidates[0]
-        best_diff = float("inf")
-        for leg in candidates:
-            g = bs_greeks(
-                S=S, K=leg.strike, T=T, r=r, sigma=leg.iv, side=leg.side,
-            )
-            diff = abs(g.delta - target)
-            if diff < best_diff:
-                best = leg
-                best_diff = diff
-        return best

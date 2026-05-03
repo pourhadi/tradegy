@@ -12,8 +12,12 @@ classes follow once B-2 has shipped.
 """
 from tradegy.options.strategies.iron_condor import IronCondor45dteD16
 from tradegy.options.strategies.put_credit_spread import PutCreditSpread45dteD30
+from tradegy.options.strategies.short_strangle_defined import (
+    ShortStrangleDefined45dteD25,
+)
 
 __all__ = [
     "IronCondor45dteD16",
     "PutCreditSpread45dteD30",
+    "ShortStrangleDefined45dteD25",
 ]

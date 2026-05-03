@@ -54,6 +54,7 @@ from tradegy.options.runner import (
 from tradegy.options.strategies import (
     IronCondor45dteD16,
     PutCreditSpread45dteD30,
+    ShortStrangleDefined45dteD25,
 )
 from tradegy.options.strategy import (
     ManagementRules,
@@ -101,6 +102,7 @@ __all__ = [
     "RiskConfig",
     "RiskDecision",
     "RiskManager",
+    "ShortStrangleDefined45dteD25",
     "SnapshotPnL",
     "atm_iv",
     "bs_greeks",

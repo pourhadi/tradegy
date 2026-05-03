@@ -1,37 +1,46 @@
-"""Iron condor with delta-anchored entry + delta-anchored wings.
+"""ShortStrangleDefined — defined-risk short strangle (4 legs).
 
-Concrete vol-selling strategy class. Per
-`14_options_volatility_selling.md` Phase B-2:
+Same shape as the iron condor (short call + long call wing + short
+put + long put wing), but with a NARROWER body — the short legs sit
+closer to ATM. The trade-off vs IronCondor45dteD16:
 
-  Entry rules
-    - Skip if any position is already open (concentration limit
-      enforced by the strategy in MVP; later moves to a portfolio-
-      level cap in Phase B-3).
-    - Pick expiry whose DTE is closest to `target_dte` (default 45).
-      Tie-break: prefer the later expiry (more management headroom).
-    - Short call: closest to +`short_delta` (default +0.16) call
-      delta.
-    - Short put: closest to -`short_delta` put delta.
-    - Long wings: closest to ±`wing_delta` (default ±0.05). Delta-
-      anchored wings are the FIX for the asymmetric-wings issue we
-      surfaced in B-1's real-data smoke test (next-strike wings
-      produced a $25 put wing + $100 call wing because SPX strike
-      spacing varies by distance from spot).
+  Iron condor (short body 16-delta)
+    - body further OTM → ~70% probability of expiring fully OTM
+    - smaller per-trade premium
+    - slower decay (more time-value to bleed off)
+    - more "room" for the underlying to move within the body
+      before testing the short legs
 
-  Management
-    Inherited from ManagementRules + should_close (50% profit / 21
-    DTE / 200% loss). The strategy class never decides exits.
+  Defined-risk strangle (short body 25-30 delta)
+    - body closer to ATM → ~50-60% probability of expiring fully OTM
+    - larger per-trade premium (~2-3x the condor's credit)
+    - faster decay (more theta per day per dollar of risk)
+    - SHORT legs are tested faster on adverse moves; pin risk
+      near expiration is much higher (this is what the 21 DTE
+      management trigger is non-negotiable for)
 
-The strategy is stateless — every instance configured with the same
-parameters produces the same output for the same (snapshot,
-open_positions) input. State (open positions, P&L, fills) lives in
-the runner.
+Practitioner usage: defined-risk strangles are the higher-octane
+sibling of the iron condor. Same management discipline applies;
+the position behavior and capital efficiency profile is different.
+
+Default parameters per practitioner-canon:
+
+  target_dte = 45
+  short_delta = 0.25   (closer to ATM than the condor's 0.16)
+  wing_delta = 0.05    (same outer wing delta as condor — the
+                        body is what's narrower, not the wings)
+
+Implementation: identical leg-selection mechanics as
+IronCondor45dteD16; only the short_delta default differs. Sharing
+the helpers in `_helpers.py` keeps the two classes from drifting
+apart on shared concerns (delta-target search, expiry pick,
+fillable filter).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from tradegy.options.chain import ChainSnapshot, OptionLeg, OptionSide
+from tradegy.options.chain import ChainSnapshot, OptionSide
 from tradegy.options.positions import LegOrder, MultiLegOrder, MultiLegPosition
 from tradegy.options.strategies._helpers import (
     closest_delta,
@@ -42,28 +51,24 @@ from tradegy.options.strategy import OptionStrategy
 
 
 @dataclass(frozen=True)
-class IronCondor45dteD16(OptionStrategy):
-    """Default iron condor: 45 DTE, 16-delta short body, 5-delta
-    long wings, 1 contract per entry.
-
-    Subclassable for variants — e.g. IronCondor45dteD10 with
-    short_delta=0.10, IronCondor30dteD16 with target_dte=30, etc.
+class ShortStrangleDefined45dteD25(OptionStrategy):
+    """Defined-risk short strangle: 25-delta short body, 5-delta
+    long wings, 45 DTE. Concentration rule: at most one open
+    position per strategy instance (Phase B-3 RiskManager handles
+    portfolio-level capital cap).
     """
 
     target_dte: int = 45
-    short_delta: float = 0.16
+    short_delta: float = 0.25
     wing_delta: float = 0.05
     contracts: int = 1
-    id: str = "iron_condor_45dte_d16"
+    id: str = "short_strangle_defined_45dte_d25"
 
     def on_chain(
         self,
         snapshot: ChainSnapshot,
         open_positions: tuple[MultiLegPosition, ...],
     ) -> MultiLegOrder | None:
-        # Phase-B-2 concentration rule: at most one position open
-        # at a time. Phase B-3 promotes this to a portfolio-level
-        # capital-percentage cap.
         if open_positions:
             return None
 
@@ -87,7 +92,6 @@ class IronCondor45dteD16(OptionStrategy):
         if not calls or not puts:
             return None
 
-        # Delta-anchored leg selection.
         short_call = closest_delta(
             calls, target=self.short_delta,
             S=snapshot.underlying_price, T=T, r=snapshot.risk_free_rate,
@@ -112,9 +116,6 @@ class IronCondor45dteD16(OptionStrategy):
             or long_call is None or long_put is None
         ):
             return None
-
-        # Defensive sanity: wings must be FURTHER from the body
-        # than the short legs (positive wing width on each side).
         if (
             long_call.strike <= short_call.strike
             or long_put.strike >= short_put.strike
@@ -143,4 +144,3 @@ class IronCondor45dteD16(OptionStrategy):
                 ),
             ),
         )
-
