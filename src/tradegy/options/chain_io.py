@@ -18,7 +18,7 @@ remain accessible via the raw polars frame for cross-check audits.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import polars as pl
@@ -76,11 +76,20 @@ def load_chain_frames(
         )
     pattern = str(base / "date=*" / "data.parquet")
     df = pl.read_parquet(pattern).sort(["ts_utc", "expir_date", "strike"])
+    # Parquet `ts_utc` is tz-aware UTC nanoseconds; comparing against
+    # a naive python datetime raises a polars SchemaError. Normalize
+    # any naive bound to UTC so callers can pass either form.
     if start is not None:
-        df = df.filter(pl.col("ts_utc") >= start)
+        df = df.filter(pl.col("ts_utc") >= _to_utc(start))
     if end is not None:
-        df = df.filter(pl.col("ts_utc") <= end)
+        df = df.filter(pl.col("ts_utc") <= _to_utc(end))
     return df
+
+
+def _to_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def iter_chain_snapshots(

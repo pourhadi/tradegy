@@ -1261,5 +1261,200 @@ def market_scan_cmd(
     console.print(f"\n[dim]wrote {out_path.relative_to(config.repo_root())}[/]")
 
 
+@app.command("options-walk-forward")
+def options_walk_forward_cmd(
+    strategy_ids: Annotated[str, typer.Argument(
+        help="single strategy id, or comma-joined ids for portfolio "
+             "mode. Run `options-strategies` to list registered ids.",
+    )],
+    source_id: Annotated[str, typer.Option(
+        "--source-id",
+        help="ingested options-chain source (e.g. spx_options_chain).",
+    )] = "spx_options_chain",
+    ticker: Annotated[str, typer.Option(
+        "--ticker", help="underlying ticker (SPX, XSP, ...).",
+    )] = "SPX",
+    coverage_start: Annotated[str, typer.Option(
+        "--start", help="ISO 8601 inclusive lower bound on snapshots.",
+    )] = "2020-01-01",
+    coverage_end: Annotated[str, typer.Option(
+        "--end", help="ISO 8601 inclusive upper bound on snapshots.",
+    )] = "2026-01-01",
+    train_years: Annotated[float, typer.Option()] = 3.0,
+    test_years: Annotated[float, typer.Option()] = 1.0,
+    roll_years: Annotated[float, typer.Option()] = 1.0,
+    declared_capital: Annotated[float, typer.Option(
+        "--capital", help="capital cap for the RiskManager.",
+    )] = 250_000.0,
+) -> None:
+    """Rolling walk-forward validation for the options runner.
+
+    Same OOS-within-50%-of-IS gate as the futures `walk-forward`
+    command (per 07_auto_generation.md:171). Runs the strategy (or
+    portfolio) on each rolling (train, test) window and reports
+    aggregate Sharpe + per-window detail.
+
+    Exit code 4 on gate failure (matches futures convention).
+    """
+    from tradegy.options.registry import resolve_strategy_ids
+    from tradegy.options.risk import RiskManager, RiskConfig
+    from tradegy.options.walk_forward import (
+        OptionsWalkForwardConfig,
+        run_options_walk_forward,
+    )
+
+    strategies = resolve_strategy_ids(strategy_ids)
+    cs = datetime.fromisoformat(coverage_start)
+    ce = datetime.fromisoformat(coverage_end)
+    cfg = OptionsWalkForwardConfig(
+        train_years=train_years, test_years=test_years, roll_years=roll_years,
+    )
+    risk = RiskManager(RiskConfig(declared_capital=declared_capital))
+
+    summary = run_options_walk_forward(
+        strategies=strategies,
+        source_id=source_id, ticker=ticker,
+        coverage_start=cs, coverage_end=ce,
+        config=cfg, risk=risk,
+    )
+
+    portfolio_label = ",".join(s.id for s in strategies)
+    console.print(
+        f"[bold]options-walk-forward[/]  strategies=[{portfolio_label}]  "
+        f"ticker={ticker}  source={source_id}  capital=${declared_capital:,.0f}\n"
+        f"coverage=[{cs.date()} → {ce.date()}]  "
+        f"config={cfg.train_years}y/{cfg.test_years}y/{cfg.roll_years}y  "
+        f"windows={len(summary.windows)}"
+    )
+    table = Table(title="walk-forward windows")
+    table.add_column("#")
+    table.add_column("train")
+    table.add_column("test")
+    table.add_column("IS sharpe", justify="right")
+    table.add_column("OOS sharpe", justify="right")
+    table.add_column("IS trades", justify="right")
+    table.add_column("OOS trades", justify="right")
+    table.add_column("IS pnl $", justify="right")
+    table.add_column("OOS pnl $", justify="right")
+    from tradegy.options.walk_forward import trade_dollar_sharpe
+    for w in summary.windows:
+        is_trades = w.in_sample.aggregate_closed_trades if w.in_sample else []
+        oos_trades = w.out_of_sample.aggregate_closed_trades if w.out_of_sample else []
+        is_pnl = sum(t.closed_pnl_dollars for t in is_trades)
+        oos_pnl = sum(t.closed_pnl_dollars for t in oos_trades)
+        table.add_row(
+            str(w.index),
+            f"{w.train_start.date()}→{w.train_end.date()}",
+            f"{w.test_start.date()}→{w.test_end.date()}",
+            f"{trade_dollar_sharpe(is_trades):+.3f}",
+            f"{trade_dollar_sharpe(oos_trades):+.3f}",
+            str(len(is_trades)),
+            str(len(oos_trades)),
+            f"{is_pnl:+,.0f}",
+            f"{oos_pnl:+,.0f}",
+        )
+    console.print(table)
+
+    agg = Table(title="aggregate")
+    agg.add_column("metric")
+    agg.add_column("value", justify="right")
+    agg.add_row("avg in-sample sharpe", f"{summary.avg_in_sample_sharpe:+.3f}")
+    agg.add_row("avg OOS sharpe", f"{summary.avg_oos_sharpe:+.3f}")
+    agg.add_row("worst-window OOS sharpe", f"{summary.worst_window_oos_sharpe:+.3f}")
+    agg.add_row("avg in-sample trades", f"{summary.avg_in_sample_trades:.1f}")
+    agg.add_row("avg OOS trades", f"{summary.avg_oos_trades:.1f}")
+    agg.add_row(
+        "gate",
+        ("[green]PASS[/]" if summary.passed
+         else f"[red]FAIL[/] — {summary.fail_reason}"),
+    )
+    console.print(agg)
+
+    if not summary.passed:
+        raise typer.Exit(code=4)
+
+
+@app.command("options-cpcv")
+def options_cpcv_cmd(
+    strategy_ids: Annotated[str, typer.Argument(
+        help="single strategy id, or comma-joined ids for portfolio "
+             "mode. Run `options-strategies` to list registered ids.",
+    )],
+    source_id: Annotated[str, typer.Option("--source-id")] = "spx_options_chain",
+    ticker: Annotated[str, typer.Option("--ticker")] = "SPX",
+    coverage_start: Annotated[str, typer.Option("--start")] = "2020-01-01",
+    coverage_end: Annotated[str, typer.Option("--end")] = "2026-01-01",
+    n_folds: Annotated[int, typer.Option("--n-folds")] = 10,
+    k_test_folds: Annotated[int, typer.Option("--k-test-folds")] = 2,
+    declared_capital: Annotated[float, typer.Option("--capital")] = 250_000.0,
+) -> None:
+    """Combinatorial Purged CV for the options runner.
+
+    Per doc 05:343 gate: median Sharpe > 0.8 AND pct paths negative
+    < 20%. Per-trade dollar Sharpe over the concatenation of test-
+    fold trades for each path; distribution stats across paths.
+
+    Exit code 4 on gate failure (matches futures convention).
+    """
+    from tradegy.options.cpcv import (
+        OptionsCPCVConfig,
+        run_options_cpcv,
+    )
+    from tradegy.options.registry import resolve_strategy_ids
+    from tradegy.options.risk import RiskManager, RiskConfig
+
+    strategies = resolve_strategy_ids(strategy_ids)
+    cs = datetime.fromisoformat(coverage_start)
+    ce = datetime.fromisoformat(coverage_end)
+    cfg = OptionsCPCVConfig(n_folds=n_folds, k_test_folds=k_test_folds)
+    risk = RiskManager(RiskConfig(declared_capital=declared_capital))
+
+    summary = run_options_cpcv(
+        strategies=strategies,
+        source_id=source_id, ticker=ticker,
+        coverage_start=cs, coverage_end=ce,
+        config=cfg, risk=risk,
+    )
+
+    portfolio_label = ",".join(s.id for s in strategies)
+    console.print(
+        f"[bold]options-cpcv[/]  strategies=[{portfolio_label}]  "
+        f"ticker={ticker}  source={source_id}  capital=${declared_capital:,.0f}\n"
+        f"coverage=[{cs.date()} → {ce.date()}]  "
+        f"folds={cfg.n_folds}  k={cfg.k_test_folds}  "
+        f"paths={len(summary.paths)}"
+    )
+
+    agg = Table(title="aggregate")
+    agg.add_column("metric")
+    agg.add_column("value", justify="right")
+    agg.add_row("paths with trades", f"{summary.paths_with_trades}/{len(summary.paths)}")
+    agg.add_row("median sharpe", f"{summary.median_sharpe:+.3f}")
+    agg.add_row("IQR sharpe", f"{summary.iqr_sharpe:.3f}")
+    agg.add_row("pct paths negative", f"{summary.pct_paths_negative:.1%}")
+    agg.add_row(
+        "gate",
+        ("[green]PASS[/]" if summary.passed
+         else f"[red]FAIL[/] — {summary.fail_reason}"),
+    )
+    console.print(agg)
+
+    if not summary.passed:
+        raise typer.Exit(code=4)
+
+
+@app.command("options-strategies")
+def options_strategies_cmd() -> None:
+    """List registered options strategy ids (for use with
+    `options-walk-forward` and `options-cpcv`).
+    """
+    from tradegy.options.registry import list_strategy_ids
+    table = Table(title="registered options strategies")
+    table.add_column("strategy_id")
+    for sid in list_strategy_ids():
+        table.add_row(sid)
+    console.print(table)
+
+
 if __name__ == "__main__":
     app()
