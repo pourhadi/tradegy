@@ -54,6 +54,7 @@ from tradegy.harness import (
 )
 from tradegy.ingest.csv_databento import ingest_databento_csv
 from tradegy.ingest.csv_es import ingest_csv
+from tradegy.ingest.csv_orats import ingest_orats_strikes_csv
 from tradegy.ingest.csv_sierra import ingest_sierra_csv
 from tradegy.registry.api import find_features, get_feature, value_at
 from tradegy.registry.loader import load_data_source, load_feature
@@ -83,6 +84,8 @@ def ingest(
       * sierra_chart_csv → ingest_sierra_csv (multi-column timestamp, OHLCV).
       * databento_ohlcv_csv → ingest_databento_csv (per-contract OHLCV with
         no-lookahead front-month roll).
+      * orats_strikes_csv → ingest_orats_strikes_csv (per-(date, expiry,
+        strike) options chain rows from ORATS Pro /datav2/hist/strikes).
       * generic_csv (or omitted ingest spec) → ingest_csv (ts/price/size).
     """
     source = load_data_source(source_id)
@@ -91,6 +94,8 @@ def ingest(
         result = ingest_sierra_csv(csv_path, source, input_tz=input_tz)
     elif fmt == "databento_ohlcv_csv":
         result = ingest_databento_csv(csv_path, source)
+    elif fmt == "orats_strikes_csv":
+        result = ingest_orats_strikes_csv(csv_path, source)
     elif fmt == "generic_csv":
         result = ingest_csv(csv_path, source, input_tz=input_tz)
     else:

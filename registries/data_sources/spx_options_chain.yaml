@@ -1,0 +1,139 @@
+# Data source registry entry for SPX (S&P 500 cash index) options
+# end-of-day chain snapshots, sourced from ORATS Pro.
+#
+# Added 2026-05-03 to support the vol-selling workstream per
+# trading_platform_docs/14_options_volatility_selling.md Phase A.
+#
+# SPX (vs /ES options) chosen because:
+#   + European-style (no early-assignment risk to model)
+#   + Cleanest historical data with deepest history (ORATS goes back
+#     to 2007 for SPX)
+#   + Cash-settled at expiration → no underlying delivery / pin
+#     mechanics
+# Trade-off: SPX uses the cash index as underlying — for futures-
+# options work later we'd add a separate es_options_chain source.
+#
+# Cadence is 1d (end-of-day snapshot). Vol-selling at 30-45 DTE
+# does not need intraday chain data; entries are placed near the
+# close on the snapshot day.
+#
+# IMPORTANT: ORATS publishes their own Greeks (callDelta, callGamma,
+# etc.) but we IGNORE them at backtest time and recompute via
+# tradegy.options.greeks.bs_greeks. ORATS uses a smoothed-vol
+# surface model; we use raw IV per leg to keep backtests
+# reproducible without their model. Their Greeks are still ingested
+# (kept as columns) for reference / cross-check audits but no
+# strategy reads them.
+
+id: spx_options_chain
+version: v1
+description: >
+  S&P 500 cash index (SPX) end-of-day options chain snapshots from
+  ORATS Pro. One row per (tradeDate, expirDate, strike) with both
+  call and put leg fields side-by-side, plus underlying close,
+  risk-free rate, and ORATS-published Greeks (kept for reference,
+  not consumed by strategies).
+type: market_data
+provider: orats
+revisable: true
+revision_policy: revised_with_vintages
+admission_rationale: >
+  ORATS Pro provides ORATS-snapshotted SPX options end-of-day chains
+  with reasonably tight bid/ask + vendor IV computed from a smoothed
+  market vol surface. ORATS occasionally re-publishes back-dated
+  snapshots (cleaner IV when their surface model is recalibrated).
+  We pin a vintage timestamp on every ingest so a backtest can be
+  re-run against the historical vintage that was on disk at
+  decision time. Lookahead-free at the snapshot date — the
+  end-of-day chain at date D contains only quotes observable up
+  to and including D's close.
+coverage:
+  start_date: 2007-01-03   # ORATS Pro coverage floor for SPX
+  end_date: ""              # rolling — refreshed on each ingest
+  gaps: []
+cadence: 1d
+fields:
+  - {name: ts_utc, type: timestamp}             # tradeDate at session close UTC
+  - {name: ticker, type: string}
+  - {name: trade_date, type: date}
+  - {name: expir_date, type: date}
+  - {name: dte, type: int}
+  - {name: strike, type: float}
+  - {name: stock_price, type: float}            # underlying close
+  - {name: residual_rate, type: float}          # ORATS' implied risk-free
+  - {name: smv_vol, type: float}                # ORATS smoothed market vol
+  # Call leg
+  - {name: call_bid, type: float}
+  - {name: call_ask, type: float}
+  - {name: call_value, type: float}             # ORATS mid
+  - {name: call_iv, type: float}
+  - {name: call_delta, type: float}             # ORATS Greeks; reference only
+  - {name: call_gamma, type: float}
+  - {name: call_theta, type: float}
+  - {name: call_vega, type: float}
+  - {name: call_rho, type: float}
+  - {name: call_volume, type: int}
+  - {name: call_open_interest, type: int}
+  # Put leg
+  - {name: put_bid, type: float}
+  - {name: put_ask, type: float}
+  - {name: put_value, type: float}
+  - {name: put_iv, type: float}
+  - {name: put_delta, type: float}
+  - {name: put_gamma, type: float}
+  - {name: put_theta, type: float}
+  - {name: put_vega, type: float}
+  - {name: put_rho, type: float}
+  - {name: put_volume, type: int}
+  - {name: put_open_interest, type: int}
+ingest:
+  format: orats_strikes_csv
+  timestamp_columns: [tradeDate]
+session_calendar: XNYS
+# SPX options trade RTH 9:30-16:15 ET. End-of-day snapshots are
+# typically published shortly after the 16:15 ET cash close. Allow
+# generous slack for ORATS API publication latency, holiday weeks,
+# and any backfill batches.
+max_inactivity_seconds: 604800
+availability_latency:
+  median_seconds: 3600.0     # ~1 hour after close
+  p99_seconds: 86400.0       # ORATS occasionally back-publishes by next day
+  notes: >
+    ORATS' /datav2/hist/strikes endpoint serves end-of-day
+    snapshots; they typically post within 1-2 hours of the cash
+    close. Their Pro tier permits historical bulk pulls back to
+    2007 for SPX without per-pull metering, making backtest
+    rebuilds straightforward.
+licensing:
+  live_use: false   # no live ORATS adapter wired yet
+  backtest_use: true
+  redistribution: false
+known_issues:
+  - >
+    ORATS-published Greeks come from their smoothed market vol
+    surface (`smvVol`) which interpolates and extrapolates across
+    strikes/expiries to fill missing or wide-spread quotes. We
+    do NOT consume those Greeks — every strategy in the harness
+    recomputes via tradegy.options.greeks.bs_greeks from the
+    per-leg IV, the underlying close, and the residual rate.
+    The vendor Greeks columns are kept for reference + audit
+    cross-check.
+  - >
+    `residual_rate` is ORATS' implied risk-free rate from put-call
+    parity on the SPX chain. It is not a published Treasury yield
+    and may diverge slightly during stress windows. The harness
+    uses it as the BS r input rather than pulling SOFR/Treasury
+    separately, so the rate environment in backtest matches the
+    rate ORATS used to compute their own IVs (which we then re-
+    extract).
+  - >
+    SPX uses the cash index as underlying. Cash-settled European-
+    style; no early assignment, no pin risk in the underlying-
+    delivery sense. PM-settled (Friday weeklies) vs AM-settled
+    (third-Friday monthlies) is a real distinction at expiration:
+    AM-settled SPX has open-print SOQ pricing that diverges from
+    the cash close. Strategy classes that hold to expiration must
+    handle the SOQ vs close gap; the in-scope strategies (close
+    at 50% / 21 DTE) never carry to expiry so this is moot for
+    Phase B.
+audit_history: []

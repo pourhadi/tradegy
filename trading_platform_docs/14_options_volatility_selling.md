@@ -24,8 +24,11 @@ strategy classes*, not for hypothesis ideation.
 | Section | Status | Code path |
 |---|---|---|
 | Project scope (this doc) | ✅ committed 2026-05-02 | this file |
-| Phase A — options module skeleton + Greeks | 🚧 in progress 2026-05-02 | `src/tradegy/options/` |
-| Phase A — chain ingest + chain features | ⏳ blocked on data vendor decision | (Phase A) |
+| Phase A — options module skeleton + Greeks | ✅ shipped 2026-05-02 | `src/tradegy/options/` |
+| Phase A — ORATS strikes CSV ingest path + chain reader | ✅ shipped 2026-05-03 (decisions in: SPX, ORATS Pro, $25K start) — vendor camelCase columns map to snake_case canonical, parquet date partitions, `iter_chain_snapshots` yields typed `ChainSnapshot` objects, vendor Greeks columns ingested but not propagated to OptionLeg | `src/tradegy/ingest/csv_orats.py`, `src/tradegy/options/chain_io.py`, `registries/data_sources/spx_options_chain.yaml` |
+| Phase A — `download_spx_options_orats.py` (ORATS API puller) | ✅ shipped 2026-05-03 | `/Users/dan/code/data/download_spx_options_orats.py` |
+| Phase A — chain feature transforms (iv_rank_252d, term_structure_slope, put_call_skew, expected_move_to_expiry, realized_vol_30d) | ⏳ next | (Phase A) |
+| Phase A — validation against tastytrade reference backtest | ⏳ next; requires real ORATS data + Phase B harness | (Phase A) |
 | Phase B — multi-leg harness extension | ⏳ planned | `src/tradegy/harness/` |
 | Phase C — strategy class catalog | ⏳ planned | `src/tradegy/strategies/classes/` |
 | Phase D — backtest + walk-forward validation | ⏳ planned | (Phase D) |

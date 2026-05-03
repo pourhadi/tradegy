@@ -29,6 +29,10 @@ from tradegy.options.chain import (
     OptionLeg,
     OptionSide,
 )
+from tradegy.options.chain_io import (
+    iter_chain_snapshots,
+    load_chain_frames,
+)
 from tradegy.options.greeks import (
     bs_greeks,
     bs_price,
@@ -44,4 +48,6 @@ __all__ = [
     "bs_greeks",
     "bs_price",
     "implied_vol",
+    "iter_chain_snapshots",
+    "load_chain_frames",
 ]

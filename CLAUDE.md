@@ -27,7 +27,11 @@ no post-hoc tuning. See "Discipline" below — this is non-negotiable.
 - `src/tradegy/` — Python package. CLI entry is `tradegy` (Typer); see `cli.py`.
   - `options/` — vol-selling workstream (Phase A): `chain.py`
     (ChainSnapshot/OptionLeg dataclasses), `greeks.py` (Black-Scholes
-    pricing + Greeks + IV solver, vendor-independent). Per doc 14.
+    pricing + Greeks + IV solver, vendor-independent), `chain_io.py`
+    (parquet → typed snapshot reader). Per doc 14.
+  - `ingest/csv_orats.py` — ORATS Pro /datav2/hist/strikes CSV ingest;
+    canonicalizes vendor camelCase → snake_case, writes date-
+    partitioned parquet under `data/raw/source=spx_options_chain/`.
 - `registries/` — YAML registries for `data_sources/` and `features/`.
 - `strategies/` — strategy spec YAMLs (per `04_strategy_spec_schema.md`).
 - `hypotheses/` — hypothesis YAMLs (per `06_hypothesis_system.md`).
@@ -39,8 +43,9 @@ no post-hoc tuning. See "Discipline" below — this is non-negotiable.
 - `tests/` — pytest suite, currently **372 tests**.
 - `trading_platform_docs/` — design docs `00`–`13`, README index. Authoritative.
 - `/Users/dan/code/data/` — **separate repo** for vendor download scripts
-  (databento, etc.). Cost-check-then-stop pattern: every script must call
-  `client.metadata.get_cost(...)` and exit unless `--confirm` is passed.
+  (databento, ORATS, etc.). Cost-check-then-stop pattern for pay-per-pull
+  vendors (databento); ETA-then-stop for flat-rate vendors (ORATS). Every
+  script must require `--confirm` before downloading.
 
 ## Stack
 

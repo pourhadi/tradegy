@@ -1,0 +1,64 @@
+# Test-only options chain source mirroring the ORATS Pro shape so
+# csv_orats / chain_io can be exercised without the production
+# spx_options_chain registry entry. Same ingest format, smaller
+# coverage window, no live adapter.
+id: synth_options
+version: v1
+description: Synthetic options chain for tests; ORATS-shaped CSV ingest.
+type: market_data
+provider: synthetic
+revisable: false
+revision_policy: never_revised
+admission_rationale: Test fixture only.
+coverage:
+  start_date: 2026-01-02
+  end_date: 2026-01-03
+  gaps: []
+cadence: 1d
+fields:
+  - {name: ts_utc, type: timestamp}
+  - {name: ticker, type: string}
+  - {name: trade_date, type: date}
+  - {name: expir_date, type: date}
+  - {name: dte, type: int}
+  - {name: strike, type: float}
+  - {name: stock_price, type: float}
+  - {name: residual_rate, type: float}
+  - {name: smv_vol, type: float}
+  - {name: call_bid, type: float}
+  - {name: call_ask, type: float}
+  - {name: call_value, type: float}
+  - {name: call_iv, type: float}
+  - {name: call_delta, type: float}
+  - {name: call_gamma, type: float}
+  - {name: call_theta, type: float}
+  - {name: call_vega, type: float}
+  - {name: call_rho, type: float}
+  - {name: call_volume, type: int}
+  - {name: call_open_interest, type: int}
+  - {name: put_bid, type: float}
+  - {name: put_ask, type: float}
+  - {name: put_value, type: float}
+  - {name: put_iv, type: float}
+  - {name: put_delta, type: float}
+  - {name: put_gamma, type: float}
+  - {name: put_theta, type: float}
+  - {name: put_vega, type: float}
+  - {name: put_rho, type: float}
+  - {name: put_volume, type: int}
+  - {name: put_open_interest, type: int}
+ingest:
+  format: orats_strikes_csv
+  timestamp_columns: [tradeDate]
+session_calendar: XNYS
+max_inactivity_seconds: 86400
+availability_latency:
+  median_seconds: 0.0
+  p99_seconds: 60.0
+  notes: Test fixture; no real publication latency.
+licensing:
+  live_use: false
+  backtest_use: true
+  redistribution: false
+known_issues: []
+audit_history: []
