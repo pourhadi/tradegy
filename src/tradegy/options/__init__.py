@@ -51,7 +51,10 @@ from tradegy.options.runner import (
     SnapshotPnL,
     run_options_backtest,
 )
-from tradegy.options.strategies import IronCondor45dteD16
+from tradegy.options.strategies import (
+    IronCondor45dteD16,
+    PutCreditSpread45dteD30,
+)
 from tradegy.options.strategy import (
     ManagementRules,
     OptionStrategy,
@@ -93,6 +96,7 @@ __all__ = [
     "OptionStrategy",
     "OptionsBacktestResult",
     "PortfolioGreeks",
+    "PutCreditSpread45dteD30",
     "RejectedOrder",
     "RiskConfig",
     "RiskDecision",
