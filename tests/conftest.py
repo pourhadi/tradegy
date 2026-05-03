@@ -100,3 +100,46 @@ def _redirect_registry_to_test_fixtures(monkeypatch: pytest.MonkeyPatch) -> None
     feat_dir = _TESTS_REGISTRY_ROOT / "features"
     monkeypatch.setattr(config, "data_sources_registry_dir", lambda: ds_dir)
     monkeypatch.setattr(config, "features_registry_dir", lambda: feat_dir)
+
+
+# ── Real options-chain fixture ────────────────────────────────────
+#
+# Per the no-synthetic-data rule (memory: feedback_no_synthetic_data):
+# every options-related behavior test exercises real ingested ORATS
+# chain data, not hand-built ChainSnapshot instances. The fixture
+# below resolves the on-disk path (gitignored, locally-pulled) and
+# fails clearly with reproduction instructions if it isn't present.
+
+
+@pytest.fixture(scope="session")
+def real_spx_chain_snapshots():
+    """Load every ingested SPX snapshot from
+    `data/raw/source=spx_options_chain/`.
+
+    Bypasses the autouse registry redirect by reading the parquet
+    partitions directly via `iter_chain_snapshots(root=...)`. Fails
+    clearly with the pull command if data isn't on disk.
+    """
+    from tradegy.options.chain_io import iter_chain_snapshots
+
+    raw_root = config.repo_root() / "data" / "raw"
+    if not (raw_root / "source=spx_options_chain").exists():
+        pytest.fail(
+            "Real ORATS SPX chain data is not on disk. "
+            "Per the no-synthetic-data rule, options behavior tests "
+            "exercise real chain data only. Pull it with:\n"
+            "  python /Users/dan/code/data/download_spx_options_orats.py "
+            "--start 2025-12-15 --end 2025-12-19 --confirm\n"
+            "  uv run tradegy ingest "
+            "/Users/dan/code/data/spx_options_orats/spx_options_orats.csv "
+            "--source-id spx_options_chain"
+        )
+    snaps = list(iter_chain_snapshots(
+        "spx_options_chain", ticker="SPX", root=raw_root,
+    ))
+    if not snaps:
+        pytest.fail(
+            "spx_options_chain partitions exist but contain no "
+            "snapshots — re-pull a non-empty window."
+        )
+    return snaps

@@ -37,6 +37,18 @@ from tradegy.options.positions import (
     OptionPosition,
     compute_max_loss_per_contract,
 )
+from tradegy.options.runner import (
+    ClosedTrade,
+    OptionsBacktestResult,
+    SnapshotPnL,
+    run_options_backtest,
+)
+from tradegy.options.strategies import IronCondor45dteD16
+from tradegy.options.strategy import (
+    ManagementRules,
+    OptionStrategy,
+    should_close,
+)
 from tradegy.options.chain_features import (
     atm_iv,
     expected_move_to_expiry,
@@ -59,14 +71,20 @@ from tradegy.options.greeks import (
 
 __all__ = [
     "ChainSnapshot",
-    "OptionLeg",
-    "OptionSide",
+    "ClosedTrade",
     "Greeks",
+    "IronCondor45dteD16",
     "LegOrder",
+    "ManagementRules",
     "MultiLegOrder",
     "MultiLegPosition",
     "OptionCostModel",
+    "OptionLeg",
     "OptionPosition",
+    "OptionSide",
+    "OptionStrategy",
+    "OptionsBacktestResult",
+    "SnapshotPnL",
     "atm_iv",
     "bs_greeks",
     "bs_price",
@@ -79,5 +97,7 @@ __all__ = [
     "load_chain_frames",
     "put_call_skew_25d",
     "realized_vol_30d",
+    "run_options_backtest",
+    "should_close",
     "term_structure_slope",
 ]
