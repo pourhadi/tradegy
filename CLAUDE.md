@@ -25,6 +25,9 @@ no post-hoc tuning. See "Discipline" below — this is non-negotiable.
 ## Repo layout
 
 - `src/tradegy/` — Python package. CLI entry is `tradegy` (Typer); see `cli.py`.
+  - `options/` — vol-selling workstream (Phase A): `chain.py`
+    (ChainSnapshot/OptionLeg dataclasses), `greeks.py` (Black-Scholes
+    pricing + Greeks + IV solver, vendor-independent). Per doc 14.
 - `registries/` — YAML registries for `data_sources/` and `features/`.
 - `strategies/` — strategy spec YAMLs (per `04_strategy_spec_schema.md`).
 - `hypotheses/` — hypothesis YAMLs (per `06_hypothesis_system.md`).
@@ -89,6 +92,7 @@ quick-orient:
 | 11 | Execution layer | Phases 1+2+3A+3B+3C **fully shipped** — FSM, idempotency, transition log, risk caps, kill-switch, session-flatten, IBKR router, divergence detector, reconciliation loop |
 | 12 | Live monitoring | Phase 1 shipped (framework + `broker_connectivity`, `data_freshness`, `time_skew`, `process_liveness`); **Phase 2+ pending** |
 | 13 | Governance | docs only |
+| 14 | Options vol selling | scope adopted 2026-05-02; Phase A scaffolding (options module + Black-Scholes Greeks + chain dataclasses) shipped 2026-05-03 — vendor-blocked items deferred until ORATS/CBOE decision |
 
 ---
 
