@@ -37,9 +37,17 @@ from tradegy.options.positions import (
     OptionPosition,
     compute_max_loss_per_contract,
 )
+from tradegy.options.risk import (
+    PortfolioGreeks,
+    RiskConfig,
+    RiskDecision,
+    RiskManager,
+    compute_portfolio_greeks,
+)
 from tradegy.options.runner import (
     ClosedTrade,
     OptionsBacktestResult,
+    RejectedOrder,
     SnapshotPnL,
     run_options_backtest,
 )
@@ -84,11 +92,17 @@ __all__ = [
     "OptionSide",
     "OptionStrategy",
     "OptionsBacktestResult",
+    "PortfolioGreeks",
+    "RejectedOrder",
+    "RiskConfig",
+    "RiskDecision",
+    "RiskManager",
     "SnapshotPnL",
     "atm_iv",
     "bs_greeks",
     "bs_price",
     "compute_max_loss_per_contract",
+    "compute_portfolio_greeks",
     "expected_move_to_expiry",
     "implied_vol",
     "iter_chain_snapshots",

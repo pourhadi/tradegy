@@ -42,6 +42,7 @@ from tradegy.options.positions import (
     OptionPosition,
     compute_max_loss_per_contract,
 )
+from tradegy.options.risk import RiskDecision, RiskManager
 from tradegy.options.strategy import (
     ManagementRules,
     OptionStrategy,
@@ -87,12 +88,28 @@ class SnapshotPnL:
     capital_at_risk_dollars: float
 
 
+@dataclass(frozen=True)
+class RejectedOrder:
+    """Audit record for an order the RiskManager refused.
+
+    Persisted in the result so an operator can see "why didn't we
+    enter on Tue?" without rerunning the backtest.
+    """
+
+    submitted_ts: datetime
+    fill_attempted_ts: datetime
+    strategy_tag: str
+    reason: str
+    proposed_capital_at_risk: float
+
+
 @dataclass
 class OptionsBacktestResult:
     strategy_id: str
     n_snapshots_seen: int
     closed_trades: list[ClosedTrade] = field(default_factory=list)
     snapshot_pnl: list[SnapshotPnL] = field(default_factory=list)
+    rejected_orders: list[RejectedOrder] = field(default_factory=list)
 
     @property
     def n_closed_trades(self) -> int:
@@ -150,6 +167,7 @@ def run_options_backtest(
     snapshots: Iterable[ChainSnapshot],
     cost: OptionCostModel | None = None,
     rules: ManagementRules | None = None,
+    risk: RiskManager | None = None,
 ) -> OptionsBacktestResult:
     """Run `strategy` against `snapshots` in chronological order.
 
@@ -160,17 +178,23 @@ def run_options_backtest(
     `cost` defaults to OptionCostModel() (IBKR-retail-ish).
     `rules` defaults to the canonical ManagementRules (50% / 21 DTE
     / 200% loss).
+    `risk` defaults to None (no risk gating — equivalent to
+    Phase B-2 behavior). Pass a RiskManager to enforce capital
+    cap, per-expiration concentration, and tail-event halts;
+    rejected orders are recorded in result.rejected_orders.
 
-    Returns OptionsBacktestResult with full per-snapshot P&L and
-    per-trade close records.
+    Returns OptionsBacktestResult with per-snapshot P&L, per-trade
+    close records, and per-rejected-order records.
     """
     cost = cost or OptionCostModel()
     rules = rules or ManagementRules()
 
     open_positions: list[MultiLegPosition] = []
     pending_order: MultiLegOrder | None = None
+    pending_order_submitted_ts: datetime | None = None
     realized_cumulative = 0.0
     next_position_id = 0
+    snapshot_history: list[ChainSnapshot] = []
 
     result = OptionsBacktestResult(
         strategy_id=strategy.id, n_snapshots_seen=0,
@@ -178,6 +202,7 @@ def run_options_backtest(
 
     for snap in snapshots:
         result.n_snapshots_seen += 1
+        snapshot_history.append(snap)
 
         # 1. Mark + management on existing positions.
         still_open: list[MultiLegPosition] = []
@@ -193,18 +218,56 @@ def run_options_backtest(
 
         # 2. Fill any order queued from the prior snap.
         if pending_order is not None:
-            new_pos = _open_position_from_order(
-                pending_order, snap, cost, position_id=f"pos_{next_position_id}",
+            proposed_pos = _open_position_from_order(
+                pending_order, snap, cost,
+                position_id=f"pos_{next_position_id}",
             )
+            order_to_log = pending_order
+            submitted_ts = pending_order_submitted_ts or snap.ts_utc
             pending_order = None
-            if new_pos is not None:
-                open_positions.append(new_pos)
-                next_position_id += 1
+            pending_order_submitted_ts = None
+
+            if proposed_pos is None:
+                # Quote went away between submission + fill, or
+                # max_loss came back undefined — record as a
+                # rejection with reason 'unfillable'.
+                result.rejected_orders.append(RejectedOrder(
+                    submitted_ts=submitted_ts,
+                    fill_attempted_ts=snap.ts_utc,
+                    strategy_tag=order_to_log.tag,
+                    reason="unfillable_at_next_snap",
+                    proposed_capital_at_risk=0.0,
+                ))
+            else:
+                # Risk gate — runs only when a manager is configured.
+                if risk is not None:
+                    decision = risk.evaluate_order(
+                        proposed_position=proposed_pos,
+                        open_positions=tuple(open_positions),
+                        snapshot_history=tuple(snapshot_history),
+                    )
+                    if not decision.approved:
+                        result.rejected_orders.append(RejectedOrder(
+                            submitted_ts=submitted_ts,
+                            fill_attempted_ts=snap.ts_utc,
+                            strategy_tag=order_to_log.tag,
+                            reason=decision.reason,
+                            proposed_capital_at_risk=(
+                                decision.proposed_total_capital_at_risk
+                            ),
+                        ))
+                    else:
+                        open_positions.append(proposed_pos)
+                        next_position_id += 1
+                else:
+                    open_positions.append(proposed_pos)
+                    next_position_id += 1
 
         # 3. Strategy decision for the next snap.
         order = strategy.on_chain(snap, tuple(open_positions))
         if order is not None:
             pending_order = order
+            pending_order_submitted_ts = snap.ts_utc
 
         # 4. Snapshot P&L row.
         unrealized = sum(p.mark_dollars(snap) for p in open_positions)
