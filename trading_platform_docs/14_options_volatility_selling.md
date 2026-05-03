@@ -47,7 +47,8 @@ strategy classes*, not for hypothesis ideation.
 | Phase D-5 — management-rule sweep (Tier 1) | ✅ shipped 2026-05-03 — `scripts/management_sweep.py` runs [PCS, IC, JL] × 6 management-rule variants on 6-year SPX. **Headline finding: JadeLizard + tight 25/21/200 management beats PCS bare on every metric** — annualized RoC +4.3% vs +3.0%, Sharpe 0.49 vs 0.34, max DD -$29K vs -$49K, 5/6 positive years (only -8.3% in 2022 bear vs PCS bare -15.4%). Default mgmt is sub-optimal for JL (which collects high credit per trade — 25% target captures the win faster). PCS prefers MORE time (50/14 → +3.5% vs default +3.0%, sharpe 0.40). IC dramatically WORSE under tight 25%/21 (-2.7% vs +1.0%) — IC needs more time to capture credit. | `scripts/management_sweep.py` |
 | Phase D-6 — Tier 2 strategy expansion | ✅ shipped 2026-05-03 — `PutBrokenWingButterfly45dte` (3-leg asymmetric: 2 short body + 1 long inner wing + 1 long outer wing; default 25/75 dollar wings produces small credit + capped downside + uncapped-upside-with-no-loss above K1) and `PutDiagonal30_60` (different from calendar — DIFFERENT strikes; bullish bias). Multi-year results (2020-2025): PBWB +0.2% AnnRoC default / -0.1% with tight management — barely profitable but with the smallest max DD of any strategy ($-7K). PutDiagonal +2.0% AnnRoC, Sharpe 0.32, 299 trades (2.3x more frequent entry than other strategies — front-month decay fires often). Neither beat JL+tight 25/21 (+4.3% AnnRoC, Sharpe 0.49) which remains the validated multi-year winner. | `src/tradegy/options/strategies/{put_broken_wing_butterfly,put_diagonal}.py` |
 | Phase D-7 — Tier 3 regime-conditioned wrappers + structural variants | ✅ shipped 2026-05-03 — `SkewGatedStrategy` (rolling rank of put_call_skew_25d, gates on min/max), `TermStructureGatedStrategy` (live near-vs-far ATM IV slope, gates on contango/backwardation), `ReverseIronCondor45dteD30` (long-vol structure, debit, hedge for short-vol majority), `CallDiagonal30_60` (bearish mirror of PutDiagonal). Multi-year results: NONE beat JL+tight 25/21 (+4.3% AnnRoC, Sharpe 0.49). Best risk-adjusted: **JL+tight + term-structure max_slope=0 → +3.8% AnnRoC, Sharpe 0.53** (slight Sharpe improvement at cost of absolute return). Skew-gating underperformed counter to practitioner thesis. RIC barely break-even (long-vol in bull window). CallDiagonal lost -4% (6-year bull market). | `src/tradegy/options/strategies/{skew_gated,term_structure_gated,reverse_iron_condor,call_diagonal}.py` |
-| Phase D-8 — formal walk-forward + multi-instrument | ⏳ next | (Phase D) |
+| Phase D-8 — walk-forward + CPCV harness for options | ✅ shipped 2026-05-03 — `src/tradegy/options/walk_forward.py` (rolling train/test windows, OOS-within-50%-of-IS gate) and `src/tradegy/options/cpcv.py` (combinatorial purged CV, median Sharpe > 0.8 + pct paths negative < 20% gate) ported from the futures harness. CLI commands: `options-walk-forward <strategy_ids>` and `options-cpcv <strategy_ids>` (comma-joined ids → portfolio mode). 26 new tests (11 walk-forward + 15 CPCV); 628 total passing. **Headline result of running these against the supposed multi-year winners**: PCS solo, PCS+IC portfolio, AND JL+tight 25/21 ALL fail walk-forward — every IS window has negative Sharpe because each 3y rolling window includes 2022. CPCV (45 paths) corroborates: PCS median Sharpe +0.016, PCS+IC +0.036, both far below the 0.8 gate. **The "+18% / +5.0% / +4.3% AnnRoC" headlines were all single-multi-year-cumulative artifacts that depend on 2024 (bull) compounding enough to net out 2022's bleed; rolling windows expose that the strategies have no positive in-sample edge.** See "Walk-forward + CPCV findings" section below for the full table. | `src/tradegy/options/{walk_forward,cpcv,registry}.py`, `tests/test_options_{walk_forward,cpcv}.py` |
+| Phase D-9 — multi-instrument | ⏳ planned (XSP path investigated and parked — see prior commits — XSP not viable at $25K with current strategies due to bid-ask economics) | (Phase D) |
 | IV-gated strategy wrapper | ✅ shipped 2026-05-03 — `IvGatedStrategy(base, min_iv_rank, max_iv_rank, target_dte, window_days, min_history_days)` composes any OptionStrategy with an entry gate based on rolling ATM-IV rank. | `src/tradegy/options/strategies/iv_gated.py` |
 | 2025-only IV-gating findings | ❌ NOT validated by multi-year. The 2025-only "PCS+IV<0.30 → +10.2% RoC, 90% hit" was regime-local; on 6 years it drops to +7.4% with $49K max DD. The "IC width $50 + IV>0.50 → 5/5 perfect" was sample-noise; on 6 years it's -2.7% RoC, 43% hit. Lesson: don't infer from one year. | (validated against multi-year) |
 
@@ -78,13 +79,74 @@ strategy classes*, not for hypothesis ideation.
 
 PCS is consistent except in bear years (2022 took ~-15%). IronCondor was POSITIVE in 2022 when PCS lost — natural regime hedge. JadeLizard inconsistent.
 
-### Real findings (validated across 6 years)
+### Original findings (single multi-year cumulative — IN-SAMPLE on every bar)
 
-1. **PutCreditSpread bare is the only consistently profitable single-strategy** at ~3% annualized RoC, 5/6 positive years, Sharpe 0.34.
-2. **Width-anchored variants all lost** across 6 years — small per-trade credit didn't compound past the rare max-loss events. Their drawdown advantage doesn't compensate for the credit reduction. Useful for stress-only deployment perhaps.
-3. **IV-gating UNDERPERFORMED bare strategies** across 6 years. Both directions (IV>0.50 and IV<0.30) hurt PCS relative to the bare strategy. The canonical "sell vol when IV is high" rule didn't help on SPX 2020-2025.
-4. **2025-only findings did not generalize.** The +10.2% / 90% hit / $3K DD result for PCS+IV<0.30 was regime-local; the "perfect 5/5" for IC+width+IV-gate was sample-noise.
-5. **IC is the natural regime hedge for PCS.** When PCS loses (2022 bear), IC was its best year. A combined portfolio is the obvious next experiment but requires careful capital-allocation design (single-position concentration limits make naive 50/50 allocation underperform single-strategy with full capital).
+> ⚠️ **Status update 2026-05-03 (Phase D-8)**: the findings below are
+> from a *single multi-year backtest* that's in-sample on every
+> snapshot. Walk-forward and CPCV (Phase D-8) both reject the
+> "+18%" / "+5.0%" / "+4.3%" headlines — see the new
+> **"Walk-forward + CPCV findings"** section that follows. The
+> bullets below remain in this doc as a record of what the
+> in-sample numbers were, so readers can see the gap between
+> in-sample-only metrics and discipline-gated metrics.
+
+1. **PutCreditSpread bare** had the highest in-sample cumulative
+   RoC (+18%) but the regime-rolling walk-forward shows every
+   IS window NEGATIVE; the +18% relies on 2024 (a strong bull)
+   recovering enough to offset 2022's drawdown.
+2. **Width-anchored variants all lost** across 6 years — small
+   per-trade credit didn't compound past the rare max-loss events.
+3. **IV-gating UNDERPERFORMED bare strategies** across 6 years.
+4. **2025-only findings did not generalize.**
+5. **IC was the natural regime hedge for PCS** in 2022 — but the
+   walk-forward portfolio (PCS+IC) still fails the gate because
+   the 2022 bleed exceeds IC's offset.
+
+### Walk-forward + CPCV findings (Phase D-8 — 2026-05-03)
+
+`uv run tradegy options-walk-forward <strategy_id> --start
+2020-01-01 --end 2026-01-01 --capital 250000` was run against
+each of the previously-claimed multi-year winners. All three
+**FAIL** the gate (avg OOS Sharpe ≥ 50% × avg IS Sharpe AND
+avg IS Sharpe > 0).
+
+| Strategy | Avg IS Sharpe | Avg OOS Sharpe | IS PnL Win 0-2 | OOS PnL Win 0-2 | Walk-forward gate | CPCV median (45 paths, k=2) | CPCV gate |
+|---|---|---|---|---|---|---|---|
+| PCS solo | **-0.085** | +0.199 | -$39K, -$26K, -$30K | +$21K, +$23K, -$3K | ❌ FAIL — IS not positive | +0.016 (42% paths neg, IQR 0.42) | ❌ FAIL — median < 0.8 |
+| PCS + IC portfolio | **-0.039** | +0.071 | -$3.8K, -$19.3K, -$38.2K | +$8.2K, +$25.6K, -$15.3K | ❌ FAIL — IS not positive | +0.036 (33% paths neg, IQR 0.20) | ❌ FAIL — median < 0.8 |
+| JL + tight 25/21 | **-0.033** | +0.027 | +$14.9K, -$10.7K, -$35.9K | -$13.9K, +$8.7K, +$13.3K | ❌ FAIL — IS not positive | (run when needed) | (expected fail) |
+
+Per-window inspection: window 2 (train 2022→2025) is consistently
+the worst — that's the window heaviest with 2022, the regime-killer
+year for short-vol. **2025 OOS** also shows portfolio losses
+(-$15K) for PCS+IC, suggesting 2025 was less vol-selling-friendly
+than expected.
+
+**What the walk-forward exposes that the cumulative didn't:**
+
+The +18% / +5% / +4.3% AnnRoC numbers in the prior table are real
+arithmetic results of a single 6-year backtest. The walk-forward
+shows that ANY rolling 3-year IS window is negative, meaning the
+"edge" depends on a specific time alignment of bull years
+compounding past bear years. A live deployment that started after
+a 2022-style year would have bled before reaching the recovery
+years that produce the headline RoC. The CPCV distribution
+(median +0.02 to +0.04 per-trade Sharpe, 33-42% of paths
+negative) confirms there is no statistically defensible edge in
+the strategies as currently parameterized.
+
+**This is exactly what walk-forward and CPCV are designed to
+catch.** The discipline gate didn't exist for options strategies
+when the +18% figure was reported (Phase D-4); now it does, and
+we should trust the gate's verdict over the cumulative number.
+
+**Operational implication**: paper-trading these strategies live
+on $250K is no longer well-supported by evidence. The next
+question is whether **different strategies, different
+underlyings, or different parameter regimes** can pass the gate
+— OR whether the discipline gate itself is too strict for
+options vol-selling and should be re-validated against
+academically-published vol-selling research.
 
 ### 2025 backtest result table (250 trade days, $250K capital, default management)
 

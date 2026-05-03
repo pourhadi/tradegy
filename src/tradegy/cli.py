@@ -1286,6 +1286,17 @@ def options_walk_forward_cmd(
     declared_capital: Annotated[float, typer.Option(
         "--capital", help="capital cap for the RiskManager.",
     )] = 250_000.0,
+    profit_take_pct: Annotated[float, typer.Option(
+        "--profit-take", help="credit-position profit target as fraction of "
+        "entry credit (default 0.50 = close at 50% of max profit).",
+    )] = 0.50,
+    loss_stop_pct: Annotated[float, typer.Option(
+        "--loss-stop", help="credit-position loss stop as multiple of "
+        "entry credit (default 2.0 = close at 200% loss).",
+    )] = 2.0,
+    dte_close: Annotated[int, typer.Option(
+        "--dte-close", help="close at this many DTE remaining (default 21).",
+    )] = 21,
 ) -> None:
     """Rolling walk-forward validation for the options runner.
 
@@ -1298,6 +1309,7 @@ def options_walk_forward_cmd(
     """
     from tradegy.options.registry import resolve_strategy_ids
     from tradegy.options.risk import RiskManager, RiskConfig
+    from tradegy.options.strategy import ManagementRules
     from tradegy.options.walk_forward import (
         OptionsWalkForwardConfig,
         run_options_walk_forward,
@@ -1310,12 +1322,17 @@ def options_walk_forward_cmd(
         train_years=train_years, test_years=test_years, roll_years=roll_years,
     )
     risk = RiskManager(RiskConfig(declared_capital=declared_capital))
+    rules = ManagementRules(
+        profit_take_pct=profit_take_pct,
+        loss_stop_pct=loss_stop_pct,
+        dte_close=dte_close,
+    )
 
     summary = run_options_walk_forward(
         strategies=strategies,
         source_id=source_id, ticker=ticker,
         coverage_start=cs, coverage_end=ce,
-        config=cfg, risk=risk,
+        config=cfg, risk=risk, rules=rules,
     )
 
     portfolio_label = ",".join(s.id for s in strategies)
@@ -1387,6 +1404,9 @@ def options_cpcv_cmd(
     n_folds: Annotated[int, typer.Option("--n-folds")] = 10,
     k_test_folds: Annotated[int, typer.Option("--k-test-folds")] = 2,
     declared_capital: Annotated[float, typer.Option("--capital")] = 250_000.0,
+    profit_take_pct: Annotated[float, typer.Option("--profit-take")] = 0.50,
+    loss_stop_pct: Annotated[float, typer.Option("--loss-stop")] = 2.0,
+    dte_close: Annotated[int, typer.Option("--dte-close")] = 21,
 ) -> None:
     """Combinatorial Purged CV for the options runner.
 
@@ -1402,18 +1422,24 @@ def options_cpcv_cmd(
     )
     from tradegy.options.registry import resolve_strategy_ids
     from tradegy.options.risk import RiskManager, RiskConfig
+    from tradegy.options.strategy import ManagementRules
 
     strategies = resolve_strategy_ids(strategy_ids)
     cs = datetime.fromisoformat(coverage_start)
     ce = datetime.fromisoformat(coverage_end)
     cfg = OptionsCPCVConfig(n_folds=n_folds, k_test_folds=k_test_folds)
     risk = RiskManager(RiskConfig(declared_capital=declared_capital))
+    rules = ManagementRules(
+        profit_take_pct=profit_take_pct,
+        loss_stop_pct=loss_stop_pct,
+        dte_close=dte_close,
+    )
 
     summary = run_options_cpcv(
         strategies=strategies,
         source_id=source_id, ticker=ticker,
         coverage_start=cs, coverage_end=ce,
-        config=cfg, risk=risk,
+        config=cfg, risk=risk, rules=rules,
     )
 
     portfolio_label = ",".join(s.id for s in strategies)
