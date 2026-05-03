@@ -274,7 +274,8 @@ live-traded strategies.
 ## Decision points to revisit at the next pinning
 
 1. Is "MES intraday" still the goal, or is it a starting constraint
-   we should relax?
+   we should relax? **(Updated 2026-05-02: lifted. Goal is whatever
+   contract / timeframe is most tractable.)**
 2. Has the LLM-ideation approach produced a survivor in the next N
    tries? If not at N=20 cumulative kills, the prior on the method
    is dead.
@@ -282,3 +283,130 @@ live-traded strategies.
    is the highest-leverage unexplored move.
 4. Is cross-asset data unblocked? If still parked, signal-search is
    running in a strict subset of the addressable space.
+
+---
+
+## Tier 2 execution-edge feasibility study (added 2026-05-02)
+
+User asked: is execution-edge MM/queue-arb feasible at retail; what
+infrastructure; is it accessible / affordable? Researched current
+(2026) vendor pricing + cross-checked against tradegy codebase shape.
+
+### Verdict
+
+Achievable but materially harder + more expensive than initially
+estimated. **Pure passive queue MM on ES/NQ is dead at retail** —
+HFT shops own the BBO. The only retail-accessible execution-edge
+alpha left is micro-aggressive strategies on MES/MNQ (sweep fade,
+post-sweep mean reversion, momentum-ignition fade). Realistic
+upside is *"decent second income"* not hedge-fund returns.
+
+### Real monthly cost
+
+| Item | Cost |
+|---|---|
+| Rithmic R \| API (Trader + API + new CME conn) | $170 |
+| CME L2 non-pro bundle | $34 |
+| Databento Standard (live MBO + historical) | $199 |
+| Aurora VPS (Beeks Gold / QuantVPS — required for sub-ms) | $150 |
+| Sierra Chart SP12 + Denali ($0 if pure custom C++) | $164 |
+| Commissions (~5,000 round-turns micro @ $0.10/side net) | ~$1,000 |
+| Misc (monitoring, backup, source control) | $80 |
+| **All-in** | **~$1,800/mo infra + ~$1,000/mo commissions = ~$2,800/mo** |
+
+Capital floor: $25K (PDT/margin survival), $100K (realistic 3-sigma
+buffer), $250K (math works at scale). Time-to-live: 6-9 months for
+an experienced dev.
+
+### What reuses from tradegy vs what's new
+
+**Reuses cleanly (~30-40% of work avoided):** auto-gen pipeline,
+anti-overfitting discipline, execution-layer FSM
+(`execution/lifecycle.py`), idempotency, kill-switch, risk caps,
+session-flatten, divergence detector, live monitoring framework,
+docs 06/07 hypothesis lifecycle.
+
+**Needs material extension:**
+- `harness/execution.py` CostModel (currently
+  `(slippage_ticks, commission_round_trip)`) → maker/taker fees,
+  queue-position fill probabilities, cancel/replace latency, MEP
+  surcharge tracking
+- Strategy ABC: `on_bar(bar, features) → Order` becomes
+  `on_book_update | on_trade | on_quote_change` event hooks
+- Broker router: `execution/ibkr_router.py` is fine for low-msg
+  rate; Rithmic R \| API equivalent needed (IBKR's TWS limits to
+  ~50 msg/sec, fatal for MM)
+- Feature pipeline: MBO/MBP-10 ingest path alongside current OHLCV
+
+**Greenfield (the hard part):**
+- `harness/runner.py` (548-line bar loop) → discard, replace with
+  event-driven simulator
+- Order book reconstruction from MBP-10 message stream
+- Queue position model (FIFO at each price level)
+- Latency injection (3-8ms cancel-replace round-trip from Aurora)
+- Databento DBN-format reader → event stream
+- Rithmic R \| API live adapter
+
+Architectural shape: parallel codebase. Bar-driven harness keeps
+working for signal-edge research; event-driven harness builds
+alongside. Share data sources (different schemas), execution layer
+(with extensions), auto-gen framework (new strategy classes),
+monitoring + governance. No throwaway — but ~6 months net-new work
+on top of existing foundation.
+
+### What kills retail Tier 2 most often (current forum post-mortems)
+
+1. **Adverse selection on ES/NQ** — every passive fill at the BBO
+   is informed-toxic when HFTs own the queue ahead of you. Fatal
+   for passive MM.
+2. **Broker risk-team intervention** — AMP/NT/Tradovate auto-
+   throttle accounts pushing >50-100 msg/sec sustained. Optimus
+   and Edge Clear tolerate it if discussed in advance.
+3. **CME MEP surcharges** — $1,000/breach if message:volume ratio
+   exceeds the product-group benchmark. Two free breaches/month/
+   exchange-grouping.
+4. **One-sided fills during sweeps** — quote a 5-lot, news hits,
+   eat 30 ticks instantly.
+5. **"Death by scratch"** — fills break even on price but
+   commissions+exchange+routing nibble away $5-15/round-trip.
+6. **No native post-only on Rithmic** — can't safely lean against
+   the touch without race-conditioning into aggressor + paying take
+   fees.
+
+### Three-option fork
+
+1. **Tier 1 first (1 week, $0 incremental)** — wrap existing
+   signal-edge strategies in smart execution (limit-at-touch with
+   timeout, post-only with escape, basic ladder slicing) on current
+   IBKR adapter. Cheap test of "execution matters" hypothesis with
+   actual data.
+2. **Expand signal-edge laterally** — multi-instrument (ES + NQ +
+   RTY + ZN), higher timeframes (15m-daily), event-driven (FOMC,
+   CPI). Reuses platform as-built. Addresses search-space
+   limitations.
+3. **Commit to Tier 2** — only justified if prepared for 6-9
+   months solo dev + $2,800/mo + capped upside. Don't decide
+   until Tier 1 has shown what smart execution alone buys, AND
+   signal-edge expansion has hit its ceiling.
+
+**Recommended sequencing:** Tier 1 (1 week) → lateral signal-edge
+expansion (2-3 months) → re-evaluate Tier 2 with real paper data.
+The Tier 2 decision is hard to reverse; Tier 1 + lateral expansion
+is reversible.
+
+### Vendor reference (May 2026)
+
+- **Brokers tolerant of MM-style msg rates:** Edge Clear, Optimus
+  Futures (negotiable, supports MM-style accounts)
+- **Brokers that throttle:** AMP, NinjaTrader, Tradovate
+- **The only API stack that works for retail MM latency:** custom
+  C++/Rust against Rithmic R \| API (or R \| API+ for production
+  hot path)
+- **Stacks that don't work:** NinjaTrader 8 (GC pauses, OnMarketDepth
+  bottlenecks), QuantConnect LEAN (bar-based, fictional latency
+  model), MultiCharts, Investor/RT
+- **Sierra Chart + ACSIL** is usable but single-threaded chart event
+  loop — needs separate ACS service for true async MM
+- **Hosting:** Beeks Aurora VPS Gold (~$120-180/mo) is the
+  realistic floor; sub-ms to CME match engine. AWS us-east is
+  unusable for MM (15-25ms).
