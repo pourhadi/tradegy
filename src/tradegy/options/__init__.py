@@ -53,6 +53,7 @@ from tradegy.options.runner import (
 )
 from tradegy.options.strategies import (
     IronCondor45dteD16,
+    PutCalendar30_60AtmDeb,
     PutCreditSpread45dteD30,
     ShortStrangleDefined45dteD25,
 )
@@ -97,6 +98,7 @@ __all__ = [
     "OptionStrategy",
     "OptionsBacktestResult",
     "PortfolioGreeks",
+    "PutCalendar30_60AtmDeb",
     "PutCreditSpread45dteD30",
     "RejectedOrder",
     "RiskConfig",

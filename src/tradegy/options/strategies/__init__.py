@@ -11,6 +11,7 @@ the runner has something to backtest end-to-end. The other three
 classes follow once B-2 has shipped.
 """
 from tradegy.options.strategies.iron_condor import IronCondor45dteD16
+from tradegy.options.strategies.put_calendar import PutCalendar30_60AtmDeb
 from tradegy.options.strategies.put_credit_spread import PutCreditSpread45dteD30
 from tradegy.options.strategies.short_strangle_defined import (
     ShortStrangleDefined45dteD25,
@@ -18,6 +19,7 @@ from tradegy.options.strategies.short_strangle_defined import (
 
 __all__ = [
     "IronCondor45dteD16",
+    "PutCalendar30_60AtmDeb",
     "PutCreditSpread45dteD30",
     "ShortStrangleDefined45dteD25",
 ]

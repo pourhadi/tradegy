@@ -215,6 +215,22 @@ class MultiLegPosition:
             return float("nan")
         return self.mark_to_market(snap) / self.entry_credit_per_share
 
+    def pnl_pct_of_debit(self, snap: ChainSnapshot) -> float:
+        """Unrealized P&L as fraction of the debit paid at entry.
+
+        For debit positions (calendar spreads, long verticals):
+        entry_credit_per_share is negative; debit_per_share =
+        -entry_credit_per_share. PnL pct = mark / debit. Positive
+        when the position is profitable.
+
+        Returns NaN for credit positions (the inverse trigger lives
+        on pnl_pct_of_max_credit).
+        """
+        debit = -self.entry_credit_per_share
+        if debit <= 0:
+            return float("nan")
+        return self.mark_to_market(snap) / debit
+
 
 # ── Multi-leg construction helpers ─────────────────────────────
 

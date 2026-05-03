@@ -38,21 +38,41 @@ class ManagementRules:
     items 4 (early-management discipline) + the tastytrade-published
     convention.
 
-    `profit_take_pct`: close when unrealized P&L ≥ this fraction of
-        the entry credit. 0.50 = "close at 50% of max profit." Pure
-        debit positions skip this trigger (their max-profit isn't
-        bounded the same way; pnl_pct_of_max_credit returns NaN).
-    `dte_close`: close when nearest-leg DTE ≤ this. 21 = standard.
-        Pin risk near expiration kills accounts; this trigger is
-        non-negotiable.
-    `loss_stop_pct`: close when unrealized loss ≥ this multiple of
-        the entry credit. 2.0 = "close at 200% loss" (lose twice
-        the credit received). Caps the per-position drawdown.
+    Credit-position triggers (iron condor, credit spread, strangle):
+      `profit_take_pct`: close when unrealized P&L ≥ this fraction
+          of entry credit. 0.50 = "close at 50% of max profit."
+      `loss_stop_pct`: close when unrealized loss ≥ this multiple
+          of entry credit. 2.0 = "close at 200% loss" (lose twice
+          the credit received).
+
+    Debit-position triggers (calendar spread, long verticals):
+      `profit_take_pct_of_debit`: close when unrealized P&L ≥ this
+          fraction of the debit paid. 0.25 = "close at 25% gain on
+          debit." Common practitioner convention for calendars.
+          Defaults to None (no profit-take for debit positions —
+          DTE rule alone manages them).
+      `loss_stop_pct_of_debit`: close when unrealized loss ≥ this
+          fraction of the debit paid. 0.50 = "close at 50% loss
+          on debit." Defaults to None.
+
+    Universal:
+      `dte_close`: close when nearest-leg DTE ≤ this. 21 = standard.
+          Pin risk near expiration is the load-bearing risk for ALL
+          multi-leg positions; this trigger applies regardless of
+          credit or debit shape.
+
+    The runner dispatches the right trigger based on each position's
+    entry_credit sign — see `should_close` below. Debit triggers
+    are off by default to preserve backward-compat; calendar
+    strategies pass an explicit ManagementRules instance with
+    them set.
     """
 
     profit_take_pct: float = 0.50
     dte_close: int = 21
     loss_stop_pct: float = 2.0
+    profit_take_pct_of_debit: float | None = None
+    loss_stop_pct_of_debit: float | None = None
 
 
 def should_close(
@@ -63,38 +83,64 @@ def should_close(
     """Return a close-reason string if any management trigger fires,
     else None.
 
-    Triggers checked in priority order: DTE first (non-negotiable
-    pin-risk floor), then profit-take, then loss-stop. When two
-    triggers fire on the same snapshot the highest-priority one
-    is reported — important for the audit trail (we want to know
-    why we closed, and "21 DTE" is more meaningful than "happened
-    to be at 50% profit on day 24" if both were true).
+    Trigger priority (load-bearing — operator gets the most-
+    critical reason in the audit trail when multiple fire):
+
+      1. DTE: pin-risk floor, applies to every position regardless
+         of credit/debit shape.
+      2. Credit-position profit-take + loss-stop (when entry was a
+         credit).
+      3. Debit-position profit-take + loss-stop (when entry was a
+         debit AND the rules.*_of_debit fields are set).
+
+    Credit and debit branches are mutually exclusive — a position
+    has one or the other shape, never both. The pnl_pct_of_*
+    methods return NaN for the wrong shape, so the NaN-safe
+    comparison naturally short-circuits the inapplicable branch.
     """
     if not position.open:
         return None
 
-    # 1. DTE — load-bearing per doc 14, runs first.
+    # 1. DTE — universal trigger.
     dte = position.days_to_expiry(snapshot.ts_utc)
     if dte <= rules.dte_close:
         return f"dte_close: nearest leg at {dte} DTE (rule ≤ {rules.dte_close})"
 
-    # 2. Profit take.
-    pnl_pct = position.pnl_pct_of_max_credit(snapshot)
-    if pnl_pct == pnl_pct and pnl_pct >= rules.profit_take_pct:  # NaN-safe
-        return (
-            f"profit_take: pnl {pnl_pct * 100:.1f}% of credit "
-            f"(rule ≥ {rules.profit_take_pct * 100:.0f}%)"
-        )
+    # 2. Credit-position branch.
+    pnl_pct_credit = position.pnl_pct_of_max_credit(snapshot)
+    if pnl_pct_credit == pnl_pct_credit:  # NaN-safe → only fires for credit positions
+        if pnl_pct_credit >= rules.profit_take_pct:
+            return (
+                f"profit_take: pnl {pnl_pct_credit * 100:.1f}% of credit "
+                f"(rule ≥ {rules.profit_take_pct * 100:.0f}%)"
+            )
+        if pnl_pct_credit <= -rules.loss_stop_pct:
+            return (
+                f"loss_stop: pnl {pnl_pct_credit * 100:.1f}% of credit "
+                f"(rule ≤ -{rules.loss_stop_pct * 100:.0f}%)"
+            )
+        return None
 
-    # 3. Loss stop. pnl_pct_of_max_credit goes negative when we're
-    # losing on a credit position; -2.0 means the unrealized loss
-    # equals 2× the credit received.
-    if pnl_pct == pnl_pct and pnl_pct <= -rules.loss_stop_pct:
+    # 3. Debit-position branch (only when the *_of_debit rules are set).
+    pnl_pct_debit = position.pnl_pct_of_debit(snapshot)
+    if pnl_pct_debit != pnl_pct_debit:  # NaN → no shape applies (zero credit zero debit)
+        return None
+    if (
+        rules.profit_take_pct_of_debit is not None
+        and pnl_pct_debit >= rules.profit_take_pct_of_debit
+    ):
         return (
-            f"loss_stop: pnl {pnl_pct * 100:.1f}% of credit "
-            f"(rule ≤ -{rules.loss_stop_pct * 100:.0f}%)"
+            f"profit_take_debit: pnl {pnl_pct_debit * 100:.1f}% of debit "
+            f"(rule ≥ {rules.profit_take_pct_of_debit * 100:.0f}%)"
         )
-
+    if (
+        rules.loss_stop_pct_of_debit is not None
+        and pnl_pct_debit <= -rules.loss_stop_pct_of_debit
+    ):
+        return (
+            f"loss_stop_debit: pnl {pnl_pct_debit * 100:.1f}% of debit "
+            f"(rule ≤ -{rules.loss_stop_pct_of_debit * 100:.0f}%)"
+        )
     return None
 
 
