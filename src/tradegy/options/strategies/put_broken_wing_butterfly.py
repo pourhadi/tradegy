@@ -85,7 +85,7 @@ class PutBrokenWingButterfly45dte(OptionStrategy):
         snapshot: ChainSnapshot,
         open_positions: tuple[MultiLegPosition, ...],
     ) -> MultiLegOrder | None:
-        if open_positions:
+        if self._my_open(open_positions):
             return None
         if self.outer_wing_dollars <= self.inner_wing_dollars:
             # The structural definition of "broken-wing" requires

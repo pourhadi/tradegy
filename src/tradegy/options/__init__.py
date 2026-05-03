@@ -44,6 +44,10 @@ from tradegy.options.risk import (
     RiskManager,
     compute_portfolio_greeks,
 )
+from tradegy.options.portfolio_runner import (
+    PortfolioBacktestResult,
+    run_options_backtest_portfolio,
+)
 from tradegy.options.runner import (
     ClosedTrade,
     OptionsBacktestResult,
@@ -112,6 +116,7 @@ __all__ = [
     "OptionSide",
     "OptionStrategy",
     "OptionsBacktestResult",
+    "PortfolioBacktestResult",
     "PortfolioGreeks",
     "PutBrokenWingButterfly45dte",
     "PutCalendar30_60AtmDeb",
@@ -140,6 +145,7 @@ __all__ = [
     "put_call_skew_25d",
     "realized_vol_30d",
     "run_options_backtest",
+    "run_options_backtest_portfolio",
     "should_close",
     "term_structure_slope",
 ]

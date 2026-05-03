@@ -72,7 +72,7 @@ class ReverseIronCondor45dteD30(OptionStrategy):
         snapshot: ChainSnapshot,
         open_positions: tuple[MultiLegPosition, ...],
     ) -> MultiLegOrder | None:
-        if open_positions:
+        if self._my_open(open_positions):
             return None
 
         expiry = pick_expiry_closest_to_dte(snapshot, self.target_dte)

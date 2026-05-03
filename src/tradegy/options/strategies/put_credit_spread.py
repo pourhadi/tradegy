@@ -78,7 +78,7 @@ class PutCreditSpread45dteD30(OptionStrategy):
         # Same concentration rule as the iron condor: at most one
         # open position per strategy instance. Phase B-3's
         # RiskManager handles the global capital cap.
-        if open_positions:
+        if self._my_open(open_positions):
             return None
 
         expiry = pick_expiry_closest_to_dte(snapshot, self.target_dte)

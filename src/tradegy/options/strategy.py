@@ -156,9 +156,28 @@ class OptionStrategy(ABC):
     runner + ManagementRules' job.
 
     `id` is a string used in the audit trail / position tagging.
+
+    Concentration rule: by convention, strategies enter at most one
+    position at a time per strategy class. The portfolio runner
+    accumulates positions across MULTIPLE strategy instances; each
+    strategy MUST filter the open_positions tuple to only those
+    bearing its own `id` before applying its concentration check.
+    Use `_my_open` for this.
     """
 
     id: str = "<override>"
+
+    def _my_open(
+        self, open_positions: tuple[MultiLegPosition, ...],
+    ) -> tuple[MultiLegPosition, ...]:
+        """Return only the positions this strategy class opened.
+
+        Lets multiple strategies coexist in the portfolio runner —
+        each sees only its OWN positions for the concentration
+        check, so JadeLizard doesn't refuse to enter just because
+        a PutCreditSpread is already open.
+        """
+        return tuple(p for p in open_positions if p.strategy_class == self.id)
 
     @abstractmethod
     def on_chain(

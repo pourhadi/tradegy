@@ -69,7 +69,7 @@ class IronCondor45dteD16(OptionStrategy):
         # Phase-B-2 concentration rule: at most one position open
         # at a time. Phase B-3 promotes this to a portfolio-level
         # capital-percentage cap.
-        if open_positions:
+        if self._my_open(open_positions):
             return None
 
         expiry = pick_expiry_closest_to_dte(snapshot, self.target_dte)
