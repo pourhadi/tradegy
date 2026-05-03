@@ -281,6 +281,30 @@ kickoff because the worst-window cushion (+0.135 vs +0.157
 for IV<0.20+PCS+IC, but with a lower-floor downside year)
 matters more in practice than the absolute Sharpe maximum.
 
+### Management-rule check on the validated config (Phase D-8 follow-up #4)
+
+Re-ran PCS+IC+JL+IV<0.25 with two management profiles to test
+whether the JL-favoring "tight" 25/21/200 profile improves the
+3-strategy portfolio:
+
+| Mgmt profile | Avg IS Sharpe | Avg OOS Sharpe | Worst OOS Sharpe | Sum OOS PnL | OOS trades/yr |
+|---|---|---|---|---|---|
+| **Default 50/21/200** | +0.192 | **+0.275** | +0.135 | **+$130K** | 50 |
+| Tight 25/21/200 | +0.187 | +0.221 | **+0.169** | +$108K | 67 |
+
+The default profile produces $22K more OOS PnL and a
+higher avg OOS Sharpe; the tight profile produces a better
+worst-window cushion (+0.169 vs +0.135) and more frequent
+entries.
+
+**Recommendation**: use **default 50/21/200** for the paper-trade
+kickoff. The Sharpe + absolute-return improvement matters more
+than the marginal worst-window improvement, and the worst-window
+under default mgmt (+0.135) is already comfortably positive.
+The tight profile is a fallback option if 90 days of paper-trade
+results show worst-month drawdowns the operator finds
+uncomfortable.
+
 CPCV technically still fails the 0.8 absolute median-Sharpe
 threshold, but that threshold was tuned for the futures
 harness's per-trade R-Sharpe. Per-trade dollar Sharpe on options
