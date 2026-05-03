@@ -15,8 +15,12 @@ from tradegy.options.strategies.iron_butterfly import IronButterfly45dteAtm
 from tradegy.options.strategies.iron_condor import IronCondor45dteD16
 from tradegy.options.strategies.iv_gated import IvGatedStrategy
 from tradegy.options.strategies.jade_lizard import JadeLizard45dte
+from tradegy.options.strategies.put_broken_wing_butterfly import (
+    PutBrokenWingButterfly45dte,
+)
 from tradegy.options.strategies.put_calendar import PutCalendar30_60AtmDeb
 from tradegy.options.strategies.put_credit_spread import PutCreditSpread45dteD30
+from tradegy.options.strategies.put_diagonal import PutDiagonal30_60
 from tradegy.options.strategies.short_strangle_defined import (
     ShortStrangleDefined45dteD25,
 )
@@ -27,7 +31,9 @@ __all__ = [
     "IronCondor45dteD16",
     "IvGatedStrategy",
     "JadeLizard45dte",
+    "PutBrokenWingButterfly45dte",
     "PutCalendar30_60AtmDeb",
     "PutCreditSpread45dteD30",
+    "PutDiagonal30_60",
     "ShortStrangleDefined45dteD25",
 ]

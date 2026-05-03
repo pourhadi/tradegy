@@ -57,8 +57,10 @@ from tradegy.options.strategies import (
     IronCondor45dteD16,
     IvGatedStrategy,
     JadeLizard45dte,
+    PutBrokenWingButterfly45dte,
     PutCalendar30_60AtmDeb,
     PutCreditSpread45dteD30,
+    PutDiagonal30_60,
     ShortStrangleDefined45dteD25,
 )
 from tradegy.options.strategy import (
@@ -106,8 +108,10 @@ __all__ = [
     "OptionStrategy",
     "OptionsBacktestResult",
     "PortfolioGreeks",
+    "PutBrokenWingButterfly45dte",
     "PutCalendar30_60AtmDeb",
     "PutCreditSpread45dteD30",
+    "PutDiagonal30_60",
     "RejectedOrder",
     "RiskConfig",
     "RiskDecision",
