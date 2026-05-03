@@ -215,16 +215,51 @@ discipline established in `06_hypothesis_system.md` and
 
 ### Phase E — paper trading (IBKR combo orders)
 
-- Wire IBKR multi-leg combo orders into the execution layer
-  (IBKR supports natively; needs adapter extension).
-- Mid-price entry with timeout escape to slightly worse fill.
-- Run paper account with 1 contract per position.
-- Weekly comparison: paper P&L vs backtest P&L for the same
+**Status: groundwork shipped 2026-05-03; full integration pending operator paper account setup.**
+
+- ✅ Wire IBKR multi-leg combo orders into the execution layer
+  (`src/tradegy/execution/ibkr_options_router.py`):
+  - `IbkrOptionsRouter`: option contract resolution per leg
+    (qualifies via IBKR's `qualifyContracts`), BAG combo
+    construction with proper ratios + actions, single
+    LimitOrder with net price (positive for both credit + debit
+    — sign comes from BUY/SELL action). One ManagedOrder per
+    combo even with N legs (preserves defined-risk invariant).
+  - Lifecycle integration: combo placement → SUBMITTED transition
+    via the existing FSM. Status / fill events translate via
+    `map_ibkr_status` (shared with the futures router).
+  - Idempotency at `client_order_id` level. Cancel + get_combo
+    + health surface. Subscriber notification.
+  - 10 tests against a MockIB; full suite 572 passing.
+- ⏳ Mid-price entry with timeout escape to slightly worse fill —
+  current implementation places at cost-model-computed mid; the
+  escalation policy (mid → mid + offset → mid + 2*offset → ask)
+  needs the live event loop and is straightforward to add once
+  the runner integration lands.
+- ⏳ Runner integration: `_open_position_from_order` currently
+  uses the cost model for backtest fills. Paper/live mode needs
+  a code path that calls `router.place_combo()` and awaits the
+  FILLED transition. Async + timeout handling; ~1-2 days of work.
+- ⏳ Run paper account with 1 contract per position. Operator-
+  side: install ib_async, run TWS/Gateway in paper mode, point
+  the router at the paper account.
+- ⏳ Weekly comparison: paper P&L vs backtest P&L for the same
   period (must track within ±15%).
-- Identify and fix divergence (commission model, fill
+- ⏳ Identify and fix divergence (commission model, fill
   assumptions, Greeks staleness).
 
-**Estimate:** 4–8 weeks bedding-in.
+**Estimate (remaining):** 4–8 weeks bedding-in once operator
+paper-account setup is complete.
+
+**Operator workflow (for when ready):**
+  1. Open IBKR paper account (free, ~15 min).
+  2. Install Trader Workstation (TWS) or IB Gateway in paper mode.
+  3. `pip install ib_async`.
+  4. Configure TWS API: enable client connections on port 7497
+     (paper) / 4002 (gateway paper).
+  5. Build an `IBKRConnection` instance (`src/tradegy/live/ibkr_connection.py`).
+  6. Construct `IbkrOptionsRouter(ib=conn.ib, cost_model=...)`.
+  7. Wire to runner — Phase E full integration code path.
 
 ### Phase F — live, scaled (90-day soak)
 
