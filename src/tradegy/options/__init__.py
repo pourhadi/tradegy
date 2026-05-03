@@ -29,6 +29,14 @@ from tradegy.options.chain import (
     OptionLeg,
     OptionSide,
 )
+from tradegy.options.cost_model import OptionCostModel
+from tradegy.options.positions import (
+    LegOrder,
+    MultiLegOrder,
+    MultiLegPosition,
+    OptionPosition,
+    compute_max_loss_per_contract,
+)
 from tradegy.options.chain_features import (
     atm_iv,
     expected_move_to_expiry,
@@ -54,9 +62,15 @@ __all__ = [
     "OptionLeg",
     "OptionSide",
     "Greeks",
+    "LegOrder",
+    "MultiLegOrder",
+    "MultiLegPosition",
+    "OptionCostModel",
+    "OptionPosition",
     "atm_iv",
     "bs_greeks",
     "bs_price",
+    "compute_max_loss_per_contract",
     "expected_move_to_expiry",
     "implied_vol",
     "iter_chain_snapshots",

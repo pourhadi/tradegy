@@ -30,7 +30,9 @@ strategy classes*, not for hypothesis ideation.
 | Phase A — end-to-end verification on real ORATS data | ✅ verified 2026-05-03 (5 trade days, 5 snapshots, ~22.5K legs each, 54 expiries; chain reader yields typed objects; recomputed Greeks agree with vendor delta within 0.27%; vendor unit conventions documented) | (Phase A) |
 | Phase A — chain feature transforms (atm_iv, term_structure_slope, put_call_skew_25d, expected_move_to_expiry, iv_rank_252d, iv_percentile_252d, realized_vol_30d) | ✅ shipped 2026-05-03 — pure functions over ChainSnapshot(s); 13 unit tests against synthetic chains; smoke-tested against real ORATS data (5 SPX days Dec 15-19 2025: ATM IV 12-14%, 25-delta put skew +0.04-0.05 matching practitioner expectations, term structure -0.005 to -0.016 contango as expected, IV regime jumped on Dec 17 when SPX dropped 1%) | `src/tradegy/options/chain_features.py` |
 | Phase A — validation against tastytrade reference backtest | ⏳ next; requires Phase B multi-leg harness + a longer ORATS pull | (Phase A) |
-| Phase B — multi-leg harness extension | ⏳ planned | `src/tradegy/harness/` |
+| Phase B-1 — position + cost model | ✅ shipped 2026-05-03 — OptionPosition (signed quantity convention), MultiLegPosition (4-leg iron condor verified on real SPX data: $1,676 credit, $8,324 max loss, 20.1% credit/risk), OptionCostModel (mid ± offset_fraction*half_spread fills + per-leg commission), compute_max_loss_per_contract (closed-form match for iron condor + put credit spread, generic payoff-curve sampler for arbitrary multi-leg shapes) | `src/tradegy/options/positions.py`, `src/tradegy/options/cost_model.py` |
+| Phase B-2 — strategy ABC + multi-leg backtest runner | ⏳ next | `src/tradegy/options/` |
+| Phase B-3 — portfolio Greeks + risk caps | ⏳ planned | `src/tradegy/options/` |
 | Phase C — strategy class catalog | ⏳ planned | `src/tradegy/strategies/classes/` |
 | Phase D — backtest + walk-forward validation | ⏳ planned | (Phase D) |
 | Phase E — paper trading via IBKR combo orders | ⏳ planned | `src/tradegy/execution/` |
