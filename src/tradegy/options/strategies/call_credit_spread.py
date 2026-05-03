@@ -86,6 +86,8 @@ class CallCreditSpread45dteD30(OptionStrategy):
             calls, target=self.short_delta,
             S=snapshot.underlying_price, T=T, r=snapshot.risk_free_rate,
         )
+        if short_call is None:
+            return None
         # Long-wing selection: width-anchored if wing_width_dollars
         # is set; otherwise delta-anchored.
         if self.wing_width_dollars is not None:

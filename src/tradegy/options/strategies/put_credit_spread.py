@@ -104,6 +104,8 @@ class PutCreditSpread45dteD30(OptionStrategy):
             puts, target=-self.short_delta,
             S=snapshot.underlying_price, T=T, r=snapshot.risk_free_rate,
         )
+        if short_put is None:
+            return None  # no leg in tolerance; skip this snap
         # Long-wing selection: width-anchored if wing_width_dollars
         # is set; otherwise delta-anchored (default).
         if self.wing_width_dollars is not None:

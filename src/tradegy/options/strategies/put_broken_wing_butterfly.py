@@ -118,7 +118,8 @@ class PutBrokenWingButterfly45dte(OptionStrategy):
             r=snapshot.risk_free_rate,
         )
         if body is None:
-            return None
+            return None  # already handled — closest_delta returns None
+        # ↑ kept explicit for clarity post-2026-05-03 None semantics
 
         # Inner wing (long, K1 = body + inner_wing): closer to spot
         # than body. For puts, "closer to spot" = HIGHER strike.

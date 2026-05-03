@@ -99,6 +99,8 @@ class CallDiagonal30_60(OptionStrategy):
             S=snapshot.underlying_price, T=T_front,
             r=snapshot.risk_free_rate,
         )
+        if short_call is None:
+            return None
         # Long call on BACK expiry at +long_delta. Restrict to
         # strikes ABOVE the short (bearish bias — long protection
         # sits further OTM than short body).

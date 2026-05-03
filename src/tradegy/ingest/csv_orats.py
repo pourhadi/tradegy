@@ -176,7 +176,39 @@ def ingest_orats_strikes_csv(
     out_root = source_root(source.id, out_dir=out_dir)
     out_root.mkdir(parents=True, exist_ok=True)
 
-    raw = pl.read_csv(csv_path, infer_schema_length=10_000)
+    # ORATS volume / OI / size columns are mostly integers but
+    # occasionally carry fractional values (corporate actions or
+    # vendor adjustments). Coerce all numeric columns to Float64
+    # up-front so polars schema inference doesn't trip on the
+    # rare fractional row partway through a 4 GB file. The chain
+    # reader downstream casts back to int via _safe_int when it
+    # produces OptionLeg objects. Discovered 2026-05-03 on the
+    # first XSP ingest — SPX never tripped this because SPX has
+    # cleaner volume/OI data.
+    _NUMERIC_FLOAT64 = {
+        "dte": pl.Float64, "strike": pl.Float64, "stockPrice": pl.Float64,
+        "spotPrice": pl.Float64, "residualRate": pl.Float64,
+        "smvVol": pl.Float64, "extSmvVol": pl.Float64,
+        "callBidPrice": pl.Float64, "callValue": pl.Float64,
+        "callAskPrice": pl.Float64, "callBidIv": pl.Float64,
+        "callMidIv": pl.Float64, "callAskIv": pl.Float64,
+        "callVolume": pl.Float64, "callOpenInterest": pl.Float64,
+        "callBidSize": pl.Float64, "callAskSize": pl.Float64,
+        "extCallValue": pl.Float64,
+        "putBidPrice": pl.Float64, "putValue": pl.Float64,
+        "putAskPrice": pl.Float64, "putBidIv": pl.Float64,
+        "putMidIv": pl.Float64, "putAskIv": pl.Float64,
+        "putVolume": pl.Float64, "putOpenInterest": pl.Float64,
+        "putBidSize": pl.Float64, "putAskSize": pl.Float64,
+        "extPutValue": pl.Float64,
+        "delta": pl.Float64, "gamma": pl.Float64, "theta": pl.Float64,
+        "vega": pl.Float64, "rho": pl.Float64, "phi": pl.Float64,
+        "driftlessTheta": pl.Float64,
+    }
+    raw = pl.read_csv(
+        csv_path, infer_schema_length=10_000,
+        schema_overrides=_NUMERIC_FLOAT64,
+    )
     rows_in = raw.height
     missing = _REQUIRED_VENDOR_COLS - set(raw.columns)
     if missing:

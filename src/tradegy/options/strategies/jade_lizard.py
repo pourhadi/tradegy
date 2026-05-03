@@ -109,6 +109,8 @@ class JadeLizard45dte(OptionStrategy):
         short_put = closest_delta(
             puts, target=-self.short_put_delta, S=S, T=T, r=r,
         )
+        if short_call is None or short_put is None:
+            return None
         # Narrow call wing: target call_wing_delta (e.g. 0.10),
         # restricted to strikes ABOVE short call.
         long_call = closest_delta(

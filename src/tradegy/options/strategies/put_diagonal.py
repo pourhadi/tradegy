@@ -119,6 +119,8 @@ class PutDiagonal30_60(OptionStrategy):
             S=snapshot.underlying_price, T=T_front,
             r=snapshot.risk_free_rate,
         )
+        if short_put is None:
+            return None
         # Long put on BACK expiry at -long_delta. Restrict to strikes
         # BELOW the short strike (so the diagonal is bullish-biased
         # — long protection sits further OTM than short body).

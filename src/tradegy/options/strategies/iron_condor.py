@@ -101,6 +101,8 @@ class IronCondor45dteD16(OptionStrategy):
             puts, target=-self.short_delta,
             S=snapshot.underlying_price, T=T, r=snapshot.risk_free_rate,
         )
+        if short_call is None or short_put is None:
+            return None
         if self.wing_width_dollars is not None:
             long_call = closest_strike_at_offset(
                 calls, body_strike=short_call.strike,

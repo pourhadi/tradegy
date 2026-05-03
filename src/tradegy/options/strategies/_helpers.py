@@ -36,27 +36,69 @@ def pick_expiry_closest_to_dte(
     return best
 
 
-def is_fillable(leg: OptionLeg) -> bool:
-    """Filter out dead-quote legs at strategy-side leg selection.
+def is_fillable(
+    leg: OptionLeg,
+    *,
+    max_spread_pct_of_mid: float = 0.50,
+    min_iv: float = 0.01,
+    max_iv: float = 5.0,
+) -> bool:
+    """Filter out dead-quote / illiquid legs at strategy-side leg
+    selection.
 
-    A leg is fillable iff vendor IV is positive AND at least one
-    side of the bid/ask has a positive quote. Strategy classes
-    should never propose legs that won't fill at the runner.
+    A leg is fillable iff:
+      - bid > 0 AND ask > 0 (both sides quoted; one-sided quotes
+        produce unfillable strikes that contaminate delta-target
+        searches with ITM-leg false positives)
+      - ask > bid (no locked / inverted quotes)
+      - vendor IV in [min_iv, max_iv] (sane sigma; iv=0 means
+        ORATS couldn't compute IV from the quote → typically
+        sparse-chain illiquid strike that misleads bs_greeks
+        delta calculations toward 0 or near-1)
+      - bid-ask spread < `max_spread_pct_of_mid` of mid price
+        (rejects totally-illiquid strikes — discovered 2026-05-03
+        on XSP where 29%-spread strikes were getting picked as
+        "0-delta" legs because their IV was junk; SPX never
+        tripped this because SPX chains are dense + tight)
+
+    Strategies that want a more permissive filter for stress
+    regimes can wrap this and override.
     """
-    return leg.iv > 0.0 and (leg.bid > 0.0 or leg.ask > 0.0)
+    if leg.bid <= 0.0 or leg.ask <= 0.0 or leg.ask <= leg.bid:
+        return False
+    if leg.iv < min_iv or leg.iv > max_iv:
+        return False
+    mid = leg.mid
+    if mid <= 0:
+        return False
+    spread_pct = (leg.ask - leg.bid) / mid
+    return spread_pct < max_spread_pct_of_mid
 
 
 def closest_delta(
     candidates: list[OptionLeg], *,
     target: float,
     S: float, T: float, r: float,
+    max_delta_tolerance: float = 0.15,
 ) -> OptionLeg | None:
     """Return the leg whose Black-Scholes delta is closest to
     `target`. Sign convention: call delta > 0, put delta < 0;
     pass signed target (+0.16 for 16-delta call, -0.16 for
     16-delta put).
 
+    `max_delta_tolerance` REJECTS the closest leg if its delta is
+    further than this from `target`. Defaults to 0.15 — for a
+    target of 0.30, only legs with delta in [0.15, 0.45] qualify.
+    Discovered 2026-05-03 on XSP: when liquid OTM strikes were
+    all filtered out as illiquid, the closest_delta scan returned
+    deep-ITM legs as "30-delta candidates" (their actual delta
+    being ~0.70+) — produced absurd put-credit-spread structures
+    with the short strike ABOVE spot. Without the tolerance, the
+    function silently substitutes the wrong leg; with it, the
+    strategy gets None and refuses to enter on illiquid days.
+
     Empty candidates → None.
+    Closest-delta-out-of-tolerance → None.
     """
     if not candidates:
         return None
@@ -70,6 +112,8 @@ def closest_delta(
         if diff < best_diff:
             best = leg
             best_diff = diff
+    if best_diff > max_delta_tolerance:
+        return None
     return best
 
 

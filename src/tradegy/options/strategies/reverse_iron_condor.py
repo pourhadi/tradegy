@@ -105,6 +105,8 @@ class ReverseIronCondor45dteD30(OptionStrategy):
             puts, target=-self.body_delta,
             S=snapshot.underlying_price, T=T, r=snapshot.risk_free_rate,
         )
+        if long_call is None or long_put is None:
+            return None
         # SHORT wing legs at +/- wing_delta — we SELL these at
         # lower premium for partial offset. Restrict to strikes
         # OUTSIDE the body so we have positive wing-vs-body separation.
