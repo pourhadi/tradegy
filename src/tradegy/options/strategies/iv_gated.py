@@ -125,7 +125,17 @@ class IvGatedStrategy(OptionStrategy):
         if self.max_iv_rank is not None and rank > self.max_iv_rank:
             return None
 
-        return self.base.on_chain(snapshot, open_positions)
+        order = self.base.on_chain(snapshot, open_positions)
+        if order is None:
+            return None
+        # Re-tag with the wrapper's id so the portfolio runner /
+        # closed-trade audit attribute the trade to the GATED
+        # config, not the bare base. Without this re-tagging the
+        # portfolio runner keys per_strategy by self.id but
+        # _close_position looks up pos.strategy_class which is the
+        # order tag → KeyError.
+        from dataclasses import replace
+        return replace(order, tag=self.id)
 
     @staticmethod
     def _compute_rank(value: float, window: list[float]) -> float | None:

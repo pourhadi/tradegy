@@ -1297,6 +1297,18 @@ def options_walk_forward_cmd(
     dte_close: Annotated[int, typer.Option(
         "--dte-close", help="close at this many DTE remaining (default 21).",
     )] = 21,
+    iv_gate_min: Annotated[Optional[float], typer.Option(
+        "--iv-gate-min", help="if set, wrap each strategy with an IV-rank "
+        "lower bound — only enter when ATM IV rank ≥ this (0..1).",
+    )] = None,
+    iv_gate_max: Annotated[Optional[float], typer.Option(
+        "--iv-gate-max", help="if set, wrap each strategy with an IV-rank "
+        "upper bound — only enter when ATM IV rank ≤ this (0..1).",
+    )] = None,
+    iv_gate_window_days: Annotated[int, typer.Option(
+        "--iv-gate-window", help="rolling window for IV rank (default 252 = "
+        "1y trading days).",
+    )] = 252,
 ) -> None:
     """Rolling walk-forward validation for the options runner.
 
@@ -1316,6 +1328,17 @@ def options_walk_forward_cmd(
     )
 
     strategies = resolve_strategy_ids(strategy_ids)
+    if iv_gate_min is not None or iv_gate_max is not None:
+        from tradegy.options.strategies import IvGatedStrategy
+        strategies = [
+            IvGatedStrategy(
+                base=s,
+                min_iv_rank=iv_gate_min,
+                max_iv_rank=iv_gate_max,
+                window_days=iv_gate_window_days,
+            )
+            for s in strategies
+        ]
     cs = datetime.fromisoformat(coverage_start)
     ce = datetime.fromisoformat(coverage_end)
     cfg = OptionsWalkForwardConfig(
@@ -1407,6 +1430,9 @@ def options_cpcv_cmd(
     profit_take_pct: Annotated[float, typer.Option("--profit-take")] = 0.50,
     loss_stop_pct: Annotated[float, typer.Option("--loss-stop")] = 2.0,
     dte_close: Annotated[int, typer.Option("--dte-close")] = 21,
+    iv_gate_min: Annotated[Optional[float], typer.Option("--iv-gate-min")] = None,
+    iv_gate_max: Annotated[Optional[float], typer.Option("--iv-gate-max")] = None,
+    iv_gate_window_days: Annotated[int, typer.Option("--iv-gate-window")] = 252,
 ) -> None:
     """Combinatorial Purged CV for the options runner.
 
@@ -1425,6 +1451,17 @@ def options_cpcv_cmd(
     from tradegy.options.strategy import ManagementRules
 
     strategies = resolve_strategy_ids(strategy_ids)
+    if iv_gate_min is not None or iv_gate_max is not None:
+        from tradegy.options.strategies import IvGatedStrategy
+        strategies = [
+            IvGatedStrategy(
+                base=s,
+                min_iv_rank=iv_gate_min,
+                max_iv_rank=iv_gate_max,
+                window_days=iv_gate_window_days,
+            )
+            for s in strategies
+        ]
     cs = datetime.fromisoformat(coverage_start)
     ce = datetime.fromisoformat(coverage_end)
     cfg = OptionsCPCVConfig(n_folds=n_folds, k_test_folds=k_test_folds)

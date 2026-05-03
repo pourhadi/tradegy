@@ -169,3 +169,44 @@ def test_iv_gated_wraps_iron_condor_too(real_spx_chain_snapshots):
         strategy=g, snapshots=real_spx_chain_snapshots, risk=risk,
     )
     assert "iron_condor" in result.strategy_id
+
+
+def test_portfolio_mode_records_under_wrapper_id(
+    real_spx_chain_snapshots,
+):
+    """Regression for the bug discovered while wiring CLI IV-gating
+    against options-walk-forward (2026-05-03): IvGatedStrategy
+    delegated to base.on_chain which returned MultiLegOrder(tag=
+    base.id), so closed positions had pos.strategy_class = base.id
+    while the portfolio runner registered per_strategy by the
+    wrapper's id — KeyError on close.
+
+    Fix: wrapper re-tags the order with self.id before returning.
+    Verify with portfolio-mode backtest of two IV-gated wrappers.
+    """
+    from tradegy.options.portfolio_runner import (
+        run_options_backtest_portfolio,
+    )
+    snaps = real_spx_chain_snapshots[:300]  # ~1y window for warmup + signal
+    risk = RiskManager(RiskConfig(declared_capital=250_000.0))
+    pcs_g = IvGatedStrategy(
+        base=PutCreditSpread45dteD30(),
+        max_iv_rank=0.30, window_days=60, min_history_days=60,
+    )
+    ic_g = IvGatedStrategy(
+        base=IronCondor45dteD16(),
+        max_iv_rank=0.30, window_days=60, min_history_days=60,
+    )
+    # Pre-bug: this raised KeyError mid-backtest. Post-fix: runs
+    # cleanly to completion.
+    result = run_options_backtest_portfolio(
+        strategies=[pcs_g, ic_g], snapshots=snaps, risk=risk,
+    )
+    # Per-strategy keys are the WRAPPER ids, not the base ids.
+    assert pcs_g.id in result.per_strategy
+    assert ic_g.id in result.per_strategy
+    assert "put_credit_spread_45dte_d30" not in result.per_strategy
+    assert "iron_condor_45dte_d16" not in result.per_strategy
+    # Sanity — at least one strategy fired and closed within the
+    # 300-snap window.
+    assert result.n_closed_trades > 0
