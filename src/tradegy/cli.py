@@ -2052,5 +2052,212 @@ def live_options_cmd(
         raise typer.Exit(code=6)
 
 
+@app.command("label-sessions")
+def label_sessions_cmd(
+    instrument: Annotated[str, typer.Option(
+        "--instrument",
+        help="Instrument id (MES | SPY).",
+    )] = "MES",
+    start: Annotated[str, typer.Option(
+        help="ISO date (inclusive) for start of labeling window.",
+    )] = "2019-05-06",
+    end: Annotated[str, typer.Option(
+        help="ISO date (inclusive) for end of labeling window. "
+             "Defaults to today.",
+    )] = "",
+    batch_size: Annotated[int, typer.Option(
+        "--batch-size", min=1, max=20,
+        help="Number of sessions per LLM call. Larger = fewer calls but "
+             "more tokens per call. 5-10 is the sweet spot.",
+    )] = 5,
+    ensemble: Annotated[int, typer.Option(
+        "--ensemble", min=1, max=10,
+        help="Number of LLM passes per session for ensemble agreement "
+             "stability. Final regime_label is majority vote across "
+             "ensemble; final confidence is the mean. 1 disables.",
+    )] = 1,
+    model: Annotated[str, typer.Option(
+        "--model",
+        help="Anthropic model id. Default Sonnet 4.6 (cheaper than Opus, "
+             "task is classification not creative).",
+    )] = "claude-sonnet-4-6",
+    limit: Annotated[Optional[int], typer.Option(
+        "--limit",
+        help="Optional ceiling on total sessions labeled (for cost-bounded "
+             "probe runs). 0 / None = label entire window.",
+    )] = None,
+    dry_run: Annotated[bool, typer.Option(
+        "--dry-run",
+        help="Build snapshots and print the rendered prompt for the first "
+             "batch, then exit. No API calls.",
+    )] = False,
+) -> None:
+    """LLM session-labeling for the regime classifier (Phase 2).
+
+    For each trading session in [start, end], builds a sealed pre-open
+    snapshot (gap, prior 5d, VIX state, scheduled events) and asks
+    Claude for a structured `SessionLabel`. Writes one JSON file per
+    session under `data/session_labels/<instrument>/<date>.json`.
+
+    Resumable: sessions whose JSON already exists are skipped.
+    """
+    from datetime import date, datetime, timedelta, timezone
+    from pathlib import Path
+
+    from tradegy.regime.session_inputs import (
+        SessionPreOpenSnapshot,
+        build_snapshot,
+        format_snapshot_for_llm,
+    )
+    from tradegy.regime.session_labeling import (
+        AnthropicSessionLabeler,
+    )
+
+    start_d = date.fromisoformat(start)
+    end_d = date.fromisoformat(end) if end else date.today()
+
+    out_dir = config.data_dir() / "session_labels" / instrument.upper()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Enumerate trading days. We don't pre-filter by holiday; the
+    # snapshot builder will return empty data for non-session dates,
+    # which the labeler can detect (no bars, no open) and we skip.
+    all_dates: list[date] = []
+    cursor = start_d
+    while cursor <= end_d:
+        if cursor.weekday() < 5:  # Mon-Fri
+            all_dates.append(cursor)
+        cursor = cursor + timedelta(days=1)
+
+    # Skip already-labeled (resumability).
+    todo: list[date] = []
+    for d in all_dates:
+        path = out_dir / f"{d.isoformat()}.json"
+        if path.exists() and path.stat().st_size > 50:
+            continue
+        todo.append(d)
+    if limit is not None and limit > 0:
+        todo = todo[:limit]
+
+    n_sessions = len(todo)
+    n_batches = (n_sessions + batch_size - 1) // batch_size
+    n_calls = n_batches * ensemble
+    console.print(
+        f"[bold]label-sessions[/]  instrument={instrument}  "
+        f"window={start_d}..{end_d}"
+    )
+    console.print(
+        f"  total sessions in window: {len(all_dates):,}"
+    )
+    console.print(
+        f"  already labeled (skip): {len(all_dates) - n_sessions:,}"
+    )
+    console.print(
+        f"  to label: {n_sessions:,}  batches: {n_batches:,}  "
+        f"ensemble passes: {ensemble}  total LLM calls: {n_calls:,}"
+    )
+    if n_sessions == 0:
+        console.print("[green]nothing to do.[/]")
+        return
+
+    # Build snapshots up front (cheap; no API calls).
+    console.print("[dim]Building snapshots...[/]")
+    snapshots: list[SessionPreOpenSnapshot] = []
+    skipped_no_data = 0
+    for d in todo:
+        try:
+            s = build_snapshot(session_date=d, instrument=instrument)
+            if s.today_open is None or s.prior_close is None:
+                skipped_no_data += 1
+                continue
+            snapshots.append(s)
+        except FileNotFoundError as exc:
+            console.print(f"[yellow]WARN[/] {d}: {exc}")
+            skipped_no_data += 1
+    if skipped_no_data:
+        console.print(
+            f"  skipped {skipped_no_data} sessions with no bar data "
+            "(weekend / holiday / pre-coverage)."
+        )
+
+    if dry_run:
+        if not snapshots:
+            console.print("[yellow]dry-run: no snapshots built[/]")
+            return
+        sample = snapshots[: min(batch_size, 3)]
+        console.print(
+            f"\n[bold]Dry-run: rendered prompt for first {len(sample)} "
+            f"session(s):[/]"
+        )
+        from tradegy.regime.session_labeling import _build_user_message
+        console.print(_build_user_message(sample))
+        return
+
+    client = _make_anthropic_client()
+    labeler = AnthropicSessionLabeler(client=client, model=model)
+
+    total_cost = 0.0
+    failed_batches = 0
+    for batch_idx in range(n_batches):
+        batch = snapshots[batch_idx * batch_size: (batch_idx + 1) * batch_size]
+        if not batch:
+            continue
+        # Ensemble: run `ensemble` independent calls for the same batch.
+        per_session_labels: list[list] = [[] for _ in batch]
+        for ens in range(ensemble):
+            try:
+                labels = labeler.generate(batch)
+            except Exception as exc:
+                console.print(
+                    f"[red]batch {batch_idx + 1}/{n_batches} ensemble "
+                    f"{ens + 1} FAILED:[/] {exc!r}"
+                )
+                failed_batches += 1
+                continue
+            for i, lbl in enumerate(labels):
+                per_session_labels[i].append(lbl)
+            if labeler.last_cost is not None:
+                total_cost += labeler.last_cost.estimated_usd
+
+        # Aggregate ensemble: majority vote on regime_label, mean
+        # confidence. We persist the *first* ensemble pass's reasoning
+        # and signals (already representative); aggregation modifies
+        # only label + confidence fields.
+        for i, snapshot in enumerate(batch):
+            if not per_session_labels[i]:
+                console.print(
+                    f"[yellow]session {snapshot.session_date}: no successful "
+                    "ensemble pass; skipping[/]"
+                )
+                continue
+            from collections import Counter
+            votes = Counter(lbl.regime_label for lbl in per_session_labels[i])
+            top_label, top_count = votes.most_common(1)[0]
+            mean_conf = sum(
+                lbl.regime_confidence for lbl in per_session_labels[i]
+            ) / len(per_session_labels[i])
+
+            # Use first pass for the rest of the structure.
+            first = per_session_labels[i][0]
+            agg = first.model_copy(update={
+                "regime_label": top_label,
+                "regime_confidence": round(mean_conf, 4),
+            })
+            path = out_dir / f"{snapshot.session_date.isoformat()}.json"
+            path.write_text(agg.model_dump_json(indent=2))
+
+        console.print(
+            f"  batch {batch_idx + 1}/{n_batches}: "
+            f"{len(batch)} sessions × {ensemble} pass = "
+            f"{len(batch) * ensemble} calls; cumulative cost ${total_cost:.4f}"
+        )
+
+    console.print()
+    console.print(
+        f"[green]done.[/]  total cost ${total_cost:.4f}  "
+        f"failed_batches={failed_batches}"
+    )
+
+
 if __name__ == "__main__":
     app()

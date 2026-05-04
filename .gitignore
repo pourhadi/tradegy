@@ -17,5 +17,6 @@ data/auto_generation/
 data/feature_stats/
 data/market_scan/
 data/live_options/
+data/session_labels/
 !data/.gitkeep
 !tests/fixtures/
