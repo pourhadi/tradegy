@@ -61,13 +61,39 @@ def _setup_page() -> None:
         page_title="tradegy — live-options",
         page_icon="📈",
         layout="wide",
+        initial_sidebar_state="collapsed",
     )
-    st.title("tradegy — live-options")
+    # Mobile-friendly CSS overrides:
+    # - reduce default block padding (more content per viewport)
+    # - shrink Rich-table column widths so they wrap on narrow screens
+    # - allow horizontal scroll on dataframes that won't fit
+    st.markdown(
+        """
+        <style>
+        /* mobile: tighten padding so tab content fits the viewport */
+        @media (max-width: 768px) {
+            section.main > div { padding-top: 1rem !important; }
+            section.main > div { padding-left: 0.5rem !important;
+                                 padding-right: 0.5rem !important; }
+            div[data-testid="stMetric"] { padding: 0.25rem !important; }
+            div[data-testid="stMetricLabel"] { font-size: 0.75rem !important; }
+            div[data-testid="stMetricValue"] { font-size: 1.1rem !important; }
+            /* tab labels can get cramped; allow horizontal scroll */
+            div[role="tablist"] { overflow-x: auto !important;
+                                  flex-wrap: nowrap !important; }
+            /* dataframes default to fixed widths; force horizontal scroll */
+            div[data-testid="stDataFrame"] { overflow-x: auto !important; }
+        }
+        /* always: prevent very long tab names from breaking the layout */
+        button[role="tab"] { white-space: nowrap; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.title("📈 tradegy — live-options")
     st.caption(
         "monitoring + control for the validated SPY+PCS+IC+JL+IV<0.25 "
-        "portfolio at $25K. see "
-        "[doc 14](trading_platform_docs/14_options_volatility_selling.md) + "
-        "[runbook](trading_platform_docs/15_live_options_runbook.md)."
+        "portfolio at $25K (see doc 14 + runbook)."
     )
 
 
@@ -355,10 +381,17 @@ def _load_walk_forward_validation() -> dict:
 
 
 @st.cache_data(ttl=120)
-def _run_doctor_checks() -> list[dict]:
-    """Run the install doctor; return results as plain dicts."""
+def _run_doctor_checks(skip_ibkr: bool = True) -> list[dict]:
+    """Run the install doctor; return results as plain dicts.
+
+    Default `skip_ibkr=True`: skip the TWS port + IBKR connection
+    probes. They take 5-10 seconds each when TWS is down (waiting
+    for connect timeout) and would block the dashboard's first
+    paint. The doctor tab has an explicit button to run the full
+    version on demand.
+    """
     from tradegy.live.options_doctor import run_all_checks
-    results = run_all_checks(skip_ibkr=False)
+    results = run_all_checks(skip_ibkr=skip_ibkr)
     return [
         {"name": r.name, "status": r.status,
          "message": r.message, "detail": r.detail}
@@ -406,30 +439,37 @@ def _load_position_statuses_with_mark() -> list[dict]:
 
 
 def _render_top_strip() -> None:
+    """Top strip: 3 metrics on wide screens, stacks on mobile.
+
+    All loaders are FAST (cached, no IBKR probe) so first paint is
+    sub-second. Doctor's full check (with IBKR probe) is gated to
+    the doctor tab where the user can opt in by clicking refresh.
+    """
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.subheader("system")
-        doctor = _run_doctor_checks()
-        n_pass = sum(1 for r in doctor if r["status"] == "pass")
-        n_fail = sum(1 for r in doctor if r["status"] == "fail")
-        n_warn = sum(1 for r in doctor if r["status"] == "warning")
-        st.metric("doctor pass / fail / warn",
-                  f"{n_pass} / {n_fail} / {n_warn}")
-        # Latest cron status.
+        # Cron-log heuristic only — skip the IBKR probe here so the
+        # top strip paints fast even if TWS is down.
         logs = _load_recent_cron_logs(n=1)
         if logs:
             cron_status = (
                 "✅ ok" if logs[0]["success"] else
                 "❌ failed" if logs[0]["failed"] else
-                "🟡 ran (no clear status)"
+                "🟡 ran"
             )
-            st.caption(f"latest cron: {logs[0]['filename']} — {cron_status}")
+            st.metric(
+                "latest cron",
+                cron_status,
+                logs[0]["filename"].replace(".log", ""),
+            )
         else:
-            st.caption("latest cron: never run")
+            st.metric(
+                "latest cron",
+                "—",
+                "never run",
+            )
 
     with col2:
-        st.subheader("positions")
         positions = _load_open_positions()
         total_capital = sum(p["max_loss_$"] for p in positions)
         st.metric(
@@ -437,29 +477,28 @@ def _render_top_strip() -> None:
             f"{len(positions)}",
             f"${total_capital:,.0f} at risk" if positions else None,
         )
-        # Marked P&L for triggered count.
-        statuses = _load_position_statuses_with_mark()
-        n_triggered = sum(1 for s in statuses if s["trigger"] != "—")
-        if n_triggered > 0:
-            st.warning(
-                f"{n_triggered} position(s) will close on next "
-                "live-options --route session"
-            )
 
     with col3:
-        st.subheader("latest decision")
         decisions = _load_recent_decisions(n=1)
         if decisions:
             d = decisions[0]
             st.metric(
-                f"snapshot {d['snapshot_date']}",
+                f"latest decision",
                 f"{d['n_entries']} entries",
-                f"SPY=${d['underlying_price']:.2f}, "
-                f"IV<{d['iv_gate_max']}",
+                f"{d['snapshot_date']} @ ${d['underlying_price']:.2f}",
             )
-            st.caption(d["filename"])
         else:
-            st.caption("no decisions written yet")
+            st.metric("latest decision", "—", "no sessions")
+
+    # Triggered-close warning is ONLY shown when present — keeps
+    # the top strip uncluttered when nothing's pending.
+    statuses = _load_position_statuses_with_mark()
+    n_triggered = sum(1 for s in statuses if s["trigger"] != "—")
+    if n_triggered > 0:
+        st.warning(
+            f"⚠️ {n_triggered} position(s) will close on next "
+            "live-options --route session — see the positions tab."
+        )
 
 
 def _render_positions_tab() -> None:
@@ -470,7 +509,7 @@ def _render_positions_tab() -> None:
     df = pl.DataFrame(statuses).to_pandas()
     st.dataframe(
         df,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "pnl % credit": st.column_config.NumberColumn(format="%.1f%%"),
             "entry $": st.column_config.NumberColumn(format="$%.0f"),
@@ -503,7 +542,7 @@ def _render_decision_tab() -> None:
     for entry in d["entries"]:
         with st.expander(f"{entry['strategy_id']} ×{entry['contracts']}"):
             leg_df = pl.DataFrame(entry["legs"]).to_pandas()
-            st.dataframe(leg_df, use_container_width=True)
+            st.dataframe(leg_df, width="stretch")
 
 
 def _render_sessions_tab() -> None:
@@ -524,7 +563,7 @@ def _render_sessions_tab() -> None:
             for d in decisions
         ]
         st.dataframe(
-            pl.DataFrame(rows).to_pandas(), use_container_width=True,
+            pl.DataFrame(rows).to_pandas(), width="stretch",
         )
     else:
         st.caption("no decisions yet")
@@ -569,7 +608,7 @@ def _render_charts_tab() -> None:
         ).to_pandas()).mark_rule(
             color="red", strokeDash=[4, 4],
         ).encode(y="y:Q")
-        st.altair_chart(rank_chart + threshold, use_container_width=True)
+        st.altair_chart(rank_chart + threshold, width="stretch")
         # Gate-status counts.
         n_below = sum(1 for r in iv_data if r["iv_rank"] < 0.25)
         n_total = len(iv_data)
@@ -587,28 +626,26 @@ def _render_charts_tab() -> None:
     st.caption(
         "Re-runs the validated config (PCS+IC+JL+IV<0.25, $25K, "
         "default mgmt) over a 3y/1y/1y rolling window against ALL "
-        "ingested SPY data — including any 2026 partitions added "
-        "since the original validation. Tells you whether the gate "
-        "still passes as the live regime drifts. Cached 24h."
+        "ingested SPY data. Tells you whether the gate still passes "
+        "as the live regime drifts. **Lazy** — only computes when "
+        "you click the button (3-min run). Cached for the rest of "
+        "the session."
     )
 
-    col_run, _ = st.columns([1, 4])
-    with col_run:
-        if st.button(
-            "🔁 refresh validation (~3 min)",
-            use_container_width=True,
-        ):
-            _load_walk_forward_validation.clear()
-            st.rerun()
+    if st.button(
+        "🔁 run / refresh walk-forward (~3 min)",
+        key="run_walkforward_btn",
+    ):
+        _load_walk_forward_validation.clear()
+        with st.spinner("running walk-forward... (this takes ~3 min)"):
+            st.session_state["_wf_result"] = _load_walk_forward_validation()
 
-    try:
-        wf = _load_walk_forward_validation()
-    except Exception as exc:  # noqa: BLE001
-        st.error(f"walk-forward error: {type(exc).__name__}: {exc}")
-        wf = None
-
+    wf = st.session_state.get("_wf_result")
     if wf is None:
-        pass
+        st.info(
+            "Walk-forward not yet run. Click the button above to "
+            "compute. Result is cached for this session."
+        )
     elif wf.get("error"):
         st.warning(f"validation skipped: {wf['error']}")
     elif not wf["windows"]:
@@ -662,12 +699,12 @@ def _render_charts_tab() -> None:
             xOffset="kind:N",
             tooltip=["window", "kind", "pnl", "trades"],
         )
-        st.altair_chart(chart, use_container_width=True)
+        st.altair_chart(chart, width="stretch")
 
         # Detail table.
         st.dataframe(
             pl.DataFrame(wf["windows"]).to_pandas(),
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "in_sample_pnl": st.column_config.NumberColumn(format="$%.0f"),
                 "oos_pnl": st.column_config.NumberColumn(format="$%.0f"),
@@ -696,7 +733,7 @@ def _render_charts_tab() -> None:
             y=alt.Y("cumulative_pnl:Q", title="cumulative P&L ($)"),
             tooltip=["date:T", "daily_pnl:Q", "cumulative_pnl:Q"],
         )
-        st.altair_chart(cum_chart, use_container_width=True)
+        st.altair_chart(cum_chart, width="stretch")
         latest = pnl_data[-1]["cumulative_pnl"]
         col1, col2 = st.columns(2)
         col1.metric("cumulative realized $", f"${latest:+,.0f}")
@@ -704,12 +741,32 @@ def _render_charts_tab() -> None:
 
 
 def _render_doctor_tab() -> None:
-    doctor = _run_doctor_checks()
+    """Doctor tab — fast checks always; IBKR probe gated to a
+    button so it doesn't slow page rendering.
+    """
+    col1, col2, _ = st.columns([1, 1, 2])
+    with col1:
+        if st.button("🔁 refresh (fast)", key="doctor_fast"):
+            _run_doctor_checks.clear()
+            st.rerun()
+    with col2:
+        if st.button("🌐 full check (incl. IBKR probe)", key="doctor_full"):
+            _run_doctor_checks.clear()
+            st.session_state["_doctor_skip_ibkr"] = False
+            st.rerun()
+
+    skip_ibkr = st.session_state.get("_doctor_skip_ibkr", True)
+    doctor = _run_doctor_checks(skip_ibkr=skip_ibkr)
+    if skip_ibkr:
+        st.caption(
+            "ℹ️ TWS_PORT + IBKR_PROBE skipped for fast load. "
+            "Click \"full check\" to include them."
+        )
     rows = [
         {"check": r["name"], "status": r["status"], "message": r["message"]}
         for r in doctor
     ]
-    st.dataframe(pl.DataFrame(rows).to_pandas(), use_container_width=True)
+    st.dataframe(pl.DataFrame(rows).to_pandas(), width="stretch")
     for r in doctor:
         if r["detail"] and r["status"] in {"fail", "warning"}:
             with st.expander(f"{r['name']} detail"):
@@ -727,7 +784,7 @@ def _render_controls_tab() -> None:
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("🔄 generate decision (no route)", use_container_width=True):
+        if st.button("🔄 generate decision (no route)", width="stretch"):
             with st.spinner("running tradegy live-options..."):
                 out = _run_cli(["uv", "run", "tradegy", "live-options"])
             st.code(out, language="text")
@@ -738,13 +795,13 @@ def _render_controls_tab() -> None:
             help="Routes entries + V2 close loop to IBKR paper. "
                  "Requires --paper-account env or click toggles below.",
             disabled=not _route_safe(),
-            use_container_width=True,
+            width="stretch",
             on_click=_route_now,
         )
         if not _route_safe():
             st.caption("⚠️ disabled: env IBKR_PAPER_ACCOUNT not set")
     with col3:
-        if st.button("📋 doctor", use_container_width=True):
+        if st.button("📋 doctor", width="stretch"):
             _run_doctor_checks.clear()
             st.rerun()
 
@@ -765,7 +822,7 @@ def _render_controls_tab() -> None:
         )
     with col2:
         if is_loaded and st.button(
-            "⏸️ pause cron (unload)", use_container_width=True,
+            "⏸️ pause cron (unload)", width="stretch",
         ):
             out = _run_cli(
                 ["launchctl", "unload", str(plist_target)],
@@ -775,7 +832,7 @@ def _render_controls_tab() -> None:
             st.rerun()
     with col3:
         if (not is_loaded) and st.button(
-            "▶️ resume cron (load)", use_container_width=True,
+            "▶️ resume cron (load)", width="stretch",
         ):
             out = _run_cli(
                 ["launchctl", "load", str(plist_target)],
@@ -790,7 +847,7 @@ def _render_controls_tab() -> None:
     with col1:
         if st.button(
             "📥 pull today's SPY chain + ingest",
-            use_container_width=True,
+            width="stretch",
             disabled=not os.environ.get("ORATS_API_KEY"),
         ):
             from datetime import date as _date

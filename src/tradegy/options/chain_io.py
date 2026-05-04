@@ -44,6 +44,12 @@ _DEFAULT_MULTIPLIER_BY_TICKER: dict[str, int] = {
     "SPY": 100,
     "NDX": 100,
     "RUT": 100,
+    # ETF cousins admitted 2026-05-04 to support multi-underlying
+    # diversification at retail capital ($5K). All standard $100
+    # multiplier; American-style w/ physical delivery same as SPY.
+    "IWM": 100,   # Russell 2000 ETF
+    "QQQ": 100,   # Nasdaq 100 ETF
+    "DIA": 100,   # Dow Jones Industrial Avg ETF
 }
 
 

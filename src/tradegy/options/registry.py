@@ -43,22 +43,67 @@ _STRATEGY_FACTORIES: dict[str, type[OptionStrategy]] = {
 }
 
 
+# 30-DTE variants of the validated PCS+IC+JL portfolio. Same delta
+# anchors as 45-DTE versions; only target_dte differs. Faster
+# cycling for capital-constrained accounts where trade frequency
+# matters more than per-trade theta capture.
+#
+# Each factory returns a fresh instance with the appropriate id
+# overridden so portfolio-mode runs can mix 30-DTE and 45-DTE
+# variants without id collision.
+def _pcs_30dte() -> "PutCreditSpread45dteD30":
+    return PutCreditSpread45dteD30(
+        target_dte=30, id="put_credit_spread_30dte_d30",
+    )
+
+
+def _ic_30dte() -> "IronCondor45dteD16":
+    return IronCondor45dteD16(
+        target_dte=30, id="iron_condor_30dte_d16",
+    )
+
+
+def _jl_30dte() -> "JadeLizard45dte":
+    return JadeLizard45dte(
+        target_dte=30, id="jade_lizard_30dte",
+    )
+
+
+# Factory functions for parameterized variants — keyed alongside
+# the class-based factories. resolve_strategy_ids() falls back to
+# these when an id isn't a known class.
+_STRATEGY_PARAM_FACTORIES: dict[str, callable] = {
+    "put_credit_spread_30dte_d30": _pcs_30dte,
+    "iron_condor_30dte_d16": _ic_30dte,
+    "jade_lizard_30dte": _jl_30dte,
+}
+
+
 def list_strategy_ids() -> list[str]:
-    """All registered concrete strategy ids, in alphabetical order."""
-    return sorted(_STRATEGY_FACTORIES.keys())
+    """All registered strategy ids — concrete classes + parameter
+    factories, alphabetical."""
+    return sorted(
+        list(_STRATEGY_FACTORIES.keys())
+        + list(_STRATEGY_PARAM_FACTORIES.keys())
+    )
 
 
 def get_strategy(strategy_id: str) -> OptionStrategy:
     """Construct a default instance of the strategy with `strategy_id`.
 
-    Raises KeyError with the available ids on miss — no fallback.
+    Tries the class registry first (default-constructed instance);
+    falls back to the parameter-factory registry. Raises KeyError
+    with the available ids on miss — no fallback to a generic
+    strategy.
     """
-    if strategy_id not in _STRATEGY_FACTORIES:
-        raise KeyError(
-            f"unknown options strategy id {strategy_id!r}. "
-            f"Registered: {list_strategy_ids()}"
-        )
-    return _STRATEGY_FACTORIES[strategy_id]()
+    if strategy_id in _STRATEGY_FACTORIES:
+        return _STRATEGY_FACTORIES[strategy_id]()
+    if strategy_id in _STRATEGY_PARAM_FACTORIES:
+        return _STRATEGY_PARAM_FACTORIES[strategy_id]()
+    raise KeyError(
+        f"unknown options strategy id {strategy_id!r}. "
+        f"Registered: {list_strategy_ids()}"
+    )
 
 
 def resolve_strategy_ids(spec: str) -> list[OptionStrategy]:

@@ -1574,7 +1574,13 @@ def live_options_backfill_cmd(
 @app.command("live-options-dashboard")
 def live_options_dashboard_cmd(
     port: Annotated[int, typer.Option("--port")] = 8501,
-    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    host: Annotated[str, typer.Option(
+        "--host",
+        help="bind address. Default 0.0.0.0 makes the dashboard "
+        "reachable from any device on your LAN (phone/tablet) "
+        "via http://<your-LAN-IP>:8501. Use 127.0.0.1 to restrict "
+        "to localhost only.",
+    )] = "0.0.0.0",
     open_browser: Annotated[bool, typer.Option(
         "--open-browser/--no-open-browser",
     )] = True,
@@ -1585,8 +1591,8 @@ def live_options_dashboard_cmd(
     dashboard reads the registry, decision JSON, cron logs, and
     runs the install-doctor checks; refreshes on browser reload.
 
-    Default binds to 127.0.0.1:8501 (localhost only). Press
-    Ctrl-C in the terminal to stop.
+    Default binds to 0.0.0.0:8501 — reachable from your phone or
+    other devices on the LAN. Press Ctrl-C in the terminal to stop.
     """
     import os
     import subprocess
