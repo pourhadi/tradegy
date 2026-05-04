@@ -12,6 +12,8 @@ dependencies = [
     "ib-async>=2.1.0",
     "exchange-calendars>=4.13.2",
     "anthropic>=0.92",
+    "streamlit>=1.40",
+    "altair>=5.4",
 ]
 
 [project.scripts]

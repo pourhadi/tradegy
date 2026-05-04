@@ -1571,6 +1571,102 @@ def live_options_backfill_cmd(
         raise typer.Exit(code=1)
 
 
+@app.command("live-options-dashboard")
+def live_options_dashboard_cmd(
+    port: Annotated[int, typer.Option("--port")] = 8501,
+    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    open_browser: Annotated[bool, typer.Option(
+        "--open-browser/--no-open-browser",
+    )] = True,
+) -> None:
+    """Launch the Streamlit monitoring dashboard.
+
+    Wraps `streamlit run src/tradegy/dashboard/app.py`. The
+    dashboard reads the registry, decision JSON, cron logs, and
+    runs the install-doctor checks; refreshes on browser reload.
+
+    Default binds to 127.0.0.1:8501 (localhost only). Press
+    Ctrl-C in the terminal to stop.
+    """
+    import os
+    import subprocess
+
+    app_path = config.repo_root() / "src" / "tradegy" / "dashboard" / "app.py"
+    if not app_path.exists():
+        console.print(f"[red]ERROR[/]: {app_path} not found")
+        raise typer.Exit(code=1)
+
+    args = [
+        "streamlit", "run", str(app_path),
+        "--server.port", str(port),
+        "--server.address", host,
+    ]
+    if not open_browser:
+        args += ["--server.headless", "true"]
+    console.print(
+        f"[bold]launching dashboard[/]  http://{host}:{port}\n"
+        f"  ctrl-c to stop"
+    )
+    # Inherit env so streamlit picks up ORATS_API_KEY etc. for the
+    # IBKR + ORATS probes the doctor check uses.
+    try:
+        subprocess.run(args, env=os.environ.copy())
+    except KeyboardInterrupt:
+        console.print("\n[dim]dashboard stopped[/]")
+
+
+@app.command("live-options-doctor")
+def live_options_doctor_cmd(
+    skip_ibkr: Annotated[bool, typer.Option(
+        "--skip-ibkr/--no-skip-ibkr",
+        help="skip TWS port + IBKR probe checks (useful when TWS is "
+             "intentionally down).",
+    )] = False,
+) -> None:
+    """Walk through every install-side check and report status.
+
+    Each check is independent — one failing doesn't stop the others.
+    Use this BEFORE installing the cron, after editing env vars,
+    or any time you want to confirm the install hasn't drifted.
+
+    Exit code 0 if all checks pass or warning-only; exit 1 if any
+    fails.
+    """
+    from tradegy.live.options_doctor import run_all_checks
+    results = run_all_checks(skip_ibkr=skip_ibkr)
+
+    table = Table(title="live-options doctor")
+    table.add_column("check")
+    table.add_column("status")
+    table.add_column("message")
+    for r in results:
+        if r.status == "pass":
+            badge = "[green]PASS[/]"
+        elif r.status == "fail":
+            badge = "[red]FAIL[/]"
+        elif r.status == "warning":
+            badge = "[yellow]WARN[/]"
+        else:
+            badge = "[dim]skip[/]"
+        table.add_row(r.name, badge, r.message)
+    console.print(table)
+
+    for r in results:
+        if r.detail and r.status in {"fail", "warning"}:
+            console.print(f"\n[bold]{r.name} detail[/]:\n{r.detail}")
+
+    n_pass = sum(1 for r in results if r.status == "pass")
+    n_fail = sum(1 for r in results if r.status == "fail")
+    n_warn = sum(1 for r in results if r.status == "warning")
+    n_skip = sum(1 for r in results if r.status == "skip")
+    console.print(
+        f"\n[bold]summary[/]: pass={n_pass} fail={n_fail} "
+        f"warn={n_warn} skip={n_skip}"
+    )
+    if n_fail > 0:
+        raise typer.Exit(code=1)
+
+
 @app.command("live-options-status")
 def live_options_status_cmd(
     source_id: Annotated[str, typer.Option("--source-id")] = "spy_options_chain",
