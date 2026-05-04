@@ -1,0 +1,129 @@
+# MES MVP — regime-gated OR30 failed-breakout fade.
+#
+# Phase 5 MVP pivot of the regime-gated range-scalp plan
+# (/Users/dan/.claude/plans/brainstorming-in-the-context-humming-balloon.md).
+#
+# This is the deliberately-simplified version. Per the user's MVP
+# directive 2026-05-04: get a basic understanding of the thesis before
+# committing to LLM session-labeling + distillation classifier
+# infrastructure. Things this MVP DOES NOT have, all of which the full
+# plan does:
+#
+#   - LLM-derived regime label (replaced with VIX percentile heuristic)
+#   - News-event impact classifier (replaced with FOMC/scheduled-event
+#     quiet window flag — coarser, misses unscheduled news)
+#   - Cross-asset divergence detector (not built)
+#   - Realized-vol percentile at MES cadence (proxied by daily VIX)
+#   - Opening-drive strength normalization (replaced by simple
+#     time-of-session gate)
+#   - Trailing exit / asymmetric-R:R logic (existing stop classes don't
+#     support trailing yet — fixed ATR stop only)
+#
+# Interpretation rule: a profitable MVP signals the thesis is real and
+# the full version probably gets more so. An unprofitable MVP is
+# AMBIGUOUS — could mean thesis is wrong, or could mean the missing
+# features are load-bearing. Do NOT kill the hypothesis on MVP results
+# alone.
+
+metadata:
+  id: mes_mvp_regime_gated_v1_baseline
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES MVP regime-gated OR30 failed-breakout fade — baseline
+  status: draft
+  created_date: 2026-05-04
+  last_modified_date: 2026-05-04
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: mes_orb_failure_fade
+  description: >
+    MVP-pivot version of the regime-gated range-scalp strategy. Uses
+    the existing range_break_fade class with a deterministic regime
+    gate stack: VIX percentile < 0.5 AND econ-event quiet flag clear
+    AND mid-session time window. Tier proposal_only — directional
+    signal only, not a deploy candidate.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: range_break_fade
+  parameters:
+    upper_level_feature_id: mes_or30_high
+    lower_level_feature_id: mes_or30_low
+    breakout_lookback_bars: 5
+    re_entry_buffer_ticks: 1
+    tick_size: 0.25
+    max_attempts_per_session: 1
+    direction_mode: both
+  direction: both
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    # Skip first 10% and last 15% of XNYS session.
+    - condition: time_of_session
+      parameters:
+        session_position_feature_id: mes_xnys_session_position
+        lo: 0.10
+        hi: 0.85
+    # Low-vol regime: VIX percentile rank < 0.5 (i.e., bottom half of
+    # trailing 1-yr range). Range-fade strategies historically work in
+    # low-vol; trending vol environments invalidate the mean-reversion
+    # premise.
+    - condition: feature_threshold
+      parameters:
+        feature_id: vix_daily_pctile_252
+        operator: lt
+        threshold: 0.50
+    # No scheduled high-importance event in the T-2h to T+4h window.
+    # Filters around CPI / NFP / FOMC / GDP / retail sales / SEP /
+    # Fed press conferences.
+    - condition: feature_threshold
+      parameters:
+        feature_id: mes_econ_event_quiet_window_flag
+        operator: lte
+        threshold: 0.0
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: atr_multiple
+    atr_feature_id: mes_atr_14m
+    atr_mult: 1.0
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 100
+  time_stop:
+    enabled: true
+    max_holding_bars: 30
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only
