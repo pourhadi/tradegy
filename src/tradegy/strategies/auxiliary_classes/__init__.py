@@ -11,6 +11,8 @@ from tradegy.strategies.auxiliary_classes import (  # noqa: F401
     feature_threshold,
     fixed_contracts,
     fixed_ticks,
+    r_multiple_target,
     time_of_session,
     time_stop,
+    trailing_atr,
 )

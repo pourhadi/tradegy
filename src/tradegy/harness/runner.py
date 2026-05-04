@@ -60,6 +60,7 @@ from tradegy.strategies.auxiliary import (
     get_condition_evaluator,
     get_exit_class,
     get_sizing_class,
+    get_stop_adjustment_class,
     get_stop_class,
 )
 from tradegy.strategies.base import get_strategy_class
@@ -145,6 +146,18 @@ def run_backtest(
         for g in spec.entry.gating_conditions
     ]
 
+    # Stop-adjustment rules resolved once. Each rule dict has an
+    # `action` key naming a registered StopAdjustmentClass; remaining
+    # keys are passed to adjusted_stop() as parameters. Evaluated once
+    # per bar while in position; the latest non-None return ratchets
+    # `position.current_stop_price`. Empty list => initial stop only
+    # (legacy behavior).
+    adjustments = []
+    for rule in spec.stops.adjustment_rules:
+        action = rule.get("action")
+        adj_params = {k: v for k, v in rule.items() if k != "action"}
+        adjustments.append((get_stop_adjustment_class(action), adj_params))
+
     # Build the panel.
     instrument = spec.market_scope.instrument
     bar_cadence = "1m"  # MVP convention
@@ -173,6 +186,8 @@ def run_backtest(
     for c in spec.exits.invalidation_conditions:
         _harvest(c.parameters)
     _harvest(initial_stop_params)
+    for rule in spec.stops.adjustment_rules:
+        _harvest({k: v for k, v in rule.items() if k != "action"})
 
     bars = load_bar_stream(
         instrument,
@@ -276,7 +291,9 @@ def run_backtest(
                     fill = fill_market_order(order, bar.open, bar.ts_utc, cost)
                     apply_fill(state.position, fill)
                     if state.position.quantity != 0:
-                        # entry — place initial stop
+                        # entry — place initial stop and reset peak-
+                        # favorable tracking so a prior closed position's
+                        # high-water mark doesn't bleed into this one.
                         stop_px = stop_class.stop_price(
                             initial_stop_params,
                             state.position.side,
@@ -286,6 +303,7 @@ def run_backtest(
                         )
                         state.position.initial_stop_price = stop_px
                         state.position.current_stop_price = stop_px
+                        state.position.peak_favorable_price = None
             pending_orders = []
 
         # 1a) Close from a queued exit at this bar's open.
@@ -350,6 +368,23 @@ def run_backtest(
         # 3) If still in position, increment holding bars and evaluate exits.
         if not state.position.is_flat:
             state.position.bars_since_entry += 1
+
+            # 3a) Track peak-favorable price for trailing-stop classes.
+            #     Update BEFORE adjustment evaluation so the class sees
+            #     the current bar's range reflected.
+            state.position.update_peak_favorable(bar.high, bar.low)
+
+            # 3b) Evaluate stop adjustments (trailing stops, breakeven
+            #     moves, etc.). The latest non-None return updates
+            #     `current_stop_price`; classes are responsible for
+            #     ratcheting (returning None when the candidate would
+            #     loosen the stop).
+            for adj_class, adj_params in adjustments:
+                new_stop = adj_class.adjusted_stop(
+                    adj_params, state.position, bar, features,
+                )
+                if new_stop is not None:
+                    state.position.current_stop_price = new_stop
 
             if time_stop_enabled and state.position.bars_since_entry >= time_stop_max_bars:
                 pending_close_reason = ExitReason.TIME

@@ -1,0 +1,109 @@
+# MES MVP — v1_baseline + 2R profit target via r_multiple_target.
+#
+# For an OR30 fade strategy, mean-reversion is the premise. A fixed
+# R-multiple profit target captures the "exit at the opposite range
+# edge" trade thesis natively — no trailing-stop wickiness, just
+# "winners take 2R, losers cap at 1R via the initial ATR stop."
+#
+# Math at v1's 31.5% win rate: 0.315 × 2.0R - 0.685 × 1.0R = -0.055R/trade.
+# Still slightly negative, but fundamentally less negative than the
+# symmetric-R:R version (-0.476). The trailing-stop variants (v4, v5)
+# made it worse by clipping winners on wicks; this should NOT clip
+# winners that retrace — it only exits when 2R is achieved.
+
+metadata:
+  id: mes_mvp_regime_gated_v6_2R_target
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES MVP regime-gated OR30 fade — 2R profit target
+  status: draft
+  created_date: 2026-05-04
+  last_modified_date: 2026-05-04
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: mes_mvp_regime_gated_v1_baseline
+  description: >
+    v1 baseline (range_break_fade, OR30, regime-gated) plus
+    r_multiple_target invalidation condition at 2R. Initial stop 1R
+    (ATR_14m × 1.0). Asymmetric R:R 2:1 baked in. Tier proposal_only.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: range_break_fade
+  parameters:
+    upper_level_feature_id: mes_or30_high
+    lower_level_feature_id: mes_or30_low
+    breakout_lookback_bars: 5
+    re_entry_buffer_ticks: 1
+    tick_size: 0.25
+    max_attempts_per_session: 1
+    direction_mode: both
+  direction: both
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    - condition: time_of_session
+      parameters:
+        session_position_feature_id: mes_xnys_session_position
+        lo: 0.10
+        hi: 0.85
+    - condition: feature_threshold
+      parameters:
+        feature_id: vix_daily_pctile_252
+        operator: lt
+        threshold: 0.50
+    - condition: feature_threshold
+      parameters:
+        feature_id: mes_econ_event_quiet_window_flag
+        operator: lte
+        threshold: 0.0
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: atr_multiple
+    atr_feature_id: mes_atr_14m
+    atr_mult: 1.0
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 100
+  time_stop:
+    enabled: true
+    max_holding_bars: 60
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions:
+    - condition: r_multiple_target
+      parameters:
+        target_R: 2.0
+      action: exit_market
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only

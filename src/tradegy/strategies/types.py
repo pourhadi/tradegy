@@ -103,6 +103,12 @@ class Position:
     current_stop_price: float | None = None
     entry_ts: datetime | None = None
     bars_since_entry: int = 0
+    # Most favorable price reached since entry (max-of-bar.high for longs,
+    # min-of-bar.low for shorts). Updated by the harness each bar after
+    # entry; consumed by trailing-stop adjustment classes that need to
+    # know the high-water mark to compute "trail from peak". None when
+    # flat or just-after-entry-fill before the first bar update.
+    peak_favorable_price: float | None = None
 
     @property
     def is_flat(self) -> bool:
@@ -115,6 +121,25 @@ class Position:
         if self.quantity < 0:
             return Side.SHORT
         return None
+
+    def update_peak_favorable(self, bar_high: float, bar_low: float) -> None:
+        """Update peak_favorable_price using this bar's range.
+
+        Called by the harness once per bar while in position. For longs:
+        peak = max(peak, bar.high). For shorts: peak = min(peak,
+        bar.low). The very first call after entry initializes from the
+        bar.
+        """
+        if self.quantity > 0:
+            cur = self.peak_favorable_price
+            self.peak_favorable_price = (
+                bar_high if cur is None else max(cur, bar_high)
+            )
+        elif self.quantity < 0:
+            cur = self.peak_favorable_price
+            self.peak_favorable_price = (
+                bar_low if cur is None else min(cur, bar_low)
+            )
 
 
 @dataclass
