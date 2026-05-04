@@ -1,0 +1,104 @@
+# MES MVP — range_break_continuation with high-vol regime + trailing.
+#
+# Mechanic: enter on a confirmed OR30 break in the direction of the
+# break, using volume confirmation. Opposite premise to range_break_fade:
+# the breakout is real and continues (vs fade which says it fails).
+
+metadata:
+  id: mes_mvp_range_break_continuation
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES MVP OR30 break continuation — high-vol, trailing 3x ATR
+  status: draft
+  created_date: 2026-05-04
+  last_modified_date: 2026-05-04
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: null
+  description: >
+    OR30 break continuation with volume confirmation + high-vol regime
+    gate + trailing ATR exit. Tier proposal_only.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: range_break_continuation
+  parameters:
+    upper_level_feature_id: mes_or30_high
+    lower_level_feature_id: mes_or30_low
+    volume_zscore_feature_id: mes_volume_zscore_20m
+    confirmation_buffer_ticks: 1
+    volume_zscore_min: 1.0
+    tick_size: 0.25
+    max_attempts_per_session: 1
+    direction_mode: both
+  direction: both
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    - condition: time_of_session
+      parameters:
+        session_position_feature_id: mes_xnys_session_position
+        lo: 0.10
+        hi: 0.85
+    - condition: feature_threshold
+      parameters:
+        feature_id: vix_daily_pctile_252
+        operator: gt
+        threshold: 0.50
+    - condition: feature_threshold
+      parameters:
+        feature_id: mes_econ_event_quiet_window_flag
+        operator: lte
+        threshold: 0.0
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: atr_multiple
+    atr_feature_id: mes_atr_14m
+    atr_mult: 1.0
+    tick_size: 0.25
+    max_distance_ticks: 400
+  adjustment_rules:
+    - action: trailing_atr
+      atr_feature_id: mes_atr_14m
+      multiplier: 3.0
+      activation_R: 1.0
+      tick_size: 0.25
+  hard_max_distance_ticks: 400
+  time_stop:
+    enabled: true
+    max_holding_bars: 60
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only

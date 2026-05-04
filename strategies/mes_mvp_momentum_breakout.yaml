@@ -1,0 +1,105 @@
+# MES MVP — momentum_breakout with HIGH-vol regime gate + trailing exit.
+#
+# Mechanic-search variant testing the OPPOSITE premise from fade
+# strategies: ride 5m return breakouts. Pairs with high-vol regime
+# (VIX > 0.50 percentile) since trends thrive when volatility is
+# expanded; same condition kills mean-reversion fades.
+#
+# Exit shape: trailing_atr at multiplier 3.0 (wider than fade trailing
+# to give momentum room) + activation_R = 1.0 (don't trail until
+# trade is showing real movement). Asymmetric R:R that lets winners
+# run.
+
+metadata:
+  id: mes_mvp_momentum_breakout
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES MVP momentum breakout — high-vol regime, trailing 3x ATR
+  status: draft
+  created_date: 2026-05-04
+  last_modified_date: 2026-05-04
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: null
+  description: >
+    5m return momentum breakout, high-vol regime gate, trailing ATR
+    exit with 1R activation. Tier proposal_only.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: momentum_breakout
+  parameters:
+    return_feature_id: mes_5m_log_returns
+    entry_threshold: 0.001
+    max_attempts_per_session: 1
+  direction: both
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    - condition: time_of_session
+      parameters:
+        session_position_feature_id: mes_xnys_session_position
+        lo: 0.10
+        hi: 0.85
+    - condition: feature_threshold
+      parameters:
+        feature_id: vix_daily_pctile_252
+        operator: gt  # FLIPPED from fade specs: trend works in expanded vol
+        threshold: 0.50
+    - condition: feature_threshold
+      parameters:
+        feature_id: mes_econ_event_quiet_window_flag
+        operator: lte
+        threshold: 0.0
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: atr_multiple
+    atr_feature_id: mes_atr_14m
+    atr_mult: 1.0
+    tick_size: 0.25
+    max_distance_ticks: 400
+  adjustment_rules:
+    - action: trailing_atr
+      atr_feature_id: mes_atr_14m
+      multiplier: 3.0  # wider trail for momentum
+      activation_R: 1.0
+      tick_size: 0.25
+  hard_max_distance_ticks: 400
+  time_stop:
+    enabled: true
+    max_holding_bars: 60
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only

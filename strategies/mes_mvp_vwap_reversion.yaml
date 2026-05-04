@@ -1,0 +1,107 @@
+# MES MVP — VWAP-reversion fade with regime gates + 2R target.
+#
+# Mechanic-search variant per user directive 2026-05-04 ("#1 try
+# different mechanic"). Same regime gating (time-of-session,
+# VIX<0.50 percentile, econ-quiet flag) and same asymmetric exit
+# (ATR initial stop + 2R r_multiple_target invalidation) as the OR30-
+# fade MVP — different ENTRY mechanic.
+#
+# vwap_reversion (long-only): fade an intraday extension below
+# session VWAP. Mechanic premise: VWAP is institutional intraday
+# fair-value; significant negative extension represents temporary
+# overshoot that mean-reverts. Long-only because the class is
+# implemented long-only (per its docstring; bidirectional version
+# is deferred work).
+
+metadata:
+  id: mes_mvp_vwap_reversion
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES MVP VWAP reversion (long-only) — regime-gated, 2R target
+  status: draft
+  created_date: 2026-05-04
+  last_modified_date: 2026-05-04
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: null
+  description: >
+    VWAP reversion fade with the same regime gate stack as the OR30-
+    fade MVP, asymmetric R:R via 2R r_multiple_target invalidation.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: vwap_reversion
+  parameters:
+    vwap_feature_id: mes_vwap
+    deviation_threshold_ticks: 8
+    tick_size: 0.25
+    max_attempts_per_session: 1
+  direction: long  # vwap_reversion is long-only by class
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    - condition: time_of_session
+      parameters:
+        session_position_feature_id: mes_xnys_session_position
+        lo: 0.10
+        hi: 0.85
+    - condition: feature_threshold
+      parameters:
+        feature_id: vix_daily_pctile_252
+        operator: lt
+        threshold: 0.50
+    - condition: feature_threshold
+      parameters:
+        feature_id: mes_econ_event_quiet_window_flag
+        operator: lte
+        threshold: 0.0
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: atr_multiple
+    atr_feature_id: mes_atr_14m
+    atr_mult: 1.0
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 100
+  time_stop:
+    enabled: true
+    max_holding_bars: 60
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions:
+    - condition: r_multiple_target
+      parameters:
+        target_R: 2.0
+      action: exit_market
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only
