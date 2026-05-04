@@ -3,18 +3,29 @@
 This is the consolidated runbook for deploying the validated
 options vol-selling configs to an IBKR paper account.
 
-**Two validated configs — pick the one matching your capital:**
+**Two configs to pick from based on capital:**
 
-| Capital | Config | Source | OOS AnnRoC | Trade freq |
-|---|---|---|---|---|
-| **$25K** | SPY + PCS+IC+JL + IV<0.25 | `spy_options_chain` SPY | ~28% | ~68/yr |
-| **$5K** ⭐ | EEM + PCS+IC+JL + IV<0.25 | `eem_options_chain` EEM | ~45% | ~160/yr |
+| Capital | Config | Source | 6-yr Walk-fwd | 16-yr Walk-fwd | Recommendation |
+|---|---|---|---|---|---|
+| **$25K** | SPY + PCS+IC+JL + IV<0.25 | `spy_options_chain` SPY | ✅ +0.254 OOS | ✅ +0.138 OOS, -1.4 worst | **defensible — deploy** |
+| **$5K** | EEM + PCS+IC+JL + IV<0.25 | `eem_options_chain` EEM | ✅ +0.250 OOS, +45% AnnRoC | ❌ FAILS (-0.003 OOS) | **regime-fragile — deploy with caution** |
 
-The $5K EEM config (added 2026-05-04) is the discipline-validated
-winner for retail capital. EEM's low share price ($60-90) lets
-multiple positions fit in the $5K cap; structurally higher EM
-vol gives richer credit per trade. Walk-forward: avg IS +0.193 /
-OOS +0.250, all 3 OOS windows positive.
+**Important honest finding (2026-05-04):** The EEM config's 6-yr
+result (~45% AnnRoC) is real for 2020-2026 but the 16-yr extension
+back to 2010 reveals pre-2020 OOS sums to **-$873** while
+post-2020 sums to +$7,855. The recent 5 years are
+regime-friendly for EM vol-selling (COVID + inflation +
+geopolitics → elevated EM IV); 2010-2019 had vol spikes that
+didn't mean-revert (Eurozone 2011, China 2015, Brexit 2016,
+trade war 2018) and the strategy was a near-zero coin flip.
+
+**Operational guidance:**
+- If you have $25K: deploy SPY. Validated on 16 yrs.
+- If you have $5K: EEM is the best $5K config available BUT
+  is regime-dependent. Either deploy small-and-monitor, or
+  accumulate to $25K and use the SPY config. Don't trust the
+  ~45% AnnRoC headline — assume the 16-yr -0.003 average is
+  the more honest expectation for live deployment.
 
 **Start here every time you sit down with this system.** Then
 follow the section that matches what you need to do.
