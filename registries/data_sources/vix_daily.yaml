@@ -1,0 +1,82 @@
+# CBOE VIX cash daily OHLC.
+#
+# Free public source: https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv
+# - Cash VIX (front-month implied 30-day vol from SPX options)
+# - Coverage: 1990-01-02 → present, refreshed overnight by CBOE
+# - No volume (cash index has none)
+#
+# Added 2026-05-04 to support regime classification work (Phase 0 of the
+# range-scalp / regime-gating plan). Used as a daily regime input that is
+# broadcast forward to intraday bars via the
+# `cross_asset_close_aligned` feature transform — VIX 1m futures
+# (`VX.FUT`) is currently blocked on databento (no symbology access)
+# and Phase 0.5 is deferred until walk-forward shows daily granularity is
+# the binding constraint.
+#
+# Timestamp convention: each row is the published 16:00 ET close,
+# DST-aware converted to UTC by the download script. So winter rows land
+# at 21:00 UTC, summer rows at 20:00 UTC.
+
+id: vix_daily
+version: v1
+description: >
+  CBOE cash VIX daily OHLC (front-month implied 30-day vol) from the CBOE
+  public CSV mirror, normalized to ISO-UTC timestamps at the 16:00 ET
+  close. No volume column (cash index has no volume).
+type: market_data
+provider: cboe
+revisable: false
+revision_policy: never_revised
+admission_rationale: >
+  CBOE's public cash-VIX CSV is the canonical retail-accessible source
+  and is what every retail-tier vol-regime classifier in the public
+  literature uses. It is append-only and DST-aware-mappable to UTC.
+  Suitable as a daily regime input; not suitable as an intraday signal —
+  walk-forward against intraday VIX requires VX futures (deferred).
+coverage:
+  start_date: 1990-01-02
+  end_date: 2026-05-01
+  gaps: []
+cadence: 1d
+fields:
+  - {name: ts_utc, type: timestamp}
+  - {name: open, type: float}
+  - {name: high, type: float}
+  - {name: low, type: float}
+  - {name: close, type: float}
+timestamp_column: ts_utc
+ingest:
+  format: generic_csv
+session_calendar: XNYS
+# A daily series; one bar per US trading day. Max gap between bars on a
+# normal week is 3 days (Fri close → Mon close); a long holiday weekend
+# can stretch this. Hard ceiling reflects the longest US-market closure
+# in modern history (post-9/11, ~6 days).
+max_inactivity_seconds: 604800
+availability_latency:
+  median_seconds: 0.0
+  p99_seconds: 86400.0
+  notes: >
+    The CBOE CSV is updated overnight after the cash close. Latency from
+    16:00 ET close to file publication varies (typically ~30 minutes); a
+    consumer querying the file before that lag has stale data. For
+    backtest use this is irrelevant; for live use the consumer must wait
+    until ~17:00 ET or pull intraday VIX quotes from a separate adapter.
+licensing:
+  live_use: true
+  backtest_use: true
+  redistribution: false
+known_issues:
+  - >
+    Cash VIX is an index, not a tradeable instrument. Real exposure is
+    via VX futures, which trade at a basis to cash that is itself a
+    regime indicator. Strategies that gate on cash VIX as a proxy for
+    realized vol-environment must verify out-of-sample that the basis
+    didn't reverse the signal during the OOS window.
+  - >
+    Pre-2003 cash VIX uses the original VXO methodology (S&P 100 options,
+    not S&P 500 options). CBOE backfilled the post-2003 methodology to
+    1990, so the file is methodologically consistent — but the
+    pre-2003 values are computed retroactively and were not what the
+    market traded against at the time.
+audit_history: []

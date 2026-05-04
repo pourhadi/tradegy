@@ -1,0 +1,100 @@
+# Scheduled / monetary-policy economic events.
+#
+# Phase 0.3 of the regime-gated range-scalp plan
+# (/Users/dan/.claude/plans/brainstorming-in-the-context-humming-balloon.md).
+#
+# CURRENT SCOPE — FOMC events only:
+#   Federal Reserve press releases tagged "Monetary Policy" (FOMC
+#   statements, FOMC minutes, SEP releases, monetary policy report,
+#   speeches/remarks). Source: https://www.federalreserve.gov/json/ne-press.json
+#   Free, no API key, public.
+#
+# DEFERRED — BLS / BEA scheduled releases:
+#   CPI, PPI, NFP, GDP, retail sales, ISM, jobless claims still need to
+#   be added. Path TBD: hardcoded rule-based dates, FRED API key, or
+#   targeted BLS schedule scraping. Tracking under Phase 0.3 follow-up.
+#
+# Importance classification (per-row, set by ingest script):
+#   high   — fomc_statement, fomc_sep, fomc_press_conference
+#   medium — fomc_minutes, monetary_policy_report
+#   low    — fed_speech, fed_other_monetary
+#
+# Key load-bearing field: `announced_at`. For Fed press releases this
+# equals `ts_utc` because the press release itself is the announcement
+# (no advance schedule risk). For BLS/BEA when they're added, this will
+# be the date the schedule was first publicly known — load-bearing for
+# no-lookahead handling in `time_until_next_event` features.
+
+id: econ_events
+version: v1
+description: >
+  Scheduled and monetary-policy economic event timestamps. Initially
+  populated with Federal Reserve monetary-policy press releases
+  (2006-present); BLS/BEA scheduled releases TBD. Used by the regime-
+  gated strategy as both a quiet-window gate (no entries within T-2h
+  to T+4h of a high-importance event) and as a feature input to the
+  news-event distillation classifier.
+type: economic
+provider: federalreserve_gov
+revisable: false
+revision_policy: never_revised
+admission_rationale: >
+  Federal Reserve JSON press release feed is the canonical primary
+  source for all monetary-policy events; timestamps are recorded by
+  the issuing institution. Public, free, no auth. Currently covers only
+  the FOMC slice — the BLS/BEA slice is a known gap until Phase 0.3
+  follow-up lands them.
+coverage:
+  start_date: 2006-01-03
+  end_date: 2026-04-29
+  gaps: []
+cadence: irregular
+fields:
+  - {name: ts_utc, type: timestamp}
+  - {name: event_type, type: string}
+  - {name: importance, type: string}
+  - {name: announced_at, type: timestamp}
+  - {name: source, type: string}
+  - {name: headline, type: string}
+  - {name: link, type: string}
+timestamp_column: ts_utc
+ingest:
+  format: generic_csv
+session_calendar: XNYS
+# Irregular schedule — gaps between events range from minutes (multi-
+# release days) to weeks (quiet periods between FOMC meetings).
+# Ceiling reflects Fed practice of producing at least one
+# Monetary-Policy press item per week in normal times; we set a
+# generous month-long ceiling so audit tolerance accommodates known
+# multi-week quiet periods.
+max_inactivity_seconds: 2592000
+availability_latency:
+  median_seconds: 0.0
+  p99_seconds: 60.0
+  notes: >
+    The Fed JSON feed is updated with each press release. There is no
+    pre-announcement of unscheduled releases; the timestamp on each row
+    is the publish moment.
+licensing:
+  live_use: true
+  backtest_use: true
+  redistribution: true
+known_issues:
+  - >
+    Many `fed_other_monetary` entries (~70%) are speeches/remarks; some
+    are highly market-moving (e.g., Powell remarks during a quiet
+    period) but our heuristic importance classifier tags all as `low`.
+    Refining this via either keyword expansion or LLM-assisted
+    classification is a known follow-up.
+  - >
+    71 entries in the source feed had unparseable date strings and were
+    silently skipped during ingest. Sample-spot-check confirmed these
+    are pre-2010 archived entries with non-standard formatting; recovery
+    of these is low priority since coverage starts 2006 and most market-
+    impact strategies care about post-2019.
+  - >
+    BLS / BEA scheduled releases (CPI, NFP, PPI, GDP, retail sales) are
+    NOT in this dataset yet. Strategies that need an econ-quiet-window
+    gate at T-2h around CPI / NFP must either wait for the follow-up
+    Phase 0.3 ingest or use a coarser FOMC-only gate.
+audit_history: []
