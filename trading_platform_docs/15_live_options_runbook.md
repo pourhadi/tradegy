@@ -3,27 +3,32 @@
 This is the consolidated runbook for deploying the validated
 options vol-selling configs to an IBKR paper account.
 
-**Two deployment configs (same strategies + gate, different capital):**
+**One config, both capitals — SPY+PCS+IC+JL+IV<0.25:**
 
-| Capital | Config | Source | 16-yr Walk-fwd | OOS Trades/yr | OOS AnnRoC |
-|---|---|---|---|---|---|
-| **$25K** | SPY + PCS+IC+JL + IV<0.25 | `spy_options_chain` SPY | ✅ +0.138 OOS | 88 | ~17% |
-| **$5K** | SPY + PCS+IC+JL + IV<0.25 | `spy_options_chain` SPY | ✅ +0.867 OOS | 20 | ~13% |
+| Capital | 16-yr Walk-fwd | OOS Trades/yr | OOS AnnRoC |
+|---|---|---|---|
+| **$25K** | ✅ avg OOS +0.138 | 88 | ~17% |
+| **$5K** | ✅ avg OOS +0.867 (small-count noise) | 20 | ~13% |
 
-**Critical 2026-05-04 finding**: the earlier EEM "$5K winner"
-recommendation was a 6-yr regime artifact. EEM's 16-yr
-walk-forward FAILS — pre-2020 OOS sums to -$873. SPY at $5K is
-the actually-defensible $5K config — same strategy, just
-constrained trade count due to capital cap (~20 OOS trades/yr
-vs $25K's 88) but consistently profitable across 13 OOS years
-(2013-2025 inclusive).
+This is the ONLY underlying that survives 16-year diligence at
+retail capital. Cross-underlying sweep (2026-05-04) tested 5
+candidates against the same 16-yr walk-forward at $5K:
+
+| Underlying | Verdict | Why |
+|---|---|---|
+| **SPY** | ✅ PASS | Positive IS Sharpe across 13 windows; only defensible config |
+| QQQ | PASS at $5K, FAIL at $25K | Thin signal — small-count noise at $5K, real per-trade Sharpe is +0.049 |
+| EEM | FAIL | Regime-specific to 2020+. Pre-2020 OOS = -$873 |
+| GLD | FAIL | Negative IS Sharpe in EVERY window. Gold vol-selling has no edge on this gate |
+| IWM | FAIL | Losing strategy: -$1,484 over 16 yrs. Small-cap vol spikes don't mean-revert cleanly |
 
 **Operational guidance:**
-- $25K: deploy SPY. Defensible on 16 yrs. ~17% AnnRoC OOS.
-- $5K: ALSO deploy SPY (same config, different `--capital` flag).
-  ~13% AnnRoC OOS, fewer trades but same risk profile per trade.
-  Earlier EEM recommendation is RETRACTED — was 2020-2026
-  regime-specific.
+- Deploy SPY at whatever capital you have. Same CLI invocation,
+  just different `--capital` flag.
+- Earlier EEM recommendation is retracted — 2020-2026 regime
+  artifact, doesn't generalize across longer history.
+- Do NOT deploy GLD/IWM/EEM/QQQ — they fail 16-yr discipline gate
+  for different reasons (no edge, regime-specific, or thin signal).
 
 **Start here every time you sit down with this system.** Then
 follow the section that matches what you need to do.
