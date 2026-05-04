@@ -211,11 +211,17 @@ def walk_forward_folds(
     cursor = earliest + timedelta(days=train_window_days)
     holdout_cutoff = latest - timedelta(days=holdout_days)
     idx = 0
-    while cursor <= holdout_cutoff:
+    # Strict-less-than guard against the degenerate case where
+    # `cursor == holdout_cutoff` and the test_end-clamp would set
+    # cursor back to itself, looping forever.
+    while cursor < holdout_cutoff:
         train_end = cursor
         train_start = train_end - timedelta(days=train_window_days)
         test_start = cursor
         test_end = min(cursor + timedelta(days=test_window_days), holdout_cutoff)
+        if test_end <= cursor:
+            # No forward progress possible — cursor already at boundary.
+            break
         folds.append(WalkForwardFold(
             fold_index=idx,
             train_start=train_start, train_end=train_end,
