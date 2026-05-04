@@ -120,6 +120,56 @@ def _bar_at_or_before(
     return sub.row(-1, named=True)
 
 
+def aggregate_to_session_daily(bars: pl.DataFrame) -> pl.DataFrame:
+    """Collapse 1m bars into one row per session (date) with the
+    session's first-open and last-close prices.
+
+    Input: bars with at minimum (ts_utc, open, close).
+    Output: (session_date: date, session_open_utc: datetime,
+            session_open_price: float, session_close_price: float).
+
+    Sessions are inferred by `(09:30 ET, 16:00 ET)` ranges per UTC
+    date — DST-aware. Bars outside any session are dropped.
+    """
+    if bars.height == 0:
+        return pl.DataFrame(schema={
+            "session_date": pl.Date,
+            "session_open_utc": pl.Datetime("ns", "UTC"),
+            "session_open_price": pl.Float64,
+            "session_close_price": pl.Float64,
+        })
+    # Compute per-bar session date by translating ts_utc to ET, taking
+    # date. (We then filter to bars that fall in 09:30-16:00 ET.)
+    bars2 = bars.sort("ts_utc").with_columns(
+        pl.col("ts_utc").dt.convert_time_zone("America/New_York").dt.date()
+            .alias("__session_date"),
+        # Cast hour/minute to Int64 BEFORE arithmetic — polars returns
+        # Int8 by default and `h * 60` overflows for h > 2.
+        pl.col("ts_utc").dt.convert_time_zone("America/New_York").dt.hour()
+            .cast(pl.Int64).alias("__hour_et"),
+        pl.col("ts_utc").dt.convert_time_zone("America/New_York").dt.minute()
+            .cast(pl.Int64).alias("__minute_et"),
+    ).filter(
+        # Within RTH: 09:30 ET to 16:00 ET (16:00 itself excluded since
+        # bars are right-labeled; 16:00 bar covers 15:59-16:00).
+        (pl.col("__hour_et") * 60 + pl.col("__minute_et") >= 9 * 60 + 30)
+        & (pl.col("__hour_et") * 60 + pl.col("__minute_et") < 16 * 60)
+    )
+    if bars2.height == 0:
+        return pl.DataFrame(schema={
+            "session_date": pl.Date,
+            "session_open_utc": pl.Datetime("ns", "UTC"),
+            "session_open_price": pl.Float64,
+            "session_close_price": pl.Float64,
+        })
+    grouped = bars2.group_by("__session_date").agg(
+        pl.col("ts_utc").first().alias("session_open_utc"),
+        pl.col("open").first().alias("session_open_price"),
+        pl.col("close").last().alias("session_close_price"),
+    ).rename({"__session_date": "session_date"}).sort("session_date")
+    return grouped
+
+
 def _session_open_close_utc(d: date) -> tuple[datetime, datetime]:
     """For an XNYS-equivalent session, return (open_utc, close_utc).
 
@@ -140,65 +190,95 @@ def build_snapshot(
     instrument: str = "MES",
     raw_root: Path | None = None,
     feature_root: Path | None = None,
+    bars: pl.DataFrame | None = None,
+    session_daily: pl.DataFrame | None = None,
+    events: pl.DataFrame | None = None,
+    vix_close_df: pl.DataFrame | None = None,
+    vix_pctile_df: pl.DataFrame | None = None,
+    vix_5d_df: pl.DataFrame | None = None,
 ) -> SessionPreOpenSnapshot:
-    """Build the sealed pre-open snapshot for one session."""
-    bars = _read_bars(instrument, raw_root=raw_root)
+    """Build the sealed pre-open snapshot for one session.
+
+    Performance: pass pre-loaded `bars`, `session_daily`, `events`,
+    and the three VIX feature frames to avoid re-reading multi-
+    million-row parquets on every call. Bulk callers (the labeling
+    CLI) should load once and reuse across sessions; for prior-N-day
+    return computation, `session_daily` (one row per session) gives
+    O(log N) lookup vs O(N) full-frame filter.
+    """
+    if bars is None:
+        bars = _read_bars(instrument, raw_root=raw_root)
+    if session_daily is None:
+        session_daily = aggregate_to_session_daily(bars)
     open_utc, close_utc = _session_open_close_utc(session_date)
 
-    today_open_bar = _bar_at_or_after(bars, open_utc)
-    today_open = (
-        float(today_open_bar["open"]) if today_open_bar is not None else None
-    )
+    # Today's session open (use session_daily for O(log N) lookup;
+    # falls back to a per-bar filter if session_daily is empty).
+    if session_daily.height > 0:
+        today_row = session_daily.filter(
+            pl.col("session_date") == session_date
+        )
+        today_open = (
+            float(today_row.row(0, named=True)["session_open_price"])
+            if today_row.height > 0 else None
+        )
+    else:
+        today_open_bar = _bar_at_or_after(bars, open_utc)
+        today_open = (
+            float(today_open_bar["open"]) if today_open_bar is not None else None
+        )
 
-    # Prior session close = the last bar before today's open_utc whose
-    # session date is earlier than today.
-    prior_close_cutoff = open_utc
-    prior_bar = _bar_at_or_before(bars, prior_close_cutoff - timedelta(seconds=1))
-    prior_close = (
-        float(prior_bar["close"]) if prior_bar is not None else None
-    )
+    # Prior session close = last close from session_daily before
+    # session_date.
+    if session_daily.height > 0:
+        prior_row = session_daily.filter(
+            pl.col("session_date") < session_date
+        ).sort("session_date").tail(1)
+        prior_close = (
+            float(prior_row.row(0, named=True)["session_close_price"])
+            if prior_row.height > 0 else None
+        )
+    else:
+        prior_bar = _bar_at_or_before(bars, open_utc - timedelta(seconds=1))
+        prior_close = (
+            float(prior_bar["close"]) if prior_bar is not None else None
+        )
 
     overnight_gap_pct: float | None = None
     if today_open is not None and prior_close not in (None, 0):
         overnight_gap_pct = (today_open - prior_close) / prior_close
 
-    # Prior-5-day close-to-close % returns. We snap to UTC daily bins
-    # by walking back trading days (skipping weekends; holidays are
-    # handled implicitly because there are no bars).
-    closes_dates: list[float] = []
-    cursor = session_date - timedelta(days=1)
-    last_close_seen: float | None = None
-    days_seen = 0
-    bars_sorted = bars.sort("ts_utc")
-    while days_seen < 6 and cursor > session_date - timedelta(days=20):
-        sess_open, sess_close = _session_open_close_utc(cursor)
-        last_bar = bars_sorted.filter(
-            (pl.col("ts_utc") >= sess_open) & (pl.col("ts_utc") <= sess_close)
-        ).sort("ts_utc")
-        if last_bar.height > 0:
-            cls = float(last_bar.row(-1, named=True)["close"])
-            if last_close_seen is not None and last_close_seen != 0:
-                pct = (cls - last_close_seen) / last_close_seen
-                # Note: walking BACKWARD, so this represents the
-                # earlier→later move. Reverse at the end.
-                closes_dates.append(pct)
-            last_close_seen = cls
-            days_seen += 1
-        cursor = cursor - timedelta(days=1)
-    # closes_dates was built oldest-first; reverse so the most-recent
-    # day's return comes first in the output.
-    prior_5d = list(reversed(closes_dates))[:5]
+    # Prior-5-day close-to-close % returns. Use session_daily (one row
+    # per session) for O(log N) lookup; pick the 6 most-recent sessions
+    # before today and compute pairwise % moves.
+    if session_daily.height > 0:
+        prior_sessions = session_daily.filter(
+            pl.col("session_date") < session_date
+        ).sort("session_date").tail(6)
+        closes = prior_sessions["session_close_price"].to_list()
+        moves: list[float] = []
+        for i in range(1, len(closes)):
+            if closes[i - 1] != 0:
+                moves.append((closes[i] - closes[i - 1]) / closes[i - 1])
+        # `moves` is oldest→newest. Reverse so the most-recent move is first.
+        prior_5d = list(reversed(moves))[:5]
+    else:
+        prior_5d = []
 
-    # VIX features as of prior close.
-    vix_close_df = _read_feature_value("vix_daily_close", feature_root=feature_root)
-    vix_pctile_df = _read_feature_value("vix_daily_pctile_252", feature_root=feature_root)
-    vix_5d_df = _read_feature_value("vix_daily_5d_change", feature_root=feature_root)
+    # VIX features as of prior close. Lazy-load if not pre-supplied.
+    if vix_close_df is None:
+        vix_close_df = _read_feature_value("vix_daily_close", feature_root=feature_root)
+    if vix_pctile_df is None:
+        vix_pctile_df = _read_feature_value("vix_daily_pctile_252", feature_root=feature_root)
+    if vix_5d_df is None:
+        vix_5d_df = _read_feature_value("vix_daily_5d_change", feature_root=feature_root)
     vix_at_prior = _value_as_of(vix_close_df, open_utc - timedelta(seconds=1))
     vix_pctile_at_prior = _value_as_of(vix_pctile_df, open_utc - timedelta(seconds=1))
     vix_5d_at_prior = _value_as_of(vix_5d_df, open_utc - timedelta(seconds=1))
 
     # Scheduled events for today (UTC date span).
-    events = _read_econ_events(raw_root=raw_root)
+    if events is None:
+        events = _read_econ_events(raw_root=raw_root)
     today_start_utc = datetime.combine(session_date, datetime.min.time(), tzinfo=_UTC)
     today_end_utc = today_start_utc + timedelta(days=1)
     if events.height > 0:

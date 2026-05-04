@@ -2106,6 +2106,10 @@ def label_sessions_cmd(
 
     from tradegy.regime.session_inputs import (
         SessionPreOpenSnapshot,
+        _read_bars,
+        _read_econ_events,
+        _read_feature_value,
+        aggregate_to_session_daily,
         build_snapshot,
         format_snapshot_for_llm,
     )
@@ -2160,13 +2164,39 @@ def label_sessions_cmd(
         console.print("[green]nothing to do.[/]")
         return
 
-    # Build snapshots up front (cheap; no API calls).
+    # Pre-load shared frames ONCE (bars + session-daily + events + 3 VIX
+    # features). Massive speedup vs re-reading on every snapshot build:
+    # the bars parquet is multi-million rows and was previously loaded
+    # 1789 times on a full historical run.
+    console.print("[dim]Loading shared data (bars, session-daily, "
+                  "events, VIX features)...[/]")
+    bars = _read_bars(instrument)
+    session_daily = aggregate_to_session_daily(bars)
+    events = _read_econ_events()
+    vix_close_df = _read_feature_value("vix_daily_close")
+    vix_pctile_df = _read_feature_value("vix_daily_pctile_252")
+    vix_5d_df = _read_feature_value("vix_daily_5d_change")
+    console.print(
+        f"  bars: {bars.height:,} rows; "
+        f"sessions in daily: {session_daily.height:,}; "
+        f"events: {events.height:,}; "
+        f"vix_close: {vix_close_df.height:,}"
+    )
+
     console.print("[dim]Building snapshots...[/]")
     snapshots: list[SessionPreOpenSnapshot] = []
     skipped_no_data = 0
     for d in todo:
         try:
-            s = build_snapshot(session_date=d, instrument=instrument)
+            s = build_snapshot(
+                session_date=d, instrument=instrument,
+                bars=bars,
+                session_daily=session_daily,
+                events=events,
+                vix_close_df=vix_close_df,
+                vix_pctile_df=vix_pctile_df,
+                vix_5d_df=vix_5d_df,
+            )
             if s.today_open is None or s.prior_close is None:
                 skipped_no_data += 1
                 continue

@@ -1,0 +1,53 @@
+# MES regime label as predicted by the distillation classifier.
+#
+# Phase 3 output of the regime-gated range-scalp pipeline. The
+# classifier is trained walk-forward on LLM session labels (Phase 2);
+# its predictions are materialized to a feature parquet directly by
+# `tradegy train-regime-classifier`. The harness asof-joins the daily
+# value forward to all 1m bars in the session.
+#
+# Value encoding (class index, see REGIME_CLASSES order in
+# src/tradegy/regime/classifier.py):
+#   0 = range
+#   1 = trend_up
+#   2 = trend_down
+#   3 = news_driven
+#   4 = uncertain
+#
+# Strategies key on this via feature_threshold conditions:
+#   feature_threshold(feature_id=mes_regime_label_predicted, op=eq, threshold=0)
+#   for "deploy only on range days".
+#
+# This feature is produced offline by the trained classifier rather
+# than by an in-pipeline transform — so the inputs/computation block
+# below is metadata only. compute_feature is NOT invoked for this
+# feature; the parquets land via the train-regime-classifier command.
+
+id: mes_regime_label_predicted
+version: v1
+description: >
+  Distillation-classifier-predicted regime label for MES, as a class
+  index (0=range, 1=trend_up, 2=trend_down, 3=news_driven, 4=uncertain).
+  Materialized at session-open UTC tick per session; forward-filled to
+  all 1m bars in the session via the harness asof-join.
+type: model_backed
+inputs:
+  - source_id: mes_1m_ohlcv  # nominal — actual training inputs are
+                              # broader; this satisfies the schema
+                              # without changing computation semantics
+                              # (compute_feature is not invoked for
+                              # model_backed features).
+computation:
+  type: registered_transform
+  transform_id: column_select
+  parameters:
+    column: close
+cadence: 1d
+availability_latency_seconds: 0
+derivation: model
+revisable: false
+expected_range:
+  min: 0.0
+  max: 4.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development
