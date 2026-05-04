@@ -343,6 +343,68 @@ The next investigation step (pending operator direction) is
 likely #2 — SPY ETF options data acquisition + a fresh
 walk-forward sweep on SPY+IV<X.
 
+### SPY $25K validation results (Phase D-8 follow-up #6 — 2026-05-03)
+
+SPY 6-year ORATS chain pulled (3.5 GB, 6.9M rows, 1508 trade
+days, window 2020-01-02 → 2025-12-31) and ingested into
+`spy_options_chain`. Re-ran the validated 3-strategy portfolio
+with multiple IV thresholds at $25K:
+
+| Underlying / Config | Avg IS Sharpe | Avg OOS Sharpe | Worst OOS | OOS PnL Sum (3y) | AnnRoC OOS |
+|---|---|---|---|---|---|
+| **SPY 3-strat + IV<0.25** | **+0.172** | **+0.254** | **+0.056** | **+$21.3K** | **~28.4%** ⭐ |
+| SPY 3-strat + IV<0.30 | +0.059 | +0.179 | +0.011 | +$17.3K | ~23.1% |
+| SPY 3-strat + IV<0.20 | +0.176 | +0.126 | -0.026 | +$13.0K | ~17.4% |
+| SPY 3-strat (NO IV gate) | +0.071 | +0.251 | +0.189 | ~$14-16K | ~19% |
+| For comparison: XSP 3-strat + IV<0.25 | +0.051 | +0.075 | -0.086 | +$3.3K | ~4.5% |
+| For comparison: SPX@$250K 3-strat + IV<0.25 | +0.192 | +0.275 | +0.135 | +$130K | ~17.3% |
+
+**SPY at $25K beats SPX at $250K in % terms.** The economics
+differential explained earlier (commissions + spreads) was the
+binding constraint on XSP; SPY's penny-wide spreads + $20-100
+credits per leg deliver near-SPX cost economics at a notional
+size that fits $25K.
+
+**Notable: SPY bare strategies also pass walk-forward.** Where
+SPX bare configs all had every-window-negative IS Sharpe, SPY
+bare 3-strategy passes at +0.071 IS / +0.251 OOS. This is
+likely because SPY's smaller per-trade dollar magnitude means
+the $25K position-cap is less binding (more positions can fit
+concurrently → diversification within the strategy itself);
+the IV-gating still HELPS by lifting absolute return from
+~19% to ~28%, but isn't strictly necessary for survival.
+
+**Trade-off between IV<0.25 and bare**:
+- IV<0.25: higher absolute return (+28% vs +19%), but worst-
+  window OOS Sharpe is only +0.056 — there's a year where the
+  edge nearly disappears.
+- Bare (no gate): lower absolute return but worst-window OOS
+  +0.189 — the floor under bad years is meaningfully higher.
+
+For a kickoff, **IV<0.25 is recommended** because higher
+absolute return matters when capital is small (every dollar of
+realized P&L is meaningful). If 90 days of paper trading shows
+a sustained drawdown, falling back to bare (no IV gate) is
+the operator's escape hatch.
+
+**SPY-specific deployment caveats**:
+- American-style options with physical settlement. Early
+  assignment risk on short positions deep ITM near ex-dividend
+  dates. The 50% / 21 DTE management discipline limits but does
+  not eliminate this exposure.
+- Quarterly dividends (~1.3% annual yield as of 2026). The
+  Black-Scholes Greeks computed by `tradegy.options.greeks` do
+  NOT incorporate dividends; this is a known approximation.
+  More relevant for SPY than for SPX/XSP (cash-settled, no
+  dividend on the index).
+- IBKR routing for SPY uses SecType="STK" for the underlying
+  (vs "IND" for SPX/XSP). The router already handles this; no
+  code change needed.
+
+The SPY-validated config supersedes the XSP-only $25K
+recommendation. **SPY+PCS+IC+JL+IV<0.25 at $25K is the new
+recommended paper-trade kickoff.**
+
 ### Management-rule check on the validated config (Phase D-8 follow-up #4)
 
 Re-ran PCS+IC+JL+IV<0.25 with two management profiles to test
