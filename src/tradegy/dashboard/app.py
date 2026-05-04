@@ -93,9 +93,9 @@ def _setup_page() -> None:
     st.title("📈 tradegy — live-options")
     st.caption(
         "monitoring + control for live options vol-selling. "
-        "**$25K**: SPY+PCS+IC+JL+IV<0.25 — validated 16yr, defensible. "
-        "**$5K**: EEM same config — passes 6yr but fails 16yr "
-        "(regime-fragile, see runbook caveats). See doc 14 + runbook."
+        "Deploy **SPY+PCS+IC+JL+IV<0.25** — validated on 16 yrs at "
+        "both $25K (~17% AnnRoC) and $5K (~13% AnnRoC). "
+        "See doc 14 + runbook."
     )
 
 

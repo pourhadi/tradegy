@@ -3,29 +3,27 @@
 This is the consolidated runbook for deploying the validated
 options vol-selling configs to an IBKR paper account.
 
-**Two configs to pick from based on capital:**
+**Two deployment configs (same strategies + gate, different capital):**
 
-| Capital | Config | Source | 6-yr Walk-fwd | 16-yr Walk-fwd | Recommendation |
+| Capital | Config | Source | 16-yr Walk-fwd | OOS Trades/yr | OOS AnnRoC |
 |---|---|---|---|---|---|
-| **$25K** | SPY + PCS+IC+JL + IV<0.25 | `spy_options_chain` SPY | ✅ +0.254 OOS | ✅ +0.138 OOS, -1.4 worst | **defensible — deploy** |
-| **$5K** | EEM + PCS+IC+JL + IV<0.25 | `eem_options_chain` EEM | ✅ +0.250 OOS, +45% AnnRoC | ❌ FAILS (-0.003 OOS) | **regime-fragile — deploy with caution** |
+| **$25K** | SPY + PCS+IC+JL + IV<0.25 | `spy_options_chain` SPY | ✅ +0.138 OOS | 88 | ~17% |
+| **$5K** | SPY + PCS+IC+JL + IV<0.25 | `spy_options_chain` SPY | ✅ +0.867 OOS | 20 | ~13% |
 
-**Important honest finding (2026-05-04):** The EEM config's 6-yr
-result (~45% AnnRoC) is real for 2020-2026 but the 16-yr extension
-back to 2010 reveals pre-2020 OOS sums to **-$873** while
-post-2020 sums to +$7,855. The recent 5 years are
-regime-friendly for EM vol-selling (COVID + inflation +
-geopolitics → elevated EM IV); 2010-2019 had vol spikes that
-didn't mean-revert (Eurozone 2011, China 2015, Brexit 2016,
-trade war 2018) and the strategy was a near-zero coin flip.
+**Critical 2026-05-04 finding**: the earlier EEM "$5K winner"
+recommendation was a 6-yr regime artifact. EEM's 16-yr
+walk-forward FAILS — pre-2020 OOS sums to -$873. SPY at $5K is
+the actually-defensible $5K config — same strategy, just
+constrained trade count due to capital cap (~20 OOS trades/yr
+vs $25K's 88) but consistently profitable across 13 OOS years
+(2013-2025 inclusive).
 
 **Operational guidance:**
-- If you have $25K: deploy SPY. Validated on 16 yrs.
-- If you have $5K: EEM is the best $5K config available BUT
-  is regime-dependent. Either deploy small-and-monitor, or
-  accumulate to $25K and use the SPY config. Don't trust the
-  ~45% AnnRoC headline — assume the 16-yr -0.003 average is
-  the more honest expectation for live deployment.
+- $25K: deploy SPY. Defensible on 16 yrs. ~17% AnnRoC OOS.
+- $5K: ALSO deploy SPY (same config, different `--capital` flag).
+  ~13% AnnRoC OOS, fewer trades but same risk profile per trade.
+  Earlier EEM recommendation is RETRACTED — was 2020-2026
+  regime-specific.
 
 **Start here every time you sit down with this system.** Then
 follow the section that matches what you need to do.
