@@ -1,0 +1,131 @@
+# MES MVP — momentum_breakout with LLM-distilled regime classifier gate.
+#
+# Successor to mes_mvp_momentum_breakout (the strongest of the eight
+# mechanic-search variants — Sharpe -0.193, win rate 37.9%). The
+# v3-no-VIX-ablation showed the deterministic VIX-percentile gate
+# wasn't selective enough; this spec replaces it with the LLM-
+# distilled classifier (mes_regime_label_predicted).
+#
+# Regime gate: trade only when the classifier predicts trend_up
+# (class 1) or trend_down (class 2), AND its confidence is at
+# least 0.6.
+#
+# Class index mapping (REGIME_CLASSES):
+#   0 = range
+#   1 = trend_up
+#   2 = trend_down
+#   3 = news_driven
+#   4 = uncertain
+#
+# RUN ORDER:
+#   1. Generate labels: tradegy label-sessions --instrument MES
+#   2. Train classifier: tradegy train-regime-classifier --instrument MES
+#   3. Then this spec backtests cleanly.
+
+metadata:
+  id: mes_mvp_momentum_regime_gated
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES momentum breakout — LLM-distilled regime gate, trailing 3x ATR
+  status: draft
+  created_date: 2026-05-04
+  last_modified_date: 2026-05-04
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: mes_mvp_momentum_breakout
+  description: >
+    Same strategy class + exit shape as mes_mvp_momentum_breakout.
+    Only difference: deterministic VIX-percentile gate replaced with
+    the LLM-distilled regime classifier output (mes_regime_label_
+    predicted in [trend_up, trend_down] AND mes_regime_confidence
+    >= 0.6). Tier proposal_only.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: momentum_breakout
+  parameters:
+    return_feature_id: mes_5m_log_returns
+    entry_threshold: 0.001
+    max_attempts_per_session: 1
+  direction: both
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    - condition: time_of_session
+      parameters:
+        session_position_feature_id: mes_xnys_session_position
+        lo: 0.10
+        hi: 0.85
+    # Distilled regime classifier — trend_up (class 1) or trend_down
+    # (class 2). Encoded as a [1, 2] band on the class index.
+    - condition: feature_range
+      parameters:
+        feature_id: mes_regime_label_predicted
+        lo: 1.0
+        hi: 2.0
+    # Classifier must be confident in the call.
+    - condition: feature_threshold
+      parameters:
+        feature_id: mes_regime_confidence
+        operator: gte
+        threshold: 0.60
+    # Scheduled-event quiet still active — belt-and-suspenders. The
+    # LLM classifier should also flag these as news_driven, but
+    # double-checking is cheap.
+    - condition: feature_threshold
+      parameters:
+        feature_id: mes_econ_event_quiet_window_flag
+        operator: lte
+        threshold: 0.0
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: atr_multiple
+    atr_feature_id: mes_atr_14m
+    atr_mult: 1.0
+    tick_size: 0.25
+    max_distance_ticks: 400
+  adjustment_rules:
+    - action: trailing_atr
+      atr_feature_id: mes_atr_14m
+      multiplier: 3.0
+      activation_R: 1.0
+      tick_size: 0.25
+  hard_max_distance_ticks: 400
+  time_stop:
+    enabled: true
+    max_holding_bars: 60
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only
