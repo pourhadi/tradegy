@@ -113,15 +113,90 @@ def run_walk_forward(*, underlyings: list[str], capital: float = 5_000.0,
         )
 
 
+def run_multi_dte_walk_forward(
+    *, underlyings: list[str], capital: float = 5_000.0,
+    iv_gate_max: float = 0.25,
+) -> None:
+    """Stack 30 DTE + 45 DTE variants of the validated PCS+IC+JL
+    portfolio on each underlying. Faster cycling on the 30-DTE
+    side should multiply trade count.
+    """
+    from tradegy.options.multi_source_runner import (
+        SourceSpec,
+        build_iv_gated_strategies_per_source,
+        run_multi_source_walk_forward,
+    )
+    from tradegy.options.registry import get_strategy
+
+    # Build sources manually so we can inject 30 DTE + 45 DTE
+    # together. build_iv_gated_strategies_per_source takes class
+    # constructors; we use it for the 45 DTE leg, then mutate to
+    # add 30 DTE wrapped strategies.
+    sources_45 = build_iv_gated_strategies_per_source(
+        underlyings=underlyings,
+        base_strategy_factories=[
+            PutCreditSpread45dteD30,
+            IronCondor45dteD16,
+            JadeLizard45dte,
+        ],
+        iv_gate_max=iv_gate_max,
+    )
+    # Add 30-DTE wrapped variants per source.
+    from dataclasses import replace
+    from tradegy.options.strategies import IvGatedStrategy
+    sources: list[SourceSpec] = []
+    for spec in sources_45:
+        ticker = spec.ticker
+        new_strats = list(spec.strategies)
+        for sid in (
+            "put_credit_spread_30dte_d30",
+            "iron_condor_30dte_d16",
+            "jade_lizard_30dte",
+        ):
+            base_30 = get_strategy(sid)
+            wrapped = IvGatedStrategy(
+                base=base_30, max_iv_rank=iv_gate_max, window_days=252,
+            )
+            wrapped = replace(wrapped, id=f"{wrapped.id}_{ticker.lower()}")
+            new_strats.append(wrapped)
+        sources.append(SourceSpec(
+            source_id=spec.source_id, ticker=ticker,
+            strategies=tuple(new_strats),
+        ))
+
+    risk = RiskManager(RiskConfig(declared_capital=capital))
+    rules = ManagementRules(profit_take_pct=0.50, loss_stop_pct=2.0, dte_close=21)
+    label = "+".join(underlyings)
+    print(f"\n=== MULTI-DTE WALK-FWD: {label} (30+45 DTE) @ ${capital:,.0f}, IV<{iv_gate_max} ===")
+    summary = run_multi_source_walk_forward(
+        sources=sources,
+        coverage_start=datetime(2020, 1, 1),
+        coverage_end=datetime(2026, 5, 2),
+        train_years=3.0, test_years=1.0, roll_years=1.0,
+        cost=OptionCostModel(), rules=rules, risk=risk,
+    )
+    print(f"avg IS Sharpe:    {summary.avg_in_sample_sharpe:+.3f}")
+    print(f"avg OOS Sharpe:   {summary.avg_oos_sharpe:+.3f}")
+    print(f"worst OOS Sharpe: {summary.worst_window_oos_sharpe:+.3f}")
+    print(f"avg IS trades:    {summary.avg_in_sample_trades:.1f}")
+    print(f"avg OOS trades:   {summary.avg_oos_trades:.1f}")
+    print(f"GATE: {'✅ PASS' if summary.passed else '❌ FAIL'}"
+          f"{'' if summary.passed else ' — ' + summary.fail_reason}")
+    for w in summary.windows:
+        is_pnl = w.in_sample.realized_pnl_dollars if w.in_sample else 0
+        oos_pnl = w.out_of_sample.realized_pnl_dollars if w.out_of_sample else 0
+        print(
+            f"  win {w.index}: IS={w.in_sample.n_closed_trades} trades "
+            f"${is_pnl:+,.0f} → OOS={w.out_of_sample.n_closed_trades} trades "
+            f"${oos_pnl:+,.0f}"
+        )
+
+
 def main() -> None:
-    # Compare in-sample first to identify best mix.
-    run_combo(underlyings=["QQQ"])
-    run_combo(underlyings=["SPY", "IWM"])
-    run_combo(underlyings=["SPY", "IWM", "QQQ"])
-    run_combo(underlyings=["SPY", "IWM", "QQQ", "DIA"])
-    # Then walk-forward the most promising — see if it generalizes.
-    run_walk_forward(underlyings=["SPY", "IWM", "QQQ"])
-    run_walk_forward(underlyings=["SPY", "IWM"])
+    # Multi-DTE: 30+45 DTE variants of PCS+IC+JL on SPY+IWM+QQQ
+    # at $5K shared. Tests whether faster cycling improves frequency
+    # without breaking the gate.
+    run_multi_dte_walk_forward(underlyings=["SPY", "IWM", "QQQ"])
 
 
 if __name__ == "__main__":

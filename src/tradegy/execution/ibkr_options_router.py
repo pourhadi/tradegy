@@ -80,6 +80,10 @@ _UNDERLYING_SECTYPE = {
     "RUT": "IND",
     "IWM": "STK",
     "DIA": "STK",
+    "GLD": "STK",
+    "TLT": "STK",
+    "XLE": "STK",
+    "EEM": "STK",
 }
 
 # Exchange routing per underlying. For most index options this is

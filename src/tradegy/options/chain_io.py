@@ -50,6 +50,13 @@ _DEFAULT_MULTIPLIER_BY_TICKER: dict[str, int] = {
     "IWM": 100,   # Russell 2000 ETF
     "QQQ": 100,   # Nasdaq 100 ETF
     "DIA": 100,   # Dow Jones Industrial Avg ETF
+    # Higher-diversification sector/asset ETFs (added 2026-05-04
+    # for multi-source $5K experiments — IV regimes uncorrelated
+    # with broad-market equity vol).
+    "GLD": 100,   # Gold ETF — gold-vol regime
+    "TLT": 100,   # 20yr Treasury — bond-vol regime
+    "XLE": 100,   # Energy Select — oil-driven vol
+    "EEM": 100,   # Emerging Markets — geopolitical vol
 }
 
 
