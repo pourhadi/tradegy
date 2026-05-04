@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -256,6 +256,102 @@ def _load_cumulative_pnl_series() -> list[dict]:
         cum += daily_pnl[d]
         out.append({"date": d, "daily_pnl": daily_pnl[d], "cumulative_pnl": cum})
     return out
+
+
+@st.cache_data(ttl=24 * 3600)
+def _load_walk_forward_validation() -> dict:
+    """Run the validated config's walk-forward and return per-
+    window summary + gate decision. Cached for 24 hours — this
+    is a 2-3 minute computation that we don't want hitting on
+    every browser refresh.
+
+    Re-runs automatically when the 24h TTL expires, OR when the
+    operator clicks the "refresh validation" button on the Charts
+    tab (which calls .clear() on this loader).
+    """
+    from tradegy.options.registry import resolve_strategy_ids
+    from tradegy.options.risk import RiskManager, RiskConfig
+    from tradegy.options.strategies import IvGatedStrategy
+    from tradegy.options.strategy import ManagementRules
+    from tradegy.options.walk_forward import (
+        OptionsWalkForwardConfig,
+        run_options_walk_forward,
+    )
+
+    bases = resolve_strategy_ids(
+        "put_credit_spread_45dte_d30,iron_condor_45dte_d16,jade_lizard_45dte"
+    )
+    strategies = [
+        IvGatedStrategy(base=s, max_iv_rank=0.25, window_days=252)
+        for s in bases
+    ]
+    risk = RiskManager(RiskConfig(declared_capital=25_000.0))
+    rules = ManagementRules(
+        profit_take_pct=0.50, loss_stop_pct=2.0, dte_close=21,
+    )
+    cfg = OptionsWalkForwardConfig(
+        train_years=3.0, test_years=1.0, roll_years=1.0,
+    )
+
+    # Determine coverage from latest ingested partition.
+    raw_root = config.raw_dir() / "source=spy_options_chain"
+    if not raw_root.exists():
+        return {
+            "error": "spy_options_chain not ingested",
+            "windows": [],
+        }
+    dates = sorted(
+        d.name.replace("date=", "")
+        for d in raw_root.iterdir()
+        if d.is_dir() and d.name.startswith("date=")
+    )
+    if not dates:
+        return {"error": "no partitions", "windows": []}
+    coverage_start = datetime(2020, 1, 1)
+    latest_date = datetime.strptime(dates[-1], "%Y-%m-%d")
+    # Add 1 day buffer so the rolling-window splitter doesn't
+    # exclude the last partition.
+    coverage_end = latest_date + timedelta(days=1)
+    summary = run_options_walk_forward(
+        strategies=strategies,
+        source_id="spy_options_chain", ticker="SPY",
+        coverage_start=coverage_start, coverage_end=coverage_end,
+        config=cfg, risk=risk, rules=rules,
+    )
+    return {
+        "passed": summary.passed,
+        "fail_reason": summary.fail_reason,
+        "avg_in_sample_sharpe": summary.avg_in_sample_sharpe,
+        "avg_oos_sharpe": summary.avg_oos_sharpe,
+        "worst_window_oos_sharpe": summary.worst_window_oos_sharpe,
+        "avg_in_sample_trades": summary.avg_in_sample_trades,
+        "avg_oos_trades": summary.avg_oos_trades,
+        "windows": [
+            {
+                "index": w.index,
+                "train_start": w.train_start.date().isoformat(),
+                "train_end": w.train_end.date().isoformat(),
+                "test_start": w.test_start.date().isoformat(),
+                "test_end": w.test_end.date().isoformat(),
+                "in_sample_trades": (
+                    w.in_sample.n_closed_trades if w.in_sample else 0
+                ),
+                "in_sample_pnl": (
+                    w.in_sample.realized_pnl_dollars if w.in_sample else 0.0
+                ),
+                "oos_trades": (
+                    w.out_of_sample.n_closed_trades if w.out_of_sample else 0
+                ),
+                "oos_pnl": (
+                    w.out_of_sample.realized_pnl_dollars if w.out_of_sample else 0.0
+                ),
+            }
+            for w in summary.windows
+        ],
+        "computed_at": datetime.now(tz=timezone.utc).isoformat(),
+        "coverage_start": coverage_start.isoformat(),
+        "coverage_end": coverage_end.isoformat(),
+    }
 
 
 @st.cache_data(ttl=120)
@@ -484,6 +580,98 @@ def _render_charts_tab() -> None:
             "latest ATM IV",
             f"{iv_data[-1]['atm_iv']:.3f}",
             f"{iv_data[-1]['atm_iv'] * 100:.1f}%",
+        )
+
+    st.divider()
+    st.markdown("### walk-forward validation (current data)")
+    st.caption(
+        "Re-runs the validated config (PCS+IC+JL+IV<0.25, $25K, "
+        "default mgmt) over a 3y/1y/1y rolling window against ALL "
+        "ingested SPY data — including any 2026 partitions added "
+        "since the original validation. Tells you whether the gate "
+        "still passes as the live regime drifts. Cached 24h."
+    )
+
+    col_run, _ = st.columns([1, 4])
+    with col_run:
+        if st.button(
+            "🔁 refresh validation (~3 min)",
+            use_container_width=True,
+        ):
+            _load_walk_forward_validation.clear()
+            st.rerun()
+
+    try:
+        wf = _load_walk_forward_validation()
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"walk-forward error: {type(exc).__name__}: {exc}")
+        wf = None
+
+    if wf is None:
+        pass
+    elif wf.get("error"):
+        st.warning(f"validation skipped: {wf['error']}")
+    elif not wf["windows"]:
+        st.warning("no walk-forward windows generated (coverage too short)")
+    else:
+        gate_emoji = "✅" if wf["passed"] else "❌"
+        gate_text = "PASS" if wf["passed"] else f"FAIL — {wf['fail_reason']}"
+        st.markdown(f"**gate**: {gate_emoji} {gate_text}")
+        st.caption(
+            f"computed {wf['computed_at']} from coverage "
+            f"{wf['coverage_start'][:10]} → {wf['coverage_end'][:10]}"
+        )
+        col1, col2, col3 = st.columns(3)
+        col1.metric(
+            "avg IS Sharpe", f"{wf['avg_in_sample_sharpe']:+.3f}",
+        )
+        col2.metric(
+            "avg OOS Sharpe", f"{wf['avg_oos_sharpe']:+.3f}",
+        )
+        col3.metric(
+            "worst-window OOS Sharpe",
+            f"{wf['worst_window_oos_sharpe']:+.3f}",
+        )
+
+        # Per-window Sharpe bar chart.
+        win_rows = []
+        for w in wf["windows"]:
+            win_rows.append({
+                "window": f"win {w['index']}: {w['test_start']}→{w['test_end']}",
+                "kind": "OOS",
+                "pnl": w["oos_pnl"],
+                "trades": w["oos_trades"],
+            })
+            win_rows.append({
+                "window": f"win {w['index']}: {w['test_start']}→{w['test_end']}",
+                "kind": "IS",
+                "pnl": w["in_sample_pnl"],
+                "trades": w["in_sample_trades"],
+            })
+        win_df = pl.DataFrame(win_rows).to_pandas()
+        chart = alt.Chart(win_df).mark_bar().encode(
+            x=alt.X("window:N", title="window"),
+            y=alt.Y("pnl:Q", title="realized P&L ($)"),
+            color=alt.Color(
+                "kind:N",
+                scale=alt.Scale(
+                    domain=["IS", "OOS"],
+                    range=["#888888", "#2ca02c"],
+                ),
+            ),
+            xOffset="kind:N",
+            tooltip=["window", "kind", "pnl", "trades"],
+        )
+        st.altair_chart(chart, use_container_width=True)
+
+        # Detail table.
+        st.dataframe(
+            pl.DataFrame(wf["windows"]).to_pandas(),
+            use_container_width=True,
+            column_config={
+                "in_sample_pnl": st.column_config.NumberColumn(format="$%.0f"),
+                "oos_pnl": st.column_config.NumberColumn(format="$%.0f"),
+            },
         )
 
     st.divider()
