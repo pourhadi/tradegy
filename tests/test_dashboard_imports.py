@@ -49,3 +49,34 @@ def test_load_recent_cron_logs_callable():
     from tradegy.dashboard.app import _load_recent_cron_logs
     out = _load_recent_cron_logs(n=3)
     assert isinstance(out, list)
+
+
+def test_v2_render_functions_exist():
+    """V2 dashboard adds charts + controls. Smoke check that
+    every render entry point is present after the refactor.
+    """
+    from tradegy.dashboard import app as dash
+    for name in (
+        "_render_charts_tab",
+        "_render_controls_tab",
+        "_route_safe",
+        "_route_now",
+        "_run_cli",
+    ):
+        assert hasattr(dash, name), f"dashboard missing {name}"
+
+
+def test_load_cumulative_pnl_series_callable():
+    """Empty registry path returns empty list."""
+    from tradegy.dashboard.app import _load_cumulative_pnl_series
+    out = _load_cumulative_pnl_series()
+    assert isinstance(out, list)
+
+
+def test_run_cli_handles_short_command():
+    """_run_cli runs commands and returns combined output. Use a
+    trivial echo so the test is fast + portable.
+    """
+    from tradegy.dashboard.app import _run_cli
+    out = _run_cli(["echo", "dashboard test"], use_uv=False)
+    assert "dashboard test" in out

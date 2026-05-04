@@ -172,6 +172,92 @@ def _load_recent_cron_logs(n: int = 5) -> list[dict]:
     return out
 
 
+@st.cache_data(ttl=600)
+def _load_iv_rank_trajectory(days: int = 90) -> list[dict]:
+    """Compute ATM IV + rolling rank for the last `days` snapshots
+    of spy_options_chain. Used by the IV-trajectory chart.
+
+    Rank = (current - rolling_min) / (rolling_max - rolling_min)
+    over the prior 252-day window — same definition used by the
+    IvGatedStrategy wrapper so the chart's y-axis is directly
+    comparable to the gate threshold.
+    """
+    from tradegy.options.chain_features import atm_iv
+    from tradegy.options.chain_io import iter_chain_snapshots
+
+    snaps = list(iter_chain_snapshots("spy_options_chain", ticker="SPY"))
+    if not snaps:
+        return []
+    # Compute ATM IV over the FULL series so rank window has data.
+    iv_series: list[tuple[str, float]] = []
+    for snap in snaps:
+        iv = atm_iv(snap, target_dte=30)
+        if iv == iv:  # not NaN
+            iv_series.append((snap.ts_utc.date().isoformat(), iv))
+    if not iv_series:
+        return []
+    # Rolling rank (252-day window) — only emit the last `days`.
+    out = []
+    window = 252
+    start_idx = max(window, len(iv_series) - days)
+    for i in range(start_idx, len(iv_series)):
+        date_str, iv = iv_series[i]
+        wnd = [v for _, v in iv_series[max(0, i - window):i]]
+        if not wnd:
+            continue
+        wmin, wmax = min(wnd), max(wnd)
+        if wmax <= wmin:
+            rank = 0.5
+        else:
+            rank = (iv - wmin) / (wmax - wmin)
+        out.append({"date": date_str, "atm_iv": iv, "iv_rank": rank})
+    return out
+
+
+@st.cache_data(ttl=120)
+def _load_cumulative_pnl_series() -> list[dict]:
+    """Reconstruct daily P&L from the registry's open + close events.
+
+    Each `close` row contributes `closed_pnl_per_share * multiplier
+    * contracts` (when set). Sums by closed_ts date for a daily
+    realized-P&L series; cumulative for the chart.
+    """
+    import json
+    registry_path = config.repo_root() / "data" / "live_options" / "positions.jsonl"
+    if not registry_path.exists():
+        return []
+    daily_pnl: dict[str, float] = {}
+    open_meta: dict[str, dict] = {}
+    with registry_path.open("r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            if row["type"] == "open":
+                open_meta[row["position_id"]] = row
+            elif row["type"] == "close":
+                pid = row["position_id"]
+                pnl_per_share = row.get("closed_pnl_per_share")
+                if pnl_per_share is None or pid not in open_meta:
+                    continue
+                op = open_meta[pid]
+                mult = op["legs"][0]["multiplier"] if op["legs"] else 100
+                contracts = op["contracts"]
+                pnl_dollars = float(pnl_per_share) * mult * contracts
+                date_str = row["closed_ts"][:10]
+                daily_pnl[date_str] = daily_pnl.get(date_str, 0.0) + pnl_dollars
+    if not daily_pnl:
+        return []
+    sorted_dates = sorted(daily_pnl.keys())
+    cum = 0.0
+    out = []
+    for d in sorted_dates:
+        cum += daily_pnl[d]
+        out.append({"date": d, "daily_pnl": daily_pnl[d], "cumulative_pnl": cum})
+    return out
+
+
 @st.cache_data(ttl=120)
 def _run_doctor_checks() -> list[dict]:
     """Run the install doctor; return results as plain dicts."""
@@ -358,6 +444,77 @@ def _render_sessions_tab() -> None:
             st.code(log["tail"], language="text")
 
 
+def _render_charts_tab() -> None:
+    st.markdown("### IV-rank trajectory (last 90 days)")
+    st.caption(
+        "ATM IV (30 DTE) and its rolling 252-day percentile rank. "
+        "Validated config trades when rank < 0.25 (red threshold). "
+        "Counter-canonical: low-IV regimes are the vol-selling-friendly "
+        "windows on SPY 2020-2025 (per doc 14)."
+    )
+    iv_data = _load_iv_rank_trajectory(days=90)
+    if not iv_data:
+        st.info(
+            "no IV data — spy_options_chain not ingested or fewer than "
+            "252 days of history."
+        )
+    else:
+        df = pl.DataFrame(iv_data).to_pandas()
+        # Two-axis chart: ATM IV (left) and IV rank (right with
+        # gate threshold).
+        rank_chart = alt.Chart(df).mark_line(color="#1f77b4").encode(
+            x=alt.X("date:T", title="date"),
+            y=alt.Y("iv_rank:Q", title="IV rank (rolling 252d)",
+                    scale=alt.Scale(domain=[0, 1])),
+            tooltip=["date:T", "atm_iv:Q", "iv_rank:Q"],
+        )
+        threshold = alt.Chart(pl.DataFrame(
+            [{"y": 0.25}]
+        ).to_pandas()).mark_rule(
+            color="red", strokeDash=[4, 4],
+        ).encode(y="y:Q")
+        st.altair_chart(rank_chart + threshold, use_container_width=True)
+        # Gate-status counts.
+        n_below = sum(1 for r in iv_data if r["iv_rank"] < 0.25)
+        n_total = len(iv_data)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("days below gate (would trade)", f"{n_below} / {n_total}")
+        col2.metric("latest IV rank", f"{iv_data[-1]['iv_rank']:.3f}")
+        col3.metric(
+            "latest ATM IV",
+            f"{iv_data[-1]['atm_iv']:.3f}",
+            f"{iv_data[-1]['atm_iv'] * 100:.1f}%",
+        )
+
+    st.divider()
+    st.markdown("### cumulative realized P&L (registry)")
+    st.caption(
+        "Daily and cumulative realized P&L from the position "
+        "registry's `close` events (positions actually closed at "
+        "the broker). Entries that haven't closed yet are not in "
+        "this chart — those are unrealized."
+    )
+    pnl_data = _load_cumulative_pnl_series()
+    if not pnl_data:
+        st.info(
+            "no closed-trade history yet — positions in the registry "
+            "either haven't closed or the cron hasn't recorded "
+            "closed_pnl_per_share."
+        )
+    else:
+        df = pl.DataFrame(pnl_data).to_pandas()
+        cum_chart = alt.Chart(df).mark_line(color="#2ca02c").encode(
+            x=alt.X("date:T", title="closed date"),
+            y=alt.Y("cumulative_pnl:Q", title="cumulative P&L ($)"),
+            tooltip=["date:T", "daily_pnl:Q", "cumulative_pnl:Q"],
+        )
+        st.altair_chart(cum_chart, use_container_width=True)
+        latest = pnl_data[-1]["cumulative_pnl"]
+        col1, col2 = st.columns(2)
+        col1.metric("cumulative realized $", f"${latest:+,.0f}")
+        col2.metric("# of P&L days", f"{len(pnl_data)}")
+
+
 def _render_doctor_tab() -> None:
     doctor = _run_doctor_checks()
     rows = [
@@ -372,22 +529,169 @@ def _render_doctor_tab() -> None:
 
 
 def _render_controls_tab() -> None:
-    st.markdown(
-        "**Read-only V1**: control buttons are disabled in this version. "
-        "Use the CLI for actions:\n\n"
-        "- `tradegy live-options` (decision-only)\n"
-        "- `tradegy live-options --route --paper-account $IBKR_PAPER_ACCOUNT`\n"
-        "- `tradegy live-options-status`\n"
-        "- `tradegy live-options-doctor`\n"
-        "- `launchctl unload ~/Library/LaunchAgents/com.tradegy.live-options.plist` (pause cron)\n"
-        "- `launchctl load ~/Library/LaunchAgents/com.tradegy.live-options.plist` (resume cron)\n"
+    """V2 control panel — inline buttons for the most common
+    operator actions. Shells out to the CLI via subprocess and
+    streams output back into the dashboard.
+    """
+    import os
+
+    st.markdown("### actions")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("🔄 generate decision (no route)", use_container_width=True):
+            with st.spinner("running tradegy live-options..."):
+                out = _run_cli(["uv", "run", "tradegy", "live-options"])
+            st.code(out, language="text")
+            st.cache_data.clear()
+    with col2:
+        st.button(
+            "🚀 generate + route to IBKR",
+            help="Routes entries + V2 close loop to IBKR paper. "
+                 "Requires --paper-account env or click toggles below.",
+            disabled=not _route_safe(),
+            use_container_width=True,
+            on_click=_route_now,
+        )
+        if not _route_safe():
+            st.caption("⚠️ disabled: env IBKR_PAPER_ACCOUNT not set")
+    with col3:
+        if st.button("📋 doctor", use_container_width=True):
+            _run_doctor_checks.clear()
+            st.rerun()
+
+    st.divider()
+    st.markdown("### cron control")
+    col1, col2, col3 = st.columns(3)
+    plist_target = (
+        Path.home() / "Library" / "LaunchAgents" / "com.tradegy.live-options.plist"
     )
+    cron_loaded = subprocess.run(
+        ["launchctl", "list"], capture_output=True, text=True,
+    ).stdout
+    is_loaded = "com.tradegy.live-options" in cron_loaded
+    with col1:
+        st.metric(
+            "cron status",
+            "🟢 loaded" if is_loaded else "🔴 not loaded",
+        )
+    with col2:
+        if is_loaded and st.button(
+            "⏸️ pause cron (unload)", use_container_width=True,
+        ):
+            out = _run_cli(
+                ["launchctl", "unload", str(plist_target)],
+                use_uv=False,
+            )
+            st.code(out or "(no output — unload ok)", language="text")
+            st.rerun()
+    with col3:
+        if (not is_loaded) and st.button(
+            "▶️ resume cron (load)", use_container_width=True,
+        ):
+            out = _run_cli(
+                ["launchctl", "load", str(plist_target)],
+                use_uv=False,
+            )
+            st.code(out or "(no output — load ok)", language="text")
+            st.rerun()
+
+    st.divider()
+    st.markdown("### data refresh")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button(
+            "📥 pull today's SPY chain + ingest",
+            use_container_width=True,
+            disabled=not os.environ.get("ORATS_API_KEY"),
+        ):
+            from datetime import date as _date
+            today = _date.today().isoformat()
+            with st.spinner(
+                f"pulling SPY {today} (1 trade day)..."
+            ):
+                pull_out = _run_cli(
+                    ["python",
+                     "/Users/dan/code/data/download_spx_options_orats.py",
+                     "--ticker", "SPY",
+                     "--start", today, "--end", today,
+                     "--confirm", "--resume"],
+                    use_uv=False,
+                )
+            st.code(pull_out, language="text")
+            with st.spinner("ingesting..."):
+                ingest_out = _run_cli([
+                    "uv", "run", "tradegy", "ingest",
+                    "/Users/dan/code/data/spy_options_orats/spy_options_orats.csv",
+                    "--source-id", "spy_options_chain",
+                ])
+            st.code(ingest_out, language="text")
+            st.cache_data.clear()
+        if not os.environ.get("ORATS_API_KEY"):
+            st.caption("⚠️ disabled: env ORATS_API_KEY not set")
+    with col2:
+        meta = _load_latest_snapshot_meta()
+        if meta:
+            st.metric(
+                "latest chain partition",
+                meta["date"],
+                f"{meta['age_days']}d old, "
+                f"{meta['n_partitions']} partitions",
+            )
+        else:
+            st.error("no chain partitions ingested")
+
     st.divider()
     st.markdown(
-        "V2 of this dashboard will add inline controls for the above. "
-        "The current read-only V1 already shows everything you need to "
-        "decide whether to run a manual session."
+        "Equivalent CLI commands (for reference):\n"
+        "- `uv run tradegy live-options`\n"
+        "- `uv run tradegy live-options --route --paper-account $IBKR_PAPER_ACCOUNT`\n"
+        "- `uv run tradegy live-options-doctor`\n"
+        "- `launchctl unload ~/Library/LaunchAgents/com.tradegy.live-options.plist`\n"
+        "- `launchctl load ~/Library/LaunchAgents/com.tradegy.live-options.plist`"
     )
+
+
+def _route_safe() -> bool:
+    """Don't enable the route button unless paper account env is set."""
+    import os
+    return bool(os.environ.get("IBKR_PAPER_ACCOUNT"))
+
+
+def _route_now() -> None:
+    """on_click handler for the route button. Runs live-options
+    --route synchronously and stuffs output into session_state for
+    re-render. Streamlit can't render in on_click directly.
+    """
+    import os
+    paper = os.environ.get("IBKR_PAPER_ACCOUNT", "")
+    out = _run_cli([
+        "uv", "run", "tradegy", "live-options",
+        "--route", "--paper-account", paper,
+    ])
+    st.session_state["last_route_output"] = out
+    st.cache_data.clear()
+
+
+def _run_cli(args: list[str], *, use_uv: bool = True) -> str:
+    """Run a CLI command and return combined stdout/stderr.
+
+    Times out after 5 minutes. Long output is truncated with a
+    sentinel.
+    """
+    import os
+    try:
+        proc = subprocess.run(
+            args, capture_output=True, text=True,
+            env=os.environ.copy(),
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        return "[command timed out after 5 minutes]"
+    out = (proc.stdout or "") + (proc.stderr or "")
+    if len(out) > 20000:
+        out = out[:10000] + f"\n\n[... truncated, full {len(out)} chars ...]\n\n" + out[-10000:]
+    return out
 
 
 # ── Main ─────────────────────────────────────────────────────────
@@ -397,14 +701,16 @@ def main() -> None:
     _setup_page()
     _render_top_strip()
     st.divider()
-    tab_pos, tab_dec, tab_sess, tab_doc, tab_ctl = st.tabs(
-        ["positions", "today's decision", "recent sessions",
-         "doctor", "controls"]
+    tab_pos, tab_dec, tab_chart, tab_sess, tab_doc, tab_ctl = st.tabs(
+        ["positions", "today's decision", "charts",
+         "recent sessions", "doctor", "controls"]
     )
     with tab_pos:
         _render_positions_tab()
     with tab_dec:
         _render_decision_tab()
+    with tab_chart:
+        _render_charts_tab()
     with tab_sess:
         _render_sessions_tab()
     with tab_doc:
