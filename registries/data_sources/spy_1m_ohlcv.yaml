@@ -1,0 +1,94 @@
+# SPY (SPDR S&P 500 ETF) 1-minute OHLCV bars from IBKR.
+#
+# Phase 0.1 of the regime-gated range-scalp plan. Pulled via
+# `download_spy_1m_ibkr.py` (IBKR's reqHistoricalData endpoint) in
+# 645 weekly chunks. Coverage 2013-12-30 → 2026-05-04 (~12.4 years).
+#
+# Includes EXTENDED HOURS — the download used useRTH=False so the
+# regime classifier has overnight gap context. RTH is the XNYS
+# 09:30-16:00 ET window; bars outside that window are present and
+# can be filtered by `mes_xnys_session_position` (or future SPY
+# variant) when needed.
+#
+# IBKR-specific quirks vs the databento MES source:
+#   + SPY is an ETF; no front-month rolling (continuous price series).
+#   + IBKR delivers two extra columns we keep but rarely consume:
+#     `average` (VWAP within the bar) and `barCount` (number of
+#     trades aggregated). Useful for sanity checks.
+#   + Pre-2018 bars sometimes have volume=0 with average=close — IBKR
+#     fills the bar even on no-trade minutes during extended hours.
+#     Strategies that use volume z-score must filter these out.
+#
+# Used as the cross-instrument validator for the regime-gated range-
+# scalp work — same regime classifier output, same momentum_breakout
+# mechanic, ported to SPY for the EEM-style fragility check.
+
+id: spy_1m_ohlcv
+version: v1
+description: >
+  SPDR S&P 500 ETF 1-minute OHLCV bars from IBKR's reqHistoricalData
+  endpoint. Includes extended hours (useRTH=False at fetch time).
+  Coverage 2013-12-30 → 2026-05-04. Two extra cols carried for audit:
+  `average` (intra-bar VWAP) and `barCount` (number of trades
+  aggregated).
+type: market_data
+provider: ibkr
+revisable: false
+revision_policy: never_revised
+admission_rationale: >
+  IBKR's historical equities feed is the canonical retail-tier source;
+  market data subscriptions cover SPY back ≥10yr at 1m granularity for
+  any active retail account. Append-only, deterministic, no roll
+  artifacts (SPY is an ETF). Pulled in weekly chunks per IBKR's
+  per-request ceiling for 1m bars; pacing 11s between requests
+  comfortably under the 60-req/10-min limit.
+coverage:
+  start_date: 2013-12-30
+  end_date: 2026-05-04
+  gaps: []
+cadence: 1m
+fields:
+  - {name: ts_utc, type: timestamp}
+  - {name: open, type: float}
+  - {name: high, type: float}
+  - {name: low, type: float}
+  - {name: close, type: float}
+  - {name: volume, type: int}
+  - {name: average, type: float}
+  - {name: barCount, type: int}
+timestamp_column: ts_utc
+ingest:
+  format: generic_csv
+session_calendar: XNYS
+# 1m cadence; long gaps appear at session boundaries and weekends. The
+# longest US-equity-market closure (post-9/11) covered ~6 days. Set the
+# inactivity ceiling at 1 week to accommodate that without false
+# positives.
+max_inactivity_seconds: 604800
+availability_latency:
+  median_seconds: 0.0
+  p99_seconds: 60.0
+  notes: >
+    Historical IBKR bars are append-only at retrieval time. There is no
+    live adapter wired to this source yet; live trading would need to
+    join the existing IBKR live module's bar stream against this
+    historical contract.
+licensing:
+  live_use: false   # no live adapter wired against this source yet
+  backtest_use: true
+  redistribution: false
+known_issues:
+  - >
+    Extended-hours bars (pre-market, after-hours) are sometimes filled
+    with `volume = 0` and `open == high == low == close` (no trade
+    that minute, IBKR carries forward the last print). Volume-z-score
+    strategies must filter these out before computing rolling stats.
+  - >
+    The extra `average` and `barCount` columns are IBKR-specific and
+    don't have analogues in the databento MES schema. Cross-instrument
+    code that compares sources should ignore them or schema-cast.
+  - >
+    Coverage starts 2013-12-30 (intentional ~12yr window). IBKR's
+    deeper history is available via separately-purchased data
+    subscription tiers but not pulled here.
+audit_history: []
