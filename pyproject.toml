@@ -14,6 +14,7 @@ dependencies = [
     "anthropic>=0.92",
     "streamlit>=1.40",
     "altair>=5.4",
+    "scikit-learn>=1.8.0",
 ]
 
 [project.scripts]

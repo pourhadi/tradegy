@@ -2259,5 +2259,156 @@ def label_sessions_cmd(
     )
 
 
+@app.command("train-regime-classifier")
+def train_regime_classifier_cmd(
+    instrument: Annotated[str, typer.Option(
+        "--instrument",
+        help="Instrument id (MES | SPY).",
+    )] = "MES",
+    train_window_days: Annotated[int, typer.Option(
+        "--train-days",
+        help="Trailing days of labeled sessions per fold's training set.",
+    )] = 365 * 3,
+    test_window_days: Annotated[int, typer.Option(
+        "--test-days",
+        help="Forward window each fold predicts on.",
+    )] = 30 * 6,
+    holdout_days: Annotated[int, typer.Option(
+        "--holdout-days",
+        help="Trailing days reserved (no training, no walk-forward test). "
+             "Used for downstream Phase 5 holdout evaluation.",
+    )] = 30 * 6,
+) -> None:
+    """Train the distillation classifier (Phase 3 of regime pipeline).
+
+    Walk-forward training: for each fold, train HistGradientBoosting on
+    the trailing `train-days` of LLM-labeled sessions and predict the
+    next `test-days`. Per-session predictions get materialized as the
+    `<inst>_regime_label_predicted` and `<inst>_regime_confidence`
+    features the strategy class consumes at backtest time.
+
+    Run AFTER `label-sessions` has emitted enough JSON files to make
+    a 3-year-trailing window viable. Macro-F1 ≥ 0.55 across the test
+    folds is Decision Gate 2 of the plan.
+    """
+    from tradegy.regime.classifier import (
+        load_labeled_examples,
+        predictions_to_feature_parquet,
+        train_walk_forward,
+        walk_forward_folds,
+    )
+
+    labels_dir = config.data_dir() / "session_labels"
+    examples = load_labeled_examples(
+        instrument=instrument, labels_dir=labels_dir,
+    )
+    if not examples:
+        console.print(
+            f"[red]ERROR[/] no labeled examples for {instrument}; "
+            f"run `tradegy label-sessions --instrument {instrument}` first."
+        )
+        raise typer.Exit(code=1)
+
+    earliest = min(ex.session_date for ex in examples)
+    latest = max(ex.session_date for ex in examples)
+    console.print(
+        f"[bold]train-regime-classifier[/]  instrument={instrument}  "
+        f"examples={len(examples):,}  span={earliest}..{latest}"
+    )
+
+    folds = walk_forward_folds(
+        earliest=earliest, latest=latest,
+        train_window_days=train_window_days,
+        test_window_days=test_window_days,
+        holdout_days=holdout_days,
+    )
+    if not folds:
+        console.print(
+            "[red]ERROR[/] no walk-forward folds buildable in this date span. "
+            "Need at least train_days + test_days + holdout_days of "
+            "labeled coverage."
+        )
+        raise typer.Exit(code=1)
+
+    console.print(f"  walk-forward folds: {len(folds)}")
+    for f in folds:
+        console.print(
+            f"    fold {f.fold_index}: "
+            f"train [{f.train_start}..{f.train_end}]  "
+            f"test [{f.test_start}..{f.test_end}]"
+        )
+
+    fold_results, pred_df = train_walk_forward(examples, folds=folds)
+
+    if not fold_results:
+        console.print(
+            "[yellow]WARN[/] no fold had enough train/test data to fit a "
+            "classifier. Need ≥30 train + ≥5 test per fold."
+        )
+        raise typer.Exit(code=1)
+
+    table = Table(title=f"walk-forward fold results ({instrument})")
+    table.add_column("fold")
+    table.add_column("train")
+    table.add_column("test")
+    table.add_column("n_train")
+    table.add_column("n_test")
+    table.add_column("macro_F1")
+    f1s: list[float] = []
+    for r in fold_results:
+        f1 = r.macro_f1 if r.macro_f1 is not None else float("nan")
+        f1s.append(f1)
+        table.add_row(
+            str(r.fold.fold_index),
+            f"{r.fold.train_start}..{r.fold.train_end}",
+            f"{r.fold.test_start}..{r.fold.test_end}",
+            str(r.n_train), str(r.n_test),
+            f"{f1:.3f}" if f1 == f1 else "n/a",
+        )
+    console.print(table)
+    console.print(
+        f"\nmean macro-F1 across folds: "
+        f"{(sum(f1s) / len(f1s)):.3f} "
+        f"(decision gate 2 threshold: 0.55)"
+    )
+
+    # Permutation importances aggregated across folds (mean).
+    feat_names = list(fold_results[0].feature_importances.keys())
+    agg_imp = {n: 0.0 for n in feat_names}
+    for r in fold_results:
+        for n, v in r.feature_importances.items():
+            agg_imp[n] += v
+    agg_imp = {n: v / len(fold_results) for n, v in agg_imp.items()}
+    table_imp = Table(title="mean permutation importance")
+    table_imp.add_column("feature")
+    table_imp.add_column("importance")
+    for n in sorted(agg_imp, key=lambda k: -agg_imp[k]):
+        table_imp.add_row(n, f"{agg_imp[n]:.4f}")
+    console.print(table_imp)
+
+    # Materialize predictions as feature parquets.
+    label_dir = (
+        config.features_dir()
+        / f"feature={instrument.lower()}_regime_label_predicted"
+        / "version=v1"
+    )
+    conf_dir = (
+        config.features_dir()
+        / f"feature={instrument.lower()}_regime_confidence"
+        / "version=v1"
+    )
+    n_label, n_conf = predictions_to_feature_parquet(
+        pred_df, instrument=instrument,
+        out_dir=config.features_dir(),
+        label_value_dir=label_dir,
+        confidence_value_dir=conf_dir,
+    )
+    console.print(
+        f"\nfeature parquets written: "
+        f"{instrument.lower()}_regime_label_predicted ({n_label} dates), "
+        f"{instrument.lower()}_regime_confidence ({n_conf} dates)"
+    )
+
+
 if __name__ == "__main__":
     app()
