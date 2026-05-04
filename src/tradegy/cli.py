@@ -1603,6 +1603,11 @@ def live_options_cmd(
         "--paper-account", help="REQUIRED if --route. Asserted against the "
         "broker-managed accounts list as a safety check before any order.",
     )] = "",
+    fill_timeout_seconds: Annotated[float, typer.Option(
+        "--fill-timeout", help="how long to wait for each placed order to "
+        "reach a terminal state (FILLED/REJECTED/CANCELLED) before "
+        "cancelling and recording as not-accepted (default 30s).",
+    )] = 30.0,
 ) -> None:
     """Daily paper-trade orchestrator for the validated options portfolio.
 
@@ -1714,6 +1719,7 @@ def live_options_cmd(
         session_date=decision.snapshot_ts_utc,
         rules=rules,
         underlying=ticker,
+        fill_timeout_seconds=fill_timeout_seconds,
     )
     results = session_outcome["entry_results"]
     close_results = session_outcome["close_results"]

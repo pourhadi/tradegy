@@ -61,6 +61,20 @@ cd "${REPO_ROOT}"
 today=$(date +%Y-%m-%d)
 echo "[$(date)] === live_options_daily ${today} ===" | tee -a "${LOG_FILE}"
 
+# macOS native notification on failure — no external service
+# needed. Banner shows in Notification Center even if Terminal
+# is closed. Caller passes (title, body); function tolerates
+# missing osascript on non-macOS environments.
+notify() {
+    local title="$1"
+    local body="$2"
+    if command -v osascript >/dev/null 2>&1; then
+        osascript -e "display notification \"${body}\" with title \"${title}\"" \
+            >/dev/null 2>&1 || true
+    fi
+}
+trap 'rc=$?; if [ $rc -ne 0 ]; then notify "tradegy live-options FAILED" "exit ${rc} on ${today} — see cron_logs/$(date +%Y-%m-%d).log"; fi' EXIT
+
 # 1. Health probe.
 echo "[$(date)] step 1/4 — IBKR health probe" | tee -a "${LOG_FILE}"
 if ! uv run tradegy live-options-health \
@@ -102,3 +116,10 @@ if ! uv run tradegy live-options \
 fi
 
 echo "[$(date)] === SUCCESS ${today} ===" | tee -a "${LOG_FILE}"
+
+# Success notification — banner so the operator knows the cron
+# ran without having to open the log. Mention entry/close counts
+# extracted from the latest log lines so the banner is informative.
+recent_summary=$(grep -E "(entry candidates|close routing results|NO ENTRIES)" \
+    "${LOG_FILE}" 2>/dev/null | tail -2 | tr '\n' '|' || echo "ran")
+notify "tradegy live-options ok" "${today}: ${recent_summary}"

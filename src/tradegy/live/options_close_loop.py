@@ -288,6 +288,7 @@ async def route_close_decisions(
     router: IbkrOptionsRouter,
     session_date: datetime,
     registry_root: Any = None,
+    fill_timeout_seconds: float = 30.0,
 ) -> list[CloseRouteResult]:
     """Place each close as a multi-leg combo via the router; await
     fill confirmation; record `close` in registry only on FILLED.
@@ -322,6 +323,7 @@ async def route_close_decisions(
             )
             final_state = await await_terminal_state(
                 router=router, client_order_id=coid,
+                timeout_seconds=fill_timeout_seconds,
             )
             if final_state == OrderState.FILLED:
                 append_close(

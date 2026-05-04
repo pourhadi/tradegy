@@ -363,6 +363,7 @@ async def _run_full_session_async(
     session_date: datetime,
     rules: Any,
     underlying: str,
+    fill_timeout_seconds: float = 30.0,
 ) -> dict[str, Any]:
     """Single-connection daily session:
 
@@ -426,6 +427,7 @@ async def _run_full_session_async(
             close_results = await route_close_decisions(
                 closes=closes, snapshot=snapshot, router=router,
                 session_date=session_date,
+                fill_timeout_seconds=fill_timeout_seconds,
             )
 
         # 5: entries — place + await fill confirmation.
@@ -449,6 +451,7 @@ async def _run_full_session_async(
                 # will re-attempt). If REJECTED → record error.
                 final_state = await await_terminal_state(
                     router=router, client_order_id=coid,
+                    timeout_seconds=fill_timeout_seconds,
                 )
                 if final_state == OrderState.FILLED:
                     _persist_entry(
@@ -522,6 +525,7 @@ def run_full_session(
     session_date: datetime,
     rules: Any,
     underlying: str,
+    fill_timeout_seconds: float = 30.0,
 ) -> dict[str, Any]:
     """Sync wrapper for the CLI surface."""
     return asyncio.run(_run_full_session_async(
@@ -531,4 +535,5 @@ def run_full_session(
         session_date=session_date,
         rules=rules,
         underlying=underlying,
+        fill_timeout_seconds=fill_timeout_seconds,
     ))
