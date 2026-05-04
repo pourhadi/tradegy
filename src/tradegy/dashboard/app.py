@@ -402,13 +402,28 @@ def _run_doctor_checks(skip_ibkr: bool = True) -> list[dict]:
 # ── Position table with live mark ─────────────────────────────────
 
 
+@st.cache_data(ttl=60)
 def _load_position_statuses_with_mark() -> list[dict]:
     """Mark every registered position against the latest snapshot
-    and evaluate close triggers. Returns dicts ready for st.dataframe.
+    and evaluate close triggers.
+
+    CACHED 60s — without caching, this walked all 1500+ SPY chain
+    partitions on every page render and blocked the entire dashboard
+    paint for 10-20 seconds (browser hung on "Stop" with no tabs
+    visible). Discovered 2026-05-04 via mobile screenshot.
+
+    Empty registry → empty list → instant return path; only does
+    the chain walk when there ARE positions to mark.
     """
     from tradegy.live.options_orchestrator import compute_position_statuses
+    from tradegy.live.options_position_registry import load_open_positions
     from tradegy.options.chain_io import iter_chain_snapshots
     from tradegy.options.strategy import ManagementRules
+
+    # Short-circuit on empty registry — saves the 1500-snap walk
+    # entirely when there are no positions to mark.
+    if not load_open_positions():
+        return []
 
     snaps = list(iter_chain_snapshots("spy_options_chain", ticker="SPY"))
     if not snaps:
