@@ -23,6 +23,29 @@ from tradegy import config
 _TESTS_REGISTRY_ROOT = Path(__file__).parent / "fixtures" / "registry"
 
 
+# Auto-mark every test that depends on a real-chain fixture as
+# `slow`. The default `pytest` invocation skips these (per
+# pyproject.toml addopts = "-m 'not slow'"); run them explicitly
+# with `pytest -m slow` (only slow) or `pytest -m "slow or not slow"`
+# (everything).
+#
+# Why: real-chain fixtures load 1500+ snapshots from parquet (SPX
+# = 7.5 GB, SPY = 3.5 GB). Each test that uses the fixture takes
+# 5-90 seconds depending on what it does with the chain. Pre-this
+# split: full suite was ~8 minutes. Post: fast suite is ~30 sec.
+_SLOW_FIXTURES = frozenset({
+    "real_spx_chain_snapshots",
+    "spy_chain_present",
+})
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        fixture_names = set(getattr(item, "fixturenames", ()))
+        if fixture_names & _SLOW_FIXTURES:
+            item.add_marker(pytest.mark.slow)
+
+
 def _generate_es_ticks(
     sessions: list[tuple[datetime, datetime]],
     *,

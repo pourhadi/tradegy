@@ -166,22 +166,28 @@ def generate_live_decision(
         )
     today = snapshots[-1]
 
-    # Phase 1: replay everything-except-today to warm up state.
-    # Use the standard portfolio runner over the warmup window —
-    # it builds IV-rank history inside the wrappers AND tracks the
-    # backtest's open-position state. We use the backtest's
-    # open-position state at "end of warmup" as the input to the
-    # final-snapshot decision.
+    # Phase 1: replay everything-except-today to warm up the
+    # IV-rank history inside the IvGatedStrategy wrappers. The
+    # PortfolioBacktestResult is computed but its `final_open_
+    # positions` is intentionally NOT used as today's open
+    # positions — those backtest-replay positions are virtual,
+    # entered at historical prices in the replay loop, and don't
+    # correspond to anything at the broker.
+    #
+    # For live decisions, the strategies' `_my_open()` check
+    # must see the LOCAL REGISTRY's open positions (which the
+    # routing path keeps in sync with the broker via the V2
+    # reconciliation pass). That way strategies correctly avoid
+    # duplicating actual broker positions but DO fire entries
+    # when nothing is held — even after a long backtest replay
+    # that produced virtual positions.
     warmup_result = run_options_backtest_portfolio(
         strategies=strategies,
         snapshots=snapshots[:-1],  # exclude today
         rules=rules, risk=risk,
     )
-    # End-of-warmup open positions come straight from the runner.
-    # In live mode the operator MUST reconcile against IBKR before
-    # routing — backtest-replay positions are not the same as
-    # broker positions.
-    open_positions = warmup_result.final_open_positions
+    from tradegy.live.options_position_registry import load_open_positions
+    open_positions = tuple(load_open_positions())
 
     # Phase 2: today-only — call each strategy's on_chain with
     # the warmed state + open-positions tuple.
@@ -211,6 +217,10 @@ def generate_live_decision(
         loss_stop_pct=loss_stop_pct,
         dte_close=dte_close,
         entries=entries,
+        # `replay_open_positions_at_today` is now the LIVE
+        # registry's open count, NOT the backtest's virtual count.
+        # Renamed semantics; field name kept for JSON-schema
+        # backward compat with prior decision files.
         replay_open_positions_at_today=len(open_positions),
         replay_realized_pnl=warmup_result.realized_pnl_dollars,
     )

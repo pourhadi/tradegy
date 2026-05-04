@@ -34,7 +34,14 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# `-m "not slow"` skips integration tests that load full SPX/SPY
+# chains (~30-90s each, ~7min total). Run them with
+# `uv run pytest -m slow` (only slow) or
+# `uv run pytest -m "slow or not slow"` (everything).
+addopts = "-q -m 'not slow'"
+markers = [
+    "slow: integration tests that load full ingested options chains. Skipped by default for fast iteration; run with `pytest -m slow` or `pytest -m 'slow or not slow'`.",
+]
 
 [tool.uv]
 package = true

@@ -55,7 +55,7 @@ no post-hoc tuning. See "Discipline" below — this is non-negotiable.
 - CLI: **`typer`** + `rich`.
 - LLM: **Anthropic SDK** (`anthropic` package). Default model `claude-opus-4-7`,
   adaptive thinking. See `src/tradegy/auto_generation/anthropic_*.py`.
-- Tests: **`pytest`**.
+- Tests: **`pytest`**. Default `uv run pytest` skips chain-replay integration tests (marker `slow`, ~125 tests, ~7-8 min); fast suite is ~551 tests in ~2.5 seconds. Run integration with `uv run pytest -m slow` (only slow) or `uv run pytest -m "slow or not slow"` (everything). Tests using the `real_spx_chain_snapshots` or `spy_chain_present` fixtures are auto-marked `slow` via a `pytest_collection_modifyitems` hook in `tests/conftest.py`.
 - Lint/format: not currently wired (no ruff/black config in repo).
 
 ## Run anything
