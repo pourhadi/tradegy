@@ -3,16 +3,23 @@
 # Phase 0.3 of the regime-gated range-scalp plan
 # (/Users/dan/.claude/plans/brainstorming-in-the-context-humming-balloon.md).
 #
-# CURRENT SCOPE — FOMC events only:
-#   Federal Reserve press releases tagged "Monetary Policy" (FOMC
-#   statements, FOMC minutes, SEP releases, monetary policy report,
-#   speeches/remarks). Source: https://www.federalreserve.gov/json/ne-press.json
-#   Free, no API key, public.
+# SCOPE — combined FOMC + FRED scheduled-release feed:
 #
-# DEFERRED — BLS / BEA scheduled releases:
-#   CPI, PPI, NFP, GDP, retail sales, ISM, jobless claims still need to
-#   be added. Path TBD: hardcoded rule-based dates, FRED API key, or
-#   targeted BLS schedule scraping. Tracking under Phase 0.3 follow-up.
+#   FOMC slice (federalreserve.gov public JSON, no auth):
+#     fomc_statement, fomc_minutes, fomc_sep, monetary_policy_report,
+#     fed_speech, fed_other_monetary
+#
+#   FRED-driven scheduled-release slice (api.stlouisfed.org, free key):
+#     cpi, ppi, employment_situation (NFP), gdp, retail_sales_advance,
+#     initial_jobless_claims, personal_income_outlays (PCE)
+#
+# ISM Manufacturing PMI is NOT included — ISM is a private organization
+# and FRED carries the data but not the release schedule. If needed,
+# encode the well-known schedule rule (1st business day of each month
+# at 10:00 AM ET) as a follow-up.
+#
+# Release-time convention: BLS/BEA/UI releases all clock at 8:30 AM ET
+# (DST-aware). FOMC events carry their own published timestamps.
 #
 # Importance classification (per-row, set by ingest script):
 #   high   — fomc_statement, fomc_sep, fomc_press_conference
@@ -28,25 +35,34 @@
 id: econ_events
 version: v1
 description: >
-  Scheduled and monetary-policy economic event timestamps. Initially
-  populated with Federal Reserve monetary-policy press releases
-  (2006-present); BLS/BEA scheduled releases TBD. Used by the regime-
-  gated strategy as both a quiet-window gate (no entries within T-2h
-  to T+4h of a high-importance event) and as a feature input to the
-  news-event distillation classifier.
+  Scheduled and monetary-policy economic event timestamps. Federal
+  Reserve monetary-policy press releases (2006-present, from the FRB
+  public JSON feed) PLUS BLS/BEA/UI scheduled releases pulled via the
+  FRED /releases/dates endpoint (CPI, PPI, NFP, GDP, retail sales,
+  initial jobless claims, PCE). Used by the regime-gated strategy as a
+  quiet-window gate (no entries within T-2h to T+4h of a high-
+  importance event) and as a feature input to the news-event
+  distillation classifier.
 type: economic
-provider: federalreserve_gov
+provider: federalreserve_gov+fred
 revisable: false
 revision_policy: never_revised
 admission_rationale: >
-  Federal Reserve JSON press release feed is the canonical primary
-  source for all monetary-policy events; timestamps are recorded by
-  the issuing institution. Public, free, no auth. Currently covers only
-  the FOMC slice — the BLS/BEA slice is a known gap until Phase 0.3
-  follow-up lands them.
+  Two complementary primary sources, both free:
+
+    Federal Reserve JSON press release feed (federalreserve.gov) is
+    the canonical source for monetary-policy events; timestamps are
+    recorded by the issuing institution.
+
+    FRED /releases/dates endpoint (api.stlouisfed.org) gives the
+    historical release dates for BLS/BEA/UI scheduled releases. FRED
+    returns dates only; release times are appended per agency
+    convention (BLS/BEA/UI = 8:30 AM ET; DST-aware). Both ts_utc and
+    announced_at use the published release moment because BLS/BEA do
+    not silently shift schedules after publication.
 coverage:
   start_date: 2006-01-03
-  end_date: 2026-04-29
+  end_date: 2026-04-30
   gaps: []
 cadence: irregular
 fields:
@@ -93,8 +109,10 @@ known_issues:
     of these is low priority since coverage starts 2006 and most market-
     impact strategies care about post-2019.
   - >
-    BLS / BEA scheduled releases (CPI, NFP, PPI, GDP, retail sales) are
-    NOT in this dataset yet. Strategies that need an econ-quiet-window
-    gate at T-2h around CPI / NFP must either wait for the follow-up
-    Phase 0.3 ingest or use a coarser FOMC-only gate.
+    ISM Manufacturing PMI is NOT in this dataset. ISM is a private
+    organization; FRED carries the data series but not the release
+    schedule. If a strategy needs an ISM-release quiet window, encode
+    the well-known schedule rule (1st business day of each month at
+    10:00 AM ET) as a derived feature rather than relying on this
+    source.
 audit_history: []
