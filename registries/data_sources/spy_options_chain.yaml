@@ -1,0 +1,146 @@
+# Data source registry entry for SPY (S&P 500 ETF) options
+# end-of-day chain snapshots, sourced from ORATS Pro.
+#
+# Added 2026-05-03 as a candidate $25K-deployable underlying after
+# XSP@$25K validated only ~4.5% AnnRoC OOS due to wide bid-ask
+# spreads (29% on near-ATM strikes) and high commission-as-%-of-
+# credit drag (13% on $5 credits). SPY ETF options have:
+#
+#   + $100 multiplier (same as SPX, vs XSP's $10)
+#   + Strike values ~1/10 of SPX dollars (SPY ≈ $500 when SPX ≈ 5000)
+#   + → notional per contract is ~1/10 of SPX, similar to XSP
+#   + BUT spreads are penny-wide on weeklies (SPY is the most-traded
+#     ETF in the world), vs XSP's 25-50 cent spreads
+#   + Commission economics: same $0.65/leg, but credit per leg can
+#     be $20-100 (vs XSP's $5), so commission drag is ~3% (vs XSP 13%)
+#
+# The hypothesis is that SPY can split the cost-economics gap between
+# SPX@$250K and XSP@$25K — capturing more of SPX's edge at the $25K
+# capital level. To be validated by walk-forward sweep on this
+# source.
+#
+# IBKR routing (live phase):
+#   - SPY is an EQUITY OPTION (TradingClass = "SPY", SecType = "OPT",
+#     underlying SecType = "STK"). Different code path from SPX/XSP
+#     (which are index options, SecType = "IND" + OPT). Will require
+#     a small IBKR router extension.
+#   - American-style: EARLY ASSIGNMENT RISK. Short put deep ITM near
+#     ex-dividend dates can be assigned. Strategy management rules
+#     (close at 50% profit / 21 DTE) limit this exposure but it's a
+#     real difference from SPX/XSP's European-style cash-settled.
+#   - Settlement: physical delivery of SPY shares (not cash). 100
+#     shares per contract — assignment requires capital to take
+#     delivery. RiskManager must account for this in margin reqs.
+#
+# Same vendor-Greeks-not-consumed convention as the SPX/XSP sources.
+
+id: spy_options_chain
+version: v1
+description: >
+  S&P 500 ETF (SPY) end-of-day options chain snapshots from ORATS Pro.
+  One row per (tradeDate, expirDate, strike) with both call and put
+  leg fields side-by-side. Strike values are in SPY price terms
+  (~1/10 of SPX); $100 multiplier. American-style with physical
+  delivery — different from SPX/XSP's European cash-settled mechanic.
+type: market_data
+provider: orats
+revisable: true
+revision_policy: revised_with_vintages
+admission_rationale: >
+  Tested as a $25K-deployable underlying after XSP demonstrated
+  insufficient bid-ask economics for the validated SPX vol-selling
+  edge to translate at retail capital. SPY is the most-liquid ETF
+  in the world; its options chain has penny-wide spreads on the
+  weeklies (vs XSP's 25-50c) and ~3% commission drag (vs XSP's
+  13%). If walk-forward validation confirms this captures more
+  of the SPX edge, SPY becomes the recommended $25K underlying
+  ahead of XSP. ORATS Pro covers SPY back to 2005+ (deeper history
+  than XSP).
+coverage:
+  start_date: 2010-01-04
+  end_date: 2026-12-31
+  gaps: []
+cadence: 1d
+fields:
+  - {name: ts_utc, type: timestamp}
+  - {name: ticker, type: string}
+  - {name: trade_date, type: date}
+  - {name: expir_date, type: date}
+  - {name: dte, type: int}
+  - {name: strike, type: float}
+  - {name: stock_price, type: float}
+  - {name: spot_price, type: float}
+  - {name: residual_rate, type: float}
+  - {name: smv_vol, type: float}
+  - {name: ext_smv_vol, type: float}
+  - {name: quote_date, type: string}
+  - {name: expiry_tod, type: string}
+  - {name: call_bid, type: float}
+  - {name: call_ask, type: float}
+  - {name: call_value, type: float}
+  - {name: call_iv, type: float}
+  - {name: call_bid_iv, type: float}
+  - {name: call_ask_iv, type: float}
+  - {name: call_bid_size, type: int}
+  - {name: call_ask_size, type: int}
+  - {name: call_volume, type: int}
+  - {name: call_open_interest, type: int}
+  - {name: ext_call_value, type: float}
+  - {name: put_bid, type: float}
+  - {name: put_ask, type: float}
+  - {name: put_value, type: float}
+  - {name: put_iv, type: float}
+  - {name: put_bid_iv, type: float}
+  - {name: put_ask_iv, type: float}
+  - {name: put_bid_size, type: int}
+  - {name: put_ask_size, type: int}
+  - {name: put_volume, type: int}
+  - {name: put_open_interest, type: int}
+  - {name: ext_put_value, type: float}
+  - {name: vendor_call_delta, type: float}
+  - {name: vendor_gamma, type: float}
+  - {name: vendor_call_theta, type: float}
+  - {name: vendor_vega, type: float}
+  - {name: vendor_call_rho, type: float}
+  - {name: vendor_phi, type: float}
+  - {name: vendor_driftless_theta, type: float}
+ingest:
+  format: orats_strikes_csv
+  timestamp_columns: [tradeDate]
+session_calendar: XNYS
+# SPY options trade RTH 9:30-16:00 ET (no 4:15 cash-index extension).
+# End-of-day snapshots typically published within 1-2 hours of close.
+max_inactivity_seconds: 604800
+availability_latency:
+  median_seconds: 3600.0
+  p99_seconds: 86400.0
+  notes: >
+    ORATS' /datav2/hist/strikes endpoint serves end-of-day
+    snapshots; ~1-2 hours after the cash close. Pro tier permits
+    historical bulk pulls without per-pull metering.
+licensing:
+  live_use: false
+  backtest_use: true
+  redistribution: false
+known_issues:
+  - >
+    SPY is American-style with physical delivery — short positions
+    deep ITM near ex-dividend dates can be early-assigned. The
+    in-scope vol-selling strategies (close at 50% / 21 DTE) limit
+    this exposure but it's not zero. Strategy classes do not
+    currently model assignment risk explicitly; assignment events
+    in backtest manifest as the position closing at intrinsic
+    value at the assignment date. Live trading would need an IBKR
+    callback hook for assignment notifications.
+  - >
+    SPY pays quarterly dividends (~1.3% annual yield as of 2026).
+    Dividend dates affect short-call early-assignment probability.
+    BS Greeks computed by the harness do NOT incorporate
+    dividends; this is a known approximation that is more relevant
+    for SPY than for SPX/XSP (cash-settled, no dividend on the
+    index).
+  - >
+    Same vendor-Greeks-not-consumed convention as SPX/XSP — the
+    harness recomputes via bs_greeks from per-leg IV; vendor
+    columns kept for audit cross-check only.
+audit_history: []
