@@ -72,6 +72,12 @@ class PortfolioBacktestResult:
     aggregate_rejected_orders: list[RejectedOrder] = field(default_factory=list)
     aggregate_snapshot_pnl: list[SnapshotPnL] = field(default_factory=list)
     per_strategy: dict[str, OptionsBacktestResult] = field(default_factory=dict)
+    # Final open positions at end-of-replay. Populated by the runner
+    # so live-orchestrator paths (paper-trade decisioner) can pass
+    # the warm state into the next-snapshot decision without
+    # reconstructing it from closed_trades. Empty for backtests
+    # that close everything before the final snapshot.
+    final_open_positions: tuple[MultiLegPosition, ...] = field(default_factory=tuple)
 
     @property
     def realized_pnl_dollars(self) -> float:
@@ -231,4 +237,5 @@ def run_options_backtest_portfolio(
             capital_at_risk_dollars=capital_at_risk,
         ))
 
+    portfolio.final_open_positions = tuple(open_positions)
     return portfolio

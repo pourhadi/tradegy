@@ -1519,5 +1519,177 @@ def options_strategies_cmd() -> None:
     console.print(table)
 
 
+@app.command("live-options")
+def live_options_cmd(
+    strategy_ids: Annotated[str, typer.Option(
+        "--strategy-ids", help="comma-joined base strategy ids; each is "
+        "wrapped with the IV gate. Default = validated PCS+IC+JL.",
+    )] = "put_credit_spread_45dte_d30,iron_condor_45dte_d16,jade_lizard_45dte",
+    source_id: Annotated[str, typer.Option("--source-id")] = "spy_options_chain",
+    ticker: Annotated[str, typer.Option("--ticker")] = "SPY",
+    declared_capital: Annotated[float, typer.Option("--capital")] = 25_000.0,
+    iv_gate_max: Annotated[Optional[float], typer.Option(
+        "--iv-gate-max", help="default 0.25 = validated config. Set to "
+        "blank string to disable.",
+    )] = 0.25,
+    iv_gate_min: Annotated[Optional[float], typer.Option(
+        "--iv-gate-min",
+    )] = None,
+    iv_gate_window_days: Annotated[int, typer.Option("--iv-gate-window")] = 252,
+    profit_take_pct: Annotated[float, typer.Option("--profit-take")] = 0.50,
+    loss_stop_pct: Annotated[float, typer.Option("--loss-stop")] = 2.0,
+    dte_close: Annotated[int, typer.Option("--dte-close")] = 21,
+    route: Annotated[bool, typer.Option(
+        "--route/--no-route", help="if --route, connect to IBKR paper "
+        "and place each entry as a multi-leg combo. Default --no-route "
+        "is decision-only (writes JSON, prints, exits).",
+    )] = False,
+    paper_account: Annotated[str, typer.Option(
+        "--paper-account", help="REQUIRED if --route. Asserted against the "
+        "broker-managed accounts list as a safety check before any order.",
+    )] = "",
+) -> None:
+    """Daily paper-trade orchestrator for the validated options portfolio.
+
+    Replays every ingested chain snapshot to warm up the IV-rank
+    history inside the IvGatedStrategy wrappers, then runs each
+    strategy against the most-recent snapshot and writes the entry
+    candidates as a JSON decision file under
+    `data/live_options/decisions/`.
+
+    Default args match the validated config from doc 14 Phase D-8
+    follow-up #6:
+      SPY + PCS+IC+JL + IV<0.25 + default 50/21/200 mgmt + $25K cap.
+
+    --no-route (default): decision-only. Writes the JSON, prints
+    the entries, exits.
+
+    --route: connects to IBKR paper (env: IBKR_HOST / IBKR_PORT /
+    IBKR_CLIENT_ID; defaults to 127.0.0.1:7497 / 17), asserts that
+    --paper-account is in the broker-managed accounts list, then
+    places each entry as a multi-leg combo. Routing exit code 6 if
+    any entry is rejected.
+
+    V1 SCOPE: entries only. Closing of OPEN broker positions per
+    50%/21DTE/200% discipline is OUT of scope — operator handles
+    closes manually via TWS until the V2 reconciliation loop ships.
+    """
+    from tradegy.live.options_orchestrator import (
+        generate_live_decision,
+        write_decision,
+    )
+    from tradegy.options.registry import resolve_strategy_ids
+
+    base_strategies = resolve_strategy_ids(strategy_ids)
+    decision = generate_live_decision(
+        base_strategies=base_strategies,
+        source_id=source_id, ticker=ticker,
+        declared_capital=declared_capital,
+        iv_gate_max=iv_gate_max,
+        iv_gate_min=iv_gate_min,
+        iv_gate_window_days=iv_gate_window_days,
+        profit_take_pct=profit_take_pct,
+        loss_stop_pct=loss_stop_pct,
+        dte_close=dte_close,
+    )
+    out_path = write_decision(decision)
+    rel_path = out_path.relative_to(config.repo_root())
+
+    console.print(
+        f"[bold]live-options[/]  ticker={ticker}  "
+        f"capital=${declared_capital:,.0f}  "
+        f"iv_gate_max={iv_gate_max}  iv_gate_min={iv_gate_min}\n"
+        f"  snapshot: {decision.snapshot_ts_utc.date()} "
+        f"@ {ticker}=${decision.snapshot_underlying_price:.2f}  "
+        f"replayed={decision.n_replayed_snapshots} snaps  "
+        f"open-at-replay-end={decision.replay_open_positions_at_today}"
+    )
+
+    if not decision.entries:
+        console.print("\n[yellow]NO ENTRIES today — strategies all gated/empty[/]")
+        console.print(f"\n[dim]decision written: {rel_path}[/]")
+        return
+
+    table = Table(title=f"entry candidates ({len(decision.entries)})")
+    table.add_column("strategy_id")
+    table.add_column("legs")
+    table.add_column("contracts", justify="right")
+    for e in decision.entries:
+        leg_text = "  ".join(
+            f"{leg['side']}{leg['quantity']:+d} K{leg['strike']:.0f} "
+            f"{leg['expiry']}"
+            for leg in e["legs"]
+        )
+        table.add_row(e["strategy_id"], leg_text, str(e["contracts"]))
+    console.print(table)
+    console.print(f"\n[dim]decision written: {rel_path}[/]")
+
+    if not route:
+        console.print(
+            "\n[dim]--no-route mode (default). To route to IBKR paper:\n"
+            f"  uv run tradegy live-options --route --paper-account <ACCOUNT>[/]"
+        )
+        return
+
+    if not paper_account:
+        console.print(
+            "\n[red]ERROR[/]: --route requires --paper-account; refusing "
+            "to place orders without an explicit account assertion"
+        )
+        raise typer.Exit(code=1)
+
+    from tradegy.live.options_routing import (
+        reconstruct_chain_snapshot_for_decision,
+        route_decision_sync,
+    )
+    snapshot = reconstruct_chain_snapshot_for_decision(
+        source_id=source_id, ticker=ticker,
+        snapshot_ts_utc=decision.snapshot_ts_utc,
+    )
+    console.print("\n[bold]routing to IBKR paper...[/]")
+    results = route_decision_sync(
+        decision_entries=decision.entries,
+        snapshot=snapshot,
+        paper_account=paper_account,
+        session_date=decision.snapshot_ts_utc,
+    )
+
+    rt = Table(title="routing results")
+    rt.add_column("strategy_id")
+    rt.add_column("client_order_id")
+    rt.add_column("accepted")
+    rt.add_column("broker_id_or_error")
+    any_failed = False
+    for r in results:
+        rt.add_row(
+            r.strategy_id,
+            r.client_order_id,
+            "[green]yes[/]" if r.accepted else "[red]no[/]",
+            r.broker_order_id if r.accepted else (r.error or ""),
+        )
+        if not r.accepted:
+            any_failed = True
+    console.print(rt)
+
+    # Append routing results into the decision file alongside the
+    # entries — single audit artifact per session.
+    payload = json.loads(out_path.read_text())
+    payload["routing_results"] = [
+        {
+            "strategy_id": r.strategy_id,
+            "client_order_id": r.client_order_id,
+            "accepted": r.accepted,
+            "broker_order_id": r.broker_order_id,
+            "error": r.error,
+            "submitted_ts": r.submitted_ts.isoformat(),
+        }
+        for r in results
+    ]
+    out_path.write_text(json.dumps(payload, indent=2, default=str))
+
+    if any_failed:
+        raise typer.Exit(code=6)
+
+
 if __name__ == "__main__":
     app()
