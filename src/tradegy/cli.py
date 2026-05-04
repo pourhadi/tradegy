@@ -1506,6 +1506,61 @@ def options_cpcv_cmd(
         raise typer.Exit(code=4)
 
 
+@app.command("live-options-health")
+def live_options_health_cmd(
+    paper_account: Annotated[str, typer.Option(
+        "--paper-account", help="if set, asserts the account is in the "
+        "broker-managed accounts list. Exits non-zero on mismatch.",
+    )] = "",
+) -> None:
+    """Probe IBKR connectivity for the live-options orchestrator.
+
+    Connects via IBKRConnection (env: IBKR_HOST/PORT/CLIENT_ID;
+    paper TWS defaults 127.0.0.1:7497/17), queries managedAccounts,
+    disconnects. Reports host/port/client_id/accounts. Exits 0 on
+    successful connection regardless of managedAccounts content;
+    exits 1 if --paper-account is set and not in the accounts list;
+    exits 2 on connection failure (TWS not running, wrong port,
+    auth issue).
+
+    Intended use: launchd pre-flight check so the daily cron
+    aborts cleanly if TWS/IB Gateway isn't up.
+    """
+    import asyncio
+    from tradegy.live.ibkr import IBKRConnection
+
+    async def _probe() -> None:
+        conn = IBKRConnection()
+        await conn.connect()
+        try:
+            try:
+                accounts = conn.ib.managedAccounts()
+            except Exception:  # noqa: BLE001
+                accounts = []
+            health = conn.health()
+            console.print(
+                f"[bold green]ibkr connected[/]  host={health['host']}  "
+                f"port={health['port']}  client_id={health['client_id']}\n"
+                f"  managed_accounts={accounts}"
+            )
+            if paper_account and paper_account not in accounts:
+                console.print(
+                    f"[red]ERROR[/]: --paper-account={paper_account!r} "
+                    f"not in managed accounts {accounts}"
+                )
+                raise typer.Exit(code=1)
+        finally:
+            await conn.disconnect()
+
+    try:
+        asyncio.run(_probe())
+    except typer.Exit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]connection failed[/]: {type(exc).__name__}: {exc}")
+        raise typer.Exit(code=2)
+
+
 @app.command("options-strategies")
 def options_strategies_cmd() -> None:
     """List registered options strategy ids (for use with
@@ -1640,19 +1695,73 @@ def live_options_cmd(
 
     from tradegy.live.options_routing import (
         reconstruct_chain_snapshot_for_decision,
-        route_decision_sync,
+        run_full_session,
     )
     snapshot = reconstruct_chain_snapshot_for_decision(
         source_id=source_id, ticker=ticker,
         snapshot_ts_utc=decision.snapshot_ts_utc,
     )
-    console.print("\n[bold]routing to IBKR paper...[/]")
-    results = route_decision_sync(
+    console.print("\n[bold]routing to IBKR paper (entries + V2 close loop)...[/]")
+    rules = ManagementRules(
+        profit_take_pct=profit_take_pct,
+        loss_stop_pct=loss_stop_pct,
+        dte_close=dte_close,
+    )
+    session_outcome = run_full_session(
         decision_entries=decision.entries,
         snapshot=snapshot,
         paper_account=paper_account,
         session_date=decision.snapshot_ts_utc,
+        rules=rules,
+        underlying=ticker,
     )
+    results = session_outcome["entry_results"]
+    close_results = session_outcome["close_results"]
+    reconciliation = session_outcome["reconciliation"]
+
+    # Surface reconciliation BEFORE closes so the operator sees
+    # divergence first.
+    if reconciliation.has_divergence:
+        rec = Table(title="[red]reconciliation divergence[/] (closes paused)")
+        rec.add_column("kind")
+        rec.add_column("detail")
+        for pos in reconciliation.local_only:
+            rec.add_row(
+                "local-only",
+                f"{pos.strategy_class} {pos.position_id} — "
+                "registry has it; broker doesn't",
+            )
+        for leg in reconciliation.broker_only:
+            rec.add_row(
+                "broker-only",
+                f"{leg.underlying} {leg.expiry} K{leg.strike} "
+                f"{leg.side.value} qty={leg.quantity} — "
+                "broker has it; registry doesn't",
+            )
+        console.print(rec)
+        console.print(
+            "\n[red]Closes were NOT routed[/] — investigate divergence "
+            "before re-running. Common causes: manual TWS close, "
+            "assignment, non-tradegy positions in the same account."
+        )
+
+    if close_results:
+        ct = Table(title=f"close routing results ({len(close_results)})")
+        ct.add_column("position_id")
+        ct.add_column("close_reason")
+        ct.add_column("accepted")
+        ct.add_column("broker_id_or_error")
+        for cr in close_results:
+            ct.add_row(
+                cr.position_id, cr.close_reason,
+                "[green]yes[/]" if cr.accepted else "[red]no[/]",
+                cr.broker_order_id if cr.accepted else (cr.error or ""),
+            )
+        console.print(ct)
+    elif not reconciliation.has_divergence:
+        console.print(
+            "\n[dim]V2 close loop: no positions triggered should_close[/]"
+        )
 
     rt = Table(title="routing results")
     rt.add_column("strategy_id")

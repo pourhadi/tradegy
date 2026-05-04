@@ -23,9 +23,19 @@ from typing import Any
 from tradegy.execution.ibkr_options_router import IbkrOptionsRouter
 from tradegy.execution.idempotency import OrderRole, make_client_order_id
 from tradegy.live.ibkr import IBKRConnection
+from tradegy.live.options_position_registry import (
+    PersistedLeg,
+    append_open,
+)
 from tradegy.options.chain import ChainSnapshot, OptionLeg, OptionSide
 from tradegy.options.chain_io import iter_chain_snapshots
-from tradegy.options.positions import LegOrder, MultiLegOrder
+from tradegy.options.cost_model import OptionCostModel
+from tradegy.options.positions import (
+    LegOrder,
+    MultiLegOrder,
+    OptionPosition,
+    compute_max_loss_per_contract,
+)
 
 
 _log = logging.getLogger(__name__)
@@ -130,6 +140,7 @@ async def route_decision(
         router = IbkrOptionsRouter(ib=conn.ib)
         await router.connect()
 
+        cost = OptionCostModel()
         results: list[RouteResult] = []
         for intent_seq, entry in enumerate(decision_entries):
             order = _entry_dict_to_order(entry)
@@ -144,6 +155,18 @@ async def route_decision(
                     order=order,
                     snapshot=snapshot,
                     client_order_id=coid,
+                )
+                # Persist routed entry so V2 close loop can manage
+                # it on subsequent sessions. Compute entry-credit
+                # and max-loss the same way the runner does so the
+                # downstream should_close math matches the backtest.
+                _persist_entry(
+                    position_id=coid,
+                    strategy_id=entry["strategy_id"],
+                    order=order,
+                    snapshot=snapshot,
+                    cost=cost,
+                    broker_order_id=managed.broker_order_id,
                 )
                 results.append(RouteResult(
                     strategy_id=entry["strategy_id"],
@@ -167,6 +190,105 @@ async def route_decision(
         await conn.disconnect()
 
 
+def _persist_entry(
+    *,
+    position_id: str,
+    strategy_id: str,
+    order: MultiLegOrder,
+    snapshot: ChainSnapshot,
+    cost: OptionCostModel,
+    broker_order_id: str | None,
+) -> None:
+    """Compute entry-credit + max-loss the same way the runner
+    does, then write the open row to the position registry.
+
+    The math here mirrors `runner._open_position_from_order` so
+    the live-tracked position carries the same `entry_credit_per_
+    share` and `max_loss_per_contract` values that the backtest
+    used to validate the strategy. Without this parity the
+    `should_close` triggers would fire at different P&L points
+    than the validated config predicts.
+    """
+    op_legs: list[OptionPosition] = []
+    persisted_legs: list[PersistedLeg] = []
+    for leg_order in order.legs:
+        chain_leg = _find_chain_leg(snapshot, leg_order)
+        if chain_leg is None:
+            raise RuntimeError(
+                f"_persist_entry: leg "
+                f"{leg_order.expiry}/{leg_order.strike}/{leg_order.side.value} "
+                "not present in snapshot — registry write would be "
+                "incoherent"
+            )
+        fill_px = cost.fill_price(
+            chain_leg, signed_quantity=leg_order.quantity,
+        )
+        if fill_px <= 0.0:
+            raise RuntimeError(
+                f"_persist_entry: cost-model returned non-positive "
+                f"fill_px for leg {leg_order.expiry}/{leg_order.strike}"
+            )
+        op_legs.append(OptionPosition(
+            contract_id=OptionPosition.make_contract_id(
+                snapshot.underlying,
+                leg_order.expiry, leg_order.strike, leg_order.side,
+            ),
+            underlying=snapshot.underlying,
+            expiry=leg_order.expiry,
+            strike=leg_order.strike,
+            side=leg_order.side,
+            multiplier=chain_leg.multiplier,
+            quantity=leg_order.quantity,
+            entry_price=fill_px,
+            entry_ts=snapshot.ts_utc,
+        ))
+        persisted_legs.append(PersistedLeg(
+            expiry=leg_order.expiry.isoformat(),
+            strike=leg_order.strike,
+            side=leg_order.side.value,
+            quantity=leg_order.quantity,
+            entry_price=fill_px,
+            multiplier=chain_leg.multiplier,
+        ))
+
+    cost_to_open_per_share = sum(l.cost_to_open() for l in op_legs)
+    entry_credit_per_share = -cost_to_open_per_share
+    max_loss = compute_max_loss_per_contract(op_legs, entry_credit_per_share)
+    if max_loss <= 0.0:
+        # Same refusal the runner does — undefined-risk shape is
+        # rejected at registration time. The combo placement already
+        # succeeded at the broker; this raise will surface the issue
+        # to the caller, who should immediately cancel the broker
+        # order and audit.
+        raise RuntimeError(
+            f"_persist_entry: position {position_id} has non-positive "
+            f"max_loss_per_contract={max_loss:.2f}; refusing to "
+            "register an undefined-risk shape — cancel the broker "
+            "order manually"
+        )
+
+    append_open(
+        position_id=position_id,
+        underlying=snapshot.underlying,
+        strategy_class=strategy_id,
+        contracts=order.contracts,
+        legs=persisted_legs,
+        entry_credit_per_share=entry_credit_per_share,
+        max_loss_per_contract=max_loss,
+        entry_ts=snapshot.ts_utc,
+        broker_order_id=broker_order_id,
+    )
+
+
+def _find_chain_leg(
+    snapshot: ChainSnapshot, leg_order: LegOrder,
+) -> OptionLeg | None:
+    for leg in snapshot.for_expiry(leg_order.expiry):
+        if leg.strike == leg_order.strike and leg.side == leg_order.side:
+            return leg
+    return None
+
+
 def route_decision_sync(
     *,
     decision_entries: list[dict[str, Any]],
@@ -180,4 +302,145 @@ def route_decision_sync(
         snapshot=snapshot,
         paper_account=paper_account,
         session_date=session_date,
+    ))
+
+
+# ── Full-session entry-then-close pipeline (V2) ───────────────────
+
+
+async def _run_full_session_async(
+    *,
+    decision_entries: list[dict[str, Any]],
+    snapshot: ChainSnapshot,
+    paper_account: str,
+    session_date: datetime,
+    rules: Any,
+    underlying: str,
+) -> dict[str, Any]:
+    """Single-connection daily session:
+
+      1. Connect to IBKR paper
+      2. Fetch broker positions for `underlying`
+      3. Reconcile against local registry (V2)
+      4. If reconciliation clean: evaluate should_close, route
+         each triggered close, append `close` rows to registry
+      5. Route each entry from `decision_entries`, append `open`
+         rows to registry on success
+      6. Disconnect
+
+    Returns a dict with `reconciliation`, `close_results`, and
+    `entry_results` so the CLI surface can render all three.
+    """
+    from tradegy.live.options_close_loop import (
+        evaluate_closes,
+        fetch_broker_option_legs,
+        reconcile,
+        route_close_decisions,
+    )
+    from tradegy.live.options_position_registry import load_open_positions
+
+    conn = IBKRConnection()
+    await conn.connect()
+    try:
+        accounts = []
+        try:
+            accounts = conn.ib.managedAccounts()
+        except Exception:  # noqa: BLE001
+            pass
+        _log.info(
+            "ibkr connected: host=%s port=%s accounts=%s",
+            conn.host, conn.port, accounts,
+        )
+        if paper_account not in accounts:
+            raise RuntimeError(
+                f"paper_account={paper_account!r} not in connected "
+                f"accounts={accounts!r}; aborting before any order placed"
+            )
+
+        router = IbkrOptionsRouter(ib=conn.ib)
+        await router.connect()
+
+        # 2-3: reconcile.
+        local_positions = load_open_positions()
+        broker_legs = fetch_broker_option_legs(
+            conn.ib, underlying=underlying,
+        )
+        reconciliation = reconcile(
+            local_positions=local_positions, broker_legs=broker_legs,
+        )
+
+        # 4: closes only when reconciliation clean.
+        close_results: list[Any] = []
+        if not reconciliation.has_divergence and reconciliation.matched:
+            closes = evaluate_closes(
+                positions=reconciliation.matched,
+                snapshot=snapshot, rules=rules,
+            )
+            close_results = await route_close_decisions(
+                closes=closes, snapshot=snapshot, router=router,
+                session_date=session_date,
+            )
+
+        # 5: entries.
+        cost = OptionCostModel()
+        entry_results: list[RouteResult] = []
+        for intent_seq, entry in enumerate(decision_entries):
+            order = _entry_dict_to_order(entry)
+            coid = make_client_order_id(
+                strategy_id=entry["strategy_id"],
+                session_date=session_date,
+                intent_seq=intent_seq,
+                role=OrderRole.ENTRY,
+            )
+            try:
+                managed = await router.place_combo(
+                    order=order, snapshot=snapshot, client_order_id=coid,
+                )
+                _persist_entry(
+                    position_id=coid,
+                    strategy_id=entry["strategy_id"],
+                    order=order, snapshot=snapshot, cost=cost,
+                    broker_order_id=managed.broker_order_id,
+                )
+                entry_results.append(RouteResult(
+                    strategy_id=entry["strategy_id"],
+                    client_order_id=coid,
+                    accepted=True,
+                    broker_order_id=managed.broker_order_id,
+                ))
+            except Exception as exc:  # noqa: BLE001
+                _log.exception("place_combo failed for %s", entry["strategy_id"])
+                entry_results.append(RouteResult(
+                    strategy_id=entry["strategy_id"],
+                    client_order_id=coid,
+                    accepted=False,
+                    error=f"{type(exc).__name__}: {exc}",
+                ))
+
+        return {
+            "reconciliation": reconciliation,
+            "close_results": close_results,
+            "entry_results": entry_results,
+        }
+    finally:
+        await conn.disconnect()
+
+
+def run_full_session(
+    *,
+    decision_entries: list[dict[str, Any]],
+    snapshot: ChainSnapshot,
+    paper_account: str,
+    session_date: datetime,
+    rules: Any,
+    underlying: str,
+) -> dict[str, Any]:
+    """Sync wrapper for the CLI surface."""
+    return asyncio.run(_run_full_session_async(
+        decision_entries=decision_entries,
+        snapshot=snapshot,
+        paper_account=paper_account,
+        session_date=session_date,
+        rules=rules,
+        underlying=underlying,
     ))

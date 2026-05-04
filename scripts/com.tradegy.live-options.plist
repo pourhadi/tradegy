@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd plist for the daily live-options paper-trade orchestrator.
+
+  Schedules `scripts/live_options_daily.sh` to run weekdays at
+  17:30 ET (= 21:30 UTC during ET-DST, 22:30 UTC during ET-Standard).
+  The schedule is in LOCAL TIME — launchd respects the system tz —
+  so we set 17:30 directly. ORATS SPY EOD chains are typically
+  published within 1-2 hours of the 16:00 ET close; 17:30 gives a
+  comfortable margin.
+
+  Weekday filter: launchd's `Weekday` key is 0=Sunday … 6=Saturday;
+  we register entries for 1..5 (Mon..Fri).
+
+  Install:
+    cp scripts/com.tradegy.live-options.plist \
+       ~/Library/LaunchAgents/com.tradegy.live-options.plist
+    launchctl load ~/Library/LaunchAgents/com.tradegy.live-options.plist
+
+  Verify:
+    launchctl list | grep tradegy
+    tail -f data/live_options/cron_logs/$(date +%Y-%m-%d).log
+
+  Disable:
+    launchctl unload ~/Library/LaunchAgents/com.tradegy.live-options.plist
+
+  Required env (read from your interactive shell — the wrapper
+  sources ~/.zprofile so these MUST be exported there):
+    ORATS_API_KEY
+    IBKR_PAPER_ACCOUNT
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tradegy.live-options</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/dan/code/tradegy/scripts/live_options_daily.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Weekday</key>
+            <integer>1</integer>
+            <key>Hour</key>
+            <integer>17</integer>
+            <key>Minute</key>
+            <integer>30</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key>
+            <integer>2</integer>
+            <key>Hour</key>
+            <integer>17</integer>
+            <key>Minute</key>
+            <integer>30</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key>
+            <integer>3</integer>
+            <key>Hour</key>
+            <integer>17</integer>
+            <key>Minute</key>
+            <integer>30</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key>
+            <integer>4</integer>
+            <key>Hour</key>
+            <integer>17</integer>
+            <key>Minute</key>
+            <integer>30</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key>
+            <integer>5</integer>
+            <key>Hour</key>
+            <integer>17</integer>
+            <key>Minute</key>
+            <integer>30</integer>
+        </dict>
+    </array>
+
+    <!-- launchd captures stdout/stderr to these files; the
+         wrapper script also tees to a per-day log under
+         data/live_options/cron_logs/. -->
+    <key>StandardOutPath</key>
+    <string>/Users/dan/code/tradegy/data/live_options/cron_logs/launchd.out</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/dan/code/tradegy/data/live_options/cron_logs/launchd.err</string>
+
+    <!-- Don't relaunch if the wrapper exits non-zero — we want the
+         operator to investigate, not have launchd retry through a
+         broken state. -->
+    <key>KeepAlive</key>
+    <false/>
+
+    <!-- Don't run during boot or when the user logs in — we want
+         only the calendar-scheduled invocations. -->
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
