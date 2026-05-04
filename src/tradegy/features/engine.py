@@ -93,6 +93,9 @@ def _resolve_inputs(
         "session_vwap": ["bars"],
         "opening_range_levels": ["bars"],
         "prior_session_close": ["bars"],
+        "column_select": ["frame"],
+        "rolling_percentile_rank": ["series"],
+        "rolling_change": ["series"],
     }
     transform_id = feature.computation.transform_id
     if transform_id not in slot_name_for_transform:

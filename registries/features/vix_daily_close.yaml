@@ -1,0 +1,38 @@
+# Daily close of cash VIX as a (ts_utc, value) series.
+#
+# Phase 1 of the regime-gated range-scalp plan. This is the foundation
+# feature for all VIX-derived regime signals — percentile rank, change
+# velocity, regime-classifier inputs all chain off this.
+#
+# Source: vix_daily (CBOE public CSV, 1990-2026, no auth, free).
+# Schema: ts_utc at the 16:00 ET close, value = closing VIX level.
+#
+# The cross_asset_close_aligned transform (TBD) will broadcast this
+# daily series forward to the strategy's intraday bar timestamps; in
+# the meantime, downstream daily-cadence features (pctile_252,
+# 5d_change) consume this directly.
+
+id: vix_daily_close
+version: v1
+description: >
+  Cash-VIX closing value as a daily (ts_utc, value) series. Sourced
+  from the vix_daily registered source; output is the `close` column
+  projected via the column_select transform. Daily cadence; ts_utc is
+  the 16:00 ET close (DST-aware).
+type: derived
+inputs:
+  - source_id: vix_daily
+computation:
+  type: registered_transform
+  transform_id: column_select
+  parameters:
+    column: close
+cadence: 1d
+availability_latency_seconds: 0
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 200.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development
