@@ -193,10 +193,32 @@ def run_multi_dte_walk_forward(
 
 
 def main() -> None:
-    # Multi-DTE: 30+45 DTE variants of PCS+IC+JL on SPY+IWM+QQQ
-    # at $5K shared. Tests whether faster cycling improves frequency
-    # without breaking the gate.
-    run_multi_dte_walk_forward(underlyings=["SPY", "IWM", "QQQ"])
+    # 7-underlying multi-source experiment with sector/asset ETFs
+    # added (GLD, TLT, XLE, EEM) for IV-regime diversification.
+    # Run in-sample combos first to find the best mix, then walk-
+    # forward the most promising.
+
+    # Each new ETF solo @ $5K to baseline.
+    for u in ["GLD", "TLT", "XLE", "EEM"]:
+        run_combo(underlyings=[u])
+
+    # Equity-only baseline for comparison (already known to pass).
+    run_combo(underlyings=["SPY", "IWM", "QQQ"])
+
+    # Add each diversifier one at a time to SPY+IWM+QQQ.
+    run_combo(underlyings=["SPY", "IWM", "QQQ", "GLD"])
+    run_combo(underlyings=["SPY", "IWM", "QQQ", "TLT"])
+    run_combo(underlyings=["SPY", "IWM", "QQQ", "XLE"])
+    run_combo(underlyings=["SPY", "IWM", "QQQ", "EEM"])
+
+    # All 7 — maximum diversification.
+    run_combo(underlyings=["SPY", "IWM", "QQQ", "GLD", "TLT", "XLE", "EEM"])
+
+    # Walk-forward the most promising combos found in the
+    # in-sample sweep: EEM solo (best single), and SPY+IWM+QQQ+EEM
+    # (best multi).
+    run_walk_forward(underlyings=["EEM"])
+    run_walk_forward(underlyings=["SPY", "IWM", "QQQ", "EEM"])
 
 
 if __name__ == "__main__":
