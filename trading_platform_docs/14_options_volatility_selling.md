@@ -281,6 +281,68 @@ kickoff because the worst-window cushion (+0.135 vs +0.157
 for IV<0.20+PCS+IC, but with a lower-floor downside year)
 matters more in practice than the absolute Sharpe maximum.
 
+### CRITICAL CORRECTION — $25K capital reality (Phase D-8 follow-up #5)
+
+**ALL preceding Phase D-8 results assumed $250K capital.** The
+operator's actual deployment capital is **$25K**. The validated
+SPX config is therefore NOT directly deployable. Re-running the
+recommended config at $25K reveals the harsh truth:
+
+| Underlying | Capital | Strategy | Avg IS Sharpe | Avg OOS Sharpe | Worst OOS | Sum OOS PnL (3y) | AnnRoC (OOS) | Reality |
+|---|---|---|---|---|---|---|---|---|
+| SPX | $250K | PCS+IC+JL+IV<0.25 | +0.192 | +0.275 | +0.135 | +$130K | ~17.3% | reference (NOT deployable) |
+| **SPX** | **$25K** | PCS+IC+JL+IV<0.25 | +0.597 | +1.334 | **+0.000** | +$8.3K | (artifact — see below) | **untradeable** — RiskManager position-cap rejects most entries; window 2 OOS = **0 trades** |
+| **XSP** | **$25K** | PCS+IC+JL+IV<0.25 | +0.051 | +0.075 | -0.086 | +$3.3K | ~4.5% | walk-forward survivor; one negative OOS window; **only $25K-deployable config tested** |
+| XSP | $25K | PCS+IC+JL+IV<0.20 | +0.049 | +0.038 | -0.123 | +$1.8K | ~2.5% | weaker than 0.25 |
+| XSP | $25K | PCS+IC+IV<0.20 | +0.028 | +0.052 | -0.129 | +$2.0K | ~2.7% | weaker still |
+
+**SPX at $25K is untradeable.** A 1-contract SPX iron condor with
+$50 wings has $5,000 max loss (20% of $25K). The RiskManager's
+per-position concentration cap (default 25%) admits 1 position
+maximum. Window 2 OOS produced ZERO trades because every candidate
+order was rejected. The headline "+1.334 OOS Sharpe" is the
+sample mean of 7 OOS trades across windows 0+1, with window 2
+contributing nothing — a noise artifact, not an edge.
+
+**XSP+IV<0.25 portfolio is the ONLY $25K-deployable
+walk-forward survivor.** ~4.5% AnnRoC, ~$1,100/year on $25K,
+window 1 OOS negative ($-1,059). Real but modest.
+
+The ~12pp gap between SPX@$250K (17%) and XSP@$25K (4.5%) is
+explained by the cost-economics differential measured in the
+prior XSP investigation (commit ee62b3b):
+
+| Metric | SPX | XSP |
+|---|---|---|
+| Bid-ask spread on liquid strikes | 1-3% | 29% |
+| Commission per leg | $0.65 | $0.65 |
+| Typical credit per leg | $50-500 | $5 |
+| Commission as % of credit | 0.13-1.3% | 13% |
+| Spread offset drag at 20% offset | minimal | meaningful |
+
+XSP economics eat ~12pp of the SPX-validated edge. Closing
+that gap requires a different underlying with SPX-like
+liquidity AND retail-sized notional.
+
+**Open paths for the operator**:
+
+1. **Deploy XSP+IV<0.25 portfolio on $25K paper** — accept
+   the ~4.5% AnnRoC, document the worst-window risk, plan to
+   scale up when capital permits.
+2. **Investigate SPY ETF options** — $100 multiplier, strikes
+   ~1/10 of SPX dollars, penny-wide bid-ask spreads on the
+   weeklies. Could potentially split the cost-economics
+   difference between SPX and XSP. Different vendor needed
+   (ORATS Pro covers SPY).
+3. **Accumulate to $250K then deploy SPX** — the validated
+   config is real at $250K. Wait until capital allows.
+4. **Stand down on options** — the $25K reality may not
+   support the validated edge.
+
+The next investigation step (pending operator direction) is
+likely #2 — SPY ETF options data acquisition + a fresh
+walk-forward sweep on SPY+IV<X.
+
 ### Management-rule check on the validated config (Phase D-8 follow-up #4)
 
 Re-ran PCS+IC+JL+IV<0.25 with two management profiles to test
