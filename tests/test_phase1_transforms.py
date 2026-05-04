@@ -176,3 +176,116 @@ def test_rolling_change_lag_zero_raises():
     src = _series([1.0, 2.0])
     with pytest.raises(ValueError, match=">= 1"):
         fn({"series": src}, {"lag_bars": 0})
+
+
+# ── event_window_flag ────────────────────────────────────────────────
+
+
+def _events(times: list[datetime], importance: list[str]) -> pl.DataFrame:
+    if not times:
+        return pl.DataFrame(
+            schema={
+                "ts_utc": pl.Datetime("ns", "UTC"),
+                "importance": pl.String,
+            }
+        )
+    return pl.DataFrame(
+        {"ts_utc": times, "importance": importance}
+    ).with_columns(pl.col("ts_utc").dt.cast_time_unit("ns").dt.replace_time_zone("UTC"))
+
+
+def _timeline(times: list[datetime]) -> pl.DataFrame:
+    if not times:
+        return pl.DataFrame(schema={"ts_utc": pl.Datetime("ns", "UTC")})
+    return pl.DataFrame(
+        {"ts_utc": times}
+    ).with_columns(pl.col("ts_utc").dt.cast_time_unit("ns").dt.replace_time_zone("UTC"))
+
+
+def test_event_window_flag_post_event_active():
+    fn = get_transform("event_window_flag")
+    events = _events(
+        [datetime(2024, 1, 5, 13, 30, tzinfo=timezone.utc)],
+        ["high"],
+    )
+    timeline = _timeline([
+        datetime(2024, 1, 5, 13, 0, tzinfo=timezone.utc),   # 30m before — pre window
+        datetime(2024, 1, 5, 13, 30, tzinfo=timezone.utc),  # at event — both
+        datetime(2024, 1, 5, 14, 0, tzinfo=timezone.utc),   # 30m after — post window
+        datetime(2024, 1, 5, 18, 0, tzinfo=timezone.utc),   # 4.5h after — outside
+    ])
+    out = fn(
+        {"events": events, "timeline": timeline},
+        {"pre_event_minutes": 60, "post_event_minutes": 60},
+    )
+    assert out["value"].to_list() == [1.0, 1.0, 1.0, 0.0]
+
+
+def test_event_window_flag_post_window_only():
+    """ts before pre window → 0; ts inside post window → 1."""
+    fn = get_transform("event_window_flag")
+    events = _events(
+        [datetime(2024, 1, 5, 12, 0, tzinfo=timezone.utc)],
+        ["high"],
+    )
+    timeline = _timeline([
+        datetime(2024, 1, 5, 9, 0, tzinfo=timezone.utc),    # 3h before, outside 1h pre
+        datetime(2024, 1, 5, 11, 30, tzinfo=timezone.utc),  # 30m before, inside 1h pre
+        datetime(2024, 1, 5, 13, 0, tzinfo=timezone.utc),   # 1h after, edge of 2h post
+        datetime(2024, 1, 5, 15, 0, tzinfo=timezone.utc),   # 3h after, outside
+    ])
+    out = fn(
+        {"events": events, "timeline": timeline},
+        {"pre_event_minutes": 60, "post_event_minutes": 120},
+    )
+    assert out["value"].to_list() == [0.0, 1.0, 1.0, 0.0]
+
+
+def test_event_window_flag_importance_filter_excludes_low():
+    """Only `high` importance should trigger when filter=['high']."""
+    fn = get_transform("event_window_flag")
+    events = _events(
+        [
+            datetime(2024, 1, 5, 12, 0, tzinfo=timezone.utc),
+            datetime(2024, 1, 5, 14, 0, tzinfo=timezone.utc),
+        ],
+        ["low", "high"],
+    )
+    timeline = _timeline([
+        datetime(2024, 1, 5, 12, 30, tzinfo=timezone.utc),  # 30m after low event — not active
+        datetime(2024, 1, 5, 14, 30, tzinfo=timezone.utc),  # 30m after high event — active
+    ])
+    out = fn(
+        {"events": events, "timeline": timeline},
+        {
+            "pre_event_minutes": 60,
+            "post_event_minutes": 120,
+            "importance_filter": ["high"],
+        },
+    )
+    assert out["value"].to_list() == [0.0, 1.0]
+
+
+def test_event_window_flag_empty_events_all_zero():
+    fn = get_transform("event_window_flag")
+    events = _events([], [])
+    timeline = _timeline([
+        datetime(2024, 1, 5, 12, 0, tzinfo=timezone.utc),
+        datetime(2024, 1, 5, 13, 0, tzinfo=timezone.utc),
+    ])
+    out = fn(
+        {"events": events, "timeline": timeline},
+        {"pre_event_minutes": 60, "post_event_minutes": 60},
+    )
+    assert out["value"].to_list() == [0.0, 0.0]
+
+
+def test_event_window_flag_negative_window_raises():
+    fn = get_transform("event_window_flag")
+    events = _events([datetime(2024, 1, 5, tzinfo=timezone.utc)], ["high"])
+    timeline = _timeline([datetime(2024, 1, 5, tzinfo=timezone.utc)])
+    with pytest.raises(ValueError, match=">= 0"):
+        fn(
+            {"events": events, "timeline": timeline},
+            {"pre_event_minutes": -1, "post_event_minutes": 60},
+        )
