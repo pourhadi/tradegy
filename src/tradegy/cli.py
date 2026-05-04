@@ -1506,6 +1506,71 @@ def options_cpcv_cmd(
         raise typer.Exit(code=4)
 
 
+@app.command("live-options-backfill")
+def live_options_backfill_cmd(
+    json_path: Annotated[Path, typer.Argument(
+        help="path to operator-supplied JSON descriptor of pre-existing "
+        "positions. See live/options_backfill.py docstring for schema.",
+    )],
+) -> None:
+    """Backfill the registry from operator-supplied position descriptors.
+
+    Use case: V2 reconciliation flagged `broker_only` divergence
+    because you opened positions via TWS (or held them before
+    installing this system). The close loop can't manage them
+    until they're in the registry. Run this to register them, then
+    the next live-options session's reconciliation will match them
+    cleanly and the close loop takes over.
+
+    JSON file is a list of position descriptors. See
+    src/tradegy/live/options_backfill.py docstring for schema.
+    Already-registered position_ids are skipped (idempotent).
+    Validation failures are reported per-position; the command
+    does not abort on first failure.
+    """
+    from tradegy.live.options_backfill import backfill_from_file
+
+    if not json_path.exists():
+        console.print(f"[red]ERROR[/]: {json_path} not found")
+        raise typer.Exit(code=1)
+
+    results = backfill_from_file(json_path=json_path)
+
+    table = Table(title=f"backfill results ({len(results)})")
+    table.add_column("position_id")
+    table.add_column("appended")
+    table.add_column("entry_credit/share", justify="right")
+    table.add_column("max_loss/contract", justify="right")
+    table.add_column("note")
+    n_appended = 0
+    n_skipped = 0
+    n_failed = 0
+    for r in results:
+        if r.appended:
+            note = "[green]ok[/]"
+            n_appended += 1
+        elif r.skipped_reason == "already_in_registry":
+            note = f"[yellow]skipped: {r.skipped_reason}[/]"
+            n_skipped += 1
+        else:
+            note = f"[red]failed: {r.skipped_reason}[/]"
+            n_failed += 1
+        table.add_row(
+            r.position_id,
+            "yes" if r.appended else "no",
+            f"{r.computed_entry_credit_per_share:+.4f}" if r.appended else "—",
+            f"${r.computed_max_loss_per_contract:.2f}" if r.appended else "—",
+            note,
+        )
+    console.print(table)
+    console.print(
+        f"\n[bold]summary[/]: appended={n_appended}  "
+        f"already_present={n_skipped}  failed={n_failed}"
+    )
+    if n_failed > 0:
+        raise typer.Exit(code=1)
+
+
 @app.command("live-options-health")
 def live_options_health_cmd(
     paper_account: Annotated[str, typer.Option(
