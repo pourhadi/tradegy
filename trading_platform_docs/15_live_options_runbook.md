@@ -1,9 +1,20 @@
 # Operator runbook — live options paper-trading
 
 This is the consolidated runbook for deploying the validated
-options vol-selling config (`SPY + PCS+IC+JL + IV<0.25` per
-[doc 14](14_options_volatility_selling.md) Phase D-8 follow-up
-#6) to IBKR paper account on $25K capital.
+options vol-selling configs to an IBKR paper account.
+
+**Two validated configs — pick the one matching your capital:**
+
+| Capital | Config | Source | OOS AnnRoC | Trade freq |
+|---|---|---|---|---|
+| **$25K** | SPY + PCS+IC+JL + IV<0.25 | `spy_options_chain` SPY | ~28% | ~68/yr |
+| **$5K** ⭐ | EEM + PCS+IC+JL + IV<0.25 | `eem_options_chain` EEM | ~45% | ~160/yr |
+
+The $5K EEM config (added 2026-05-04) is the discipline-validated
+winner for retail capital. EEM's low share price ($60-90) lets
+multiple positions fit in the $5K cap; structurally higher EM
+vol gives richer credit per trade. Walk-forward: avg IS +0.193 /
+OOS +0.250, all 3 OOS windows positive.
 
 **Start here every time you sit down with this system.** Then
 follow the section that matches what you need to do.
@@ -247,10 +258,15 @@ IB Gateway (lighter-weight) which has the same setting.
 
 ## Modifying the deployed config
 
-The CLI defaults match the validated config. To change anything,
-override on the command line:
+The CLI defaults match the SPY+$25K validated config. To deploy
+the $5K EEM config or any other override:
 
 ```bash
+# $5K EEM config (the validated retail-capital winner)
+uv run tradegy live-options --route --paper-account DU7535411 \
+    --source-id eem_options_chain --ticker EEM --capital 5000 \
+    --iv-gate-max 0.25
+
 # tighter IV gate — IV<0.20 has higher Sharpe, fewer trades
 uv run tradegy live-options --route --paper-account DU7535411 \
     --iv-gate-max 0.20
@@ -263,7 +279,7 @@ uv run tradegy live-options --route --paper-account DU7535411 \
 uv run tradegy live-options --route --paper-account DU7535411 \
     --strategy-ids put_credit_spread_45dte_d30,iron_condor_45dte_d16
 
-# scale capital
+# scale capital up
 uv run tradegy live-options --route --paper-account DU7535411 \
     --capital 50000
 ```

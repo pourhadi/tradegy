@@ -92,8 +92,10 @@ def _setup_page() -> None:
     )
     st.title("📈 tradegy — live-options")
     st.caption(
-        "monitoring + control for the validated SPY+PCS+IC+JL+IV<0.25 "
-        "portfolio at $25K (see doc 14 + runbook)."
+        "monitoring + control for live options vol-selling. "
+        "**$25K config**: SPY+PCS+IC+JL+IV<0.25 (~28% AnnRoC OOS). "
+        "**$5K config**: EEM+PCS+IC+JL+IV<0.25 (~45% AnnRoC OOS, "
+        "the validated retail-capital winner). See doc 14 + runbook."
     )
 
 
