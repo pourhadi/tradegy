@@ -153,6 +153,72 @@ def test_generate_live_decision_entries_have_well_formed_legs(
 # ── write_decision: persistence ────────────────────────────────────
 
 
+def test_compute_position_statuses_empty_registry(tmp_path, spy_chain_present):
+    """Empty registry → empty statuses list. No error."""
+    from tradegy.live.options_orchestrator import compute_position_statuses
+    from tradegy.options.chain_io import iter_chain_snapshots
+    from tradegy.options.strategy import ManagementRules
+
+    raw_root = config.repo_root() / "data" / "raw"
+    snap = list(iter_chain_snapshots(
+        "spy_options_chain", ticker="SPY", root=raw_root,
+    ))[-1]
+    rules = ManagementRules()
+    out = compute_position_statuses(
+        snapshot=snap, rules=rules, registry_root=tmp_path,
+    )
+    assert out == []
+
+
+def test_compute_position_statuses_dte_trigger(tmp_path, spy_chain_present):
+    """A backfilled position with a long-past expiry triggers DTE
+    close → PositionStatus.triggered_close_reason mentions dte_close.
+    """
+    import json
+    from tradegy.live.options_backfill import backfill_from_file
+    from tradegy.live.options_orchestrator import compute_position_statuses
+    from tradegy.options.chain_io import iter_chain_snapshots
+    from tradegy.options.strategy import ManagementRules
+
+    raw_root = config.repo_root() / "data" / "raw"
+    snap = list(iter_chain_snapshots(
+        "spy_options_chain", ticker="SPY", root=raw_root,
+    ))[-1]
+
+    # Backfill a position with expiry well in the past — DTE < 0.
+    backfill_data = [{
+        "position_id": "status_dte_test",
+        "underlying": "SPY",
+        "strategy_class": "x",
+        "contracts": 1,
+        "entry_ts": "2020-01-15T20:46:00+00:00",
+        "broker_order_id": "x",
+        "legs": [
+            {"expiry": "2020-04-17", "strike": 300.0, "side": "put",
+             "quantity": -1, "entry_price": 2.50, "multiplier": 100},
+            {"expiry": "2020-04-17", "strike": 295.0, "side": "put",
+             "quantity": +1, "entry_price": 1.20, "multiplier": 100},
+        ],
+    }]
+    json_path = tmp_path / "bf.json"
+    json_path.write_text(json.dumps(backfill_data))
+    backfill_from_file(json_path=json_path, registry_root=tmp_path)
+
+    rules = ManagementRules(profit_take_pct=0.50, loss_stop_pct=2.0, dte_close=21)
+    out = compute_position_statuses(
+        snapshot=snap, rules=rules, registry_root=tmp_path,
+    )
+    assert len(out) == 1
+    st = out[0]
+    assert st.position_id == "status_dte_test"
+    assert st.days_to_expiry < 0  # well in the past
+    assert st.triggered_close_reason is not None
+    assert "dte_close" in st.triggered_close_reason
+    # Leg summary renders both legs.
+    assert "P-1@K300" in st.leg_summary
+    assert "P+1@K295" in st.leg_summary
+
+
 def test_write_decision_round_trips_json(tmp_path, spy_chain_present):
     """Decision is written under <root>/<snap_date>_<wallclock>.json
     and the JSON parses back to dict-shaped data.

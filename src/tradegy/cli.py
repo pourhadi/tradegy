@@ -1571,6 +1571,85 @@ def live_options_backfill_cmd(
         raise typer.Exit(code=1)
 
 
+@app.command("live-options-status")
+def live_options_status_cmd(
+    source_id: Annotated[str, typer.Option("--source-id")] = "spy_options_chain",
+    ticker: Annotated[str, typer.Option("--ticker")] = "SPY",
+    profit_take_pct: Annotated[float, typer.Option("--profit-take")] = 0.50,
+    loss_stop_pct: Annotated[float, typer.Option("--loss-stop")] = 2.0,
+    dte_close: Annotated[int, typer.Option("--dte-close")] = 21,
+) -> None:
+    """Print current registry state — open positions + P&L marked
+    against the latest ingested chain snapshot.
+
+    For each open position: show legs, days-to-nearest-expiry,
+    entry credit, current mark, P&L as % of max credit (for
+    credit positions) or as % of debit (for debit positions),
+    and which `should_close` trigger (if any) is closest to firing.
+
+    Use this to sanity-check before letting the cron run, or to
+    audit "what does the system think it holds vs what's at the
+    broker" without spinning up an IBKR connection.
+    """
+    from tradegy.live.options_orchestrator import compute_position_statuses
+    from tradegy.options.chain_io import iter_chain_snapshots
+    from tradegy.options.strategy import ManagementRules
+
+    snaps = list(iter_chain_snapshots(source_id, ticker=ticker))
+    if not snaps:
+        console.print(
+            f"[red]ERROR[/]: no snapshots ingested for "
+            f"source_id={source_id!r} ticker={ticker!r}"
+        )
+        raise typer.Exit(code=1)
+    snap = snaps[-1]
+    rules = ManagementRules(
+        profit_take_pct=profit_take_pct,
+        loss_stop_pct=loss_stop_pct,
+        dte_close=dte_close,
+    )
+    statuses = compute_position_statuses(snapshot=snap, rules=rules)
+    if not statuses:
+        console.print("[dim]registry: no open positions[/]")
+        return
+
+    table = Table(title=f"open positions @ {snap.ts_utc.date()} {ticker}=${snap.underlying_price:.2f}")
+    table.add_column("position_id")
+    table.add_column("strategy")
+    table.add_column("legs")
+    table.add_column("DTE", justify="right")
+    table.add_column("entry $", justify="right")
+    table.add_column("mark $", justify="right")
+    table.add_column("pnl % credit", justify="right")
+    table.add_column("trigger?")
+    for st in statuses:
+        pnl_pct_str = (
+            f"{st.pnl_pct_of_max_credit * 100:+.1f}%"
+            if st.pnl_pct_of_max_credit == st.pnl_pct_of_max_credit
+            else "n/a"
+        )
+        trigger_str = (
+            f"[red]FIRED[/]: {st.triggered_close_reason}"
+            if st.triggered_close_reason else "[green]none[/]"
+        )
+        table.add_row(
+            st.position_id, st.strategy_class, st.leg_summary,
+            str(st.days_to_expiry),
+            f"{st.entry_credit_dollars:+.0f}",
+            f"{st.mark_dollars:+.0f}",
+            pnl_pct_str, trigger_str,
+        )
+    console.print(table)
+    n_triggered = sum(
+        1 for st in statuses if st.triggered_close_reason is not None
+    )
+    if n_triggered > 0:
+        console.print(
+            f"\n[yellow]{n_triggered} of {len(statuses)} positions "
+            "will close on the next live-options --route session[/]"
+        )
+
+
 @app.command("live-options-health")
 def live_options_health_cmd(
     paper_account: Annotated[str, typer.Option(

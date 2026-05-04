@@ -216,6 +216,59 @@ def generate_live_decision(
     )
 
 
+@dataclass
+class PositionStatus:
+    """One-row snapshot of a registered open position marked
+    against a chain snapshot. Used by the status CLI / report
+    surfaces.
+    """
+
+    position_id: str
+    strategy_class: str
+    contracts: int
+    leg_summary: str
+    days_to_expiry: int
+    entry_credit_dollars: float
+    mark_dollars: float
+    pnl_pct_of_max_credit: float
+    triggered_close_reason: str | None = None
+
+
+def compute_position_statuses(
+    *, snapshot: "ChainSnapshot", rules: "ManagementRules",
+    registry_root: Path | None = None,
+) -> list[PositionStatus]:
+    """Load open positions from the registry, mark each against
+    `snapshot`, evaluate `should_close` triggers, return PositionStatus
+    rows.
+
+    Pure read — no broker calls, no registry mutations. Useful for
+    pre-cron sanity checks and for ad-hoc audit.
+    """
+    from tradegy.live.options_position_registry import load_open_positions
+    from tradegy.options.strategy import should_close
+
+    positions = load_open_positions(root=registry_root)
+    out: list[PositionStatus] = []
+    for pos in positions:
+        leg_summary = " ".join(
+            f"{leg.side.value[0].upper()}{leg.quantity:+d}@K{leg.strike:.0f}"
+            for leg in pos.legs
+        )
+        out.append(PositionStatus(
+            position_id=pos.position_id,
+            strategy_class=pos.strategy_class,
+            contracts=pos.contracts,
+            leg_summary=leg_summary,
+            days_to_expiry=pos.days_to_expiry(snapshot.ts_utc),
+            entry_credit_dollars=pos.entry_credit_dollars,
+            mark_dollars=pos.mark_dollars(snapshot),
+            pnl_pct_of_max_credit=pos.pnl_pct_of_max_credit(snapshot),
+            triggered_close_reason=should_close(pos, snapshot, rules),
+        ))
+    return out
+
+
 def write_decision(
     decision: LiveDecision, *, root: Path | None = None,
 ) -> Path:
