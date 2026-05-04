@@ -289,13 +289,24 @@ async def route_close_decisions(
     session_date: datetime,
     registry_root: Any = None,
 ) -> list[CloseRouteResult]:
-    """Place each close as a multi-leg combo via the router; record
-    the outcome in the registry on success.
+    """Place each close as a multi-leg combo via the router; await
+    fill confirmation; record `close` in registry only on FILLED.
 
     Caller owns the IB connection — this function expects an
     already-connected `IbkrOptionsRouter` so the same connection
     can be reused for the entry routing in the same session.
+
+    Fill semantics (mirrors entry routing per V3a):
+      FILLED → registry close written, accepted=True.
+      REJECTED/CANCELLED/EXPIRED → not accepted, no registry side
+        effect; position remains "open" in registry. Next session
+        will re-attempt the close.
+      WORKING after timeout → cancel + record as not accepted; same
+        re-attempt-next-session semantics.
     """
+    from tradegy.execution.lifecycle import OrderState, TERMINAL_STATES
+    from tradegy.live.options_routing import await_terminal_state
+
     results: list[CloseRouteResult] = []
     for intent_seq, dec in enumerate(closes):
         order = dec.to_close_order()
@@ -309,20 +320,53 @@ async def route_close_decisions(
             managed = await router.place_combo(
                 order=order, snapshot=snapshot, client_order_id=coid,
             )
-            append_close(
-                position_id=dec.position.position_id,
-                closed_ts=datetime.now(tz=timezone.utc),
-                closed_reason=dec.close_reason,
-                broker_close_order_id=managed.broker_order_id,
-                root=registry_root,
+            final_state = await await_terminal_state(
+                router=router, client_order_id=coid,
             )
-            results.append(CloseRouteResult(
-                position_id=dec.position.position_id,
-                client_order_id=coid,
-                close_reason=dec.close_reason,
-                accepted=True,
-                broker_order_id=managed.broker_order_id,
-            ))
+            if final_state == OrderState.FILLED:
+                append_close(
+                    position_id=dec.position.position_id,
+                    closed_ts=datetime.now(tz=timezone.utc),
+                    closed_reason=dec.close_reason,
+                    broker_close_order_id=managed.broker_order_id,
+                    root=registry_root,
+                )
+                results.append(CloseRouteResult(
+                    position_id=dec.position.position_id,
+                    client_order_id=coid,
+                    close_reason=dec.close_reason,
+                    accepted=True,
+                    broker_order_id=managed.broker_order_id,
+                ))
+            elif final_state in TERMINAL_STATES:
+                results.append(CloseRouteResult(
+                    position_id=dec.position.position_id,
+                    client_order_id=coid,
+                    close_reason=dec.close_reason,
+                    accepted=False,
+                    broker_order_id=managed.broker_order_id,
+                    error=f"close ended in {final_state.value} not FILLED",
+                ))
+            else:
+                # Cancel non-terminal-after-timeout — don't leave a
+                # close limit hanging.
+                try:
+                    await router.cancel_combo(coid)
+                except Exception:  # noqa: BLE001
+                    _log.exception(
+                        "cancel after close-fill timeout failed for %s", coid,
+                    )
+                results.append(CloseRouteResult(
+                    position_id=dec.position.position_id,
+                    client_order_id=coid,
+                    close_reason=dec.close_reason,
+                    accepted=False,
+                    broker_order_id=managed.broker_order_id,
+                    error=(
+                        f"close in {final_state.value} after fill-wait "
+                        "timeout — cancelled; will retry next session"
+                    ),
+                ))
         except Exception as exc:  # noqa: BLE001
             _log.exception(
                 "close routing failed for position %s",

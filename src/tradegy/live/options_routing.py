@@ -22,6 +22,7 @@ from typing import Any
 
 from tradegy.execution.ibkr_options_router import IbkrOptionsRouter
 from tradegy.execution.idempotency import OrderRole, make_client_order_id
+from tradegy.execution.lifecycle import OrderState, TERMINAL_STATES
 from tradegy.live.ibkr import IBKRConnection
 from tradegy.live.options_position_registry import (
     PersistedLeg,
@@ -43,13 +44,27 @@ _log = logging.getLogger(__name__)
 
 @dataclass
 class RouteResult:
-    """Outcome of routing one entry candidate to IBKR."""
+    """Outcome of routing one entry candidate to IBKR.
+
+    `accepted` is True when the order PLACEMENT succeeded (IBKR
+    acknowledged). `final_state` reflects the FSM state at the
+    end of the fill-confirmation poll: FILLED is the only state
+    that counts as "actually traded"; WORKING after timeout means
+    the limit didn't fill and the order was cancelled; REJECTED
+    means the broker refused.
+
+    A registry-write happens ONLY on FILLED. WORKING-then-cancelled
+    and REJECTED produce a RouteResult with `final_state` set but
+    no registry side effect — re-running the next session can
+    re-attempt with a fresh strategy decision.
+    """
 
     strategy_id: str
     client_order_id: str
     accepted: bool
     broker_order_id: str | None = None
     error: str | None = None
+    final_state: str | None = None
     submitted_ts: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
 
@@ -188,6 +203,38 @@ async def route_decision(
         return results
     finally:
         await conn.disconnect()
+
+
+async def await_terminal_state(
+    *,
+    router: IbkrOptionsRouter,
+    client_order_id: str,
+    timeout_seconds: float = 30.0,
+    poll_interval_seconds: float = 0.5,
+) -> OrderState:
+    """Poll the router's tracked ManagedOrder until terminal or
+    timeout. Returns the final OrderState.
+
+    Why polling not events: the router already wires Trade events
+    to the FSM via _wire_trade_events; the side-effect of those
+    events is the ManagedOrder.state field updating. Polling that
+    field is simpler than another event-subscription layer and
+    sufficient for a once-a-day cron cadence.
+
+    Timeout behavior: returns the current (non-terminal) state
+    after timeout — caller decides whether to cancel. The router
+    itself does NOT auto-cancel on timeout (the order stays open
+    at the broker's working queue).
+    """
+    elapsed = 0.0
+    while elapsed < timeout_seconds:
+        managed = router.get_combo(client_order_id)
+        if managed is not None and managed.state in TERMINAL_STATES:
+            return managed.state
+        await asyncio.sleep(poll_interval_seconds)
+        elapsed += poll_interval_seconds
+    final = router.get_combo(client_order_id)
+    return final.state if final else OrderState.UNKNOWN
 
 
 def _persist_entry(
@@ -381,7 +428,7 @@ async def _run_full_session_async(
                 session_date=session_date,
             )
 
-        # 5: entries.
+        # 5: entries — place + await fill confirmation.
         cost = OptionCostModel()
         entry_results: list[RouteResult] = []
         for intent_seq, entry in enumerate(decision_entries):
@@ -396,18 +443,59 @@ async def _run_full_session_async(
                 managed = await router.place_combo(
                     order=order, snapshot=snapshot, client_order_id=coid,
                 )
-                _persist_entry(
-                    position_id=coid,
-                    strategy_id=entry["strategy_id"],
-                    order=order, snapshot=snapshot, cost=cost,
-                    broker_order_id=managed.broker_order_id,
+                # Wait for terminal state. If FILLED → write
+                # registry. If WORKING after timeout → cancel +
+                # warn (no registry side effect, next session
+                # will re-attempt). If REJECTED → record error.
+                final_state = await await_terminal_state(
+                    router=router, client_order_id=coid,
                 )
-                entry_results.append(RouteResult(
-                    strategy_id=entry["strategy_id"],
-                    client_order_id=coid,
-                    accepted=True,
-                    broker_order_id=managed.broker_order_id,
-                ))
+                if final_state == OrderState.FILLED:
+                    _persist_entry(
+                        position_id=coid,
+                        strategy_id=entry["strategy_id"],
+                        order=order, snapshot=snapshot, cost=cost,
+                        broker_order_id=managed.broker_order_id,
+                    )
+                    entry_results.append(RouteResult(
+                        strategy_id=entry["strategy_id"],
+                        client_order_id=coid,
+                        accepted=True,
+                        broker_order_id=managed.broker_order_id,
+                        final_state=final_state.value,
+                    ))
+                elif final_state in TERMINAL_STATES:
+                    # REJECTED, CANCELLED, EXPIRED — surface as
+                    # not-accepted; no registry write.
+                    entry_results.append(RouteResult(
+                        strategy_id=entry["strategy_id"],
+                        client_order_id=coid,
+                        accepted=False,
+                        broker_order_id=managed.broker_order_id,
+                        final_state=final_state.value,
+                        error=f"order ended in {final_state.value} not FILLED",
+                    ))
+                else:
+                    # Non-terminal after timeout (WORKING / PARTIAL).
+                    # Cancel so the limit doesn't sit unfilled
+                    # forever; surface as not-accepted.
+                    try:
+                        await router.cancel_combo(coid)
+                    except Exception:  # noqa: BLE001
+                        _log.exception(
+                            "cancel after timeout failed for %s", coid,
+                        )
+                    entry_results.append(RouteResult(
+                        strategy_id=entry["strategy_id"],
+                        client_order_id=coid,
+                        accepted=False,
+                        broker_order_id=managed.broker_order_id,
+                        final_state=final_state.value,
+                        error=(
+                            f"order in {final_state.value} after fill-"
+                            "wait timeout — cancelled"
+                        ),
+                    ))
             except Exception as exc:  # noqa: BLE001
                 _log.exception("place_combo failed for %s", entry["strategy_id"])
                 entry_results.append(RouteResult(
