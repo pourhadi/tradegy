@@ -1,0 +1,33 @@
+# Hours-from-now to the next FOMC statement OR CPI release.
+#
+# Combined-events feature for the FOMC+CPI portfolio strategy. These
+# are the two events that tested with positive expectancy individually
+# (FOMC strong, CPI marginal); the all-high-importance combined
+# version washed out due to NFP/GDP/PPI being negative.
+
+id: mes_hours_to_next_fomc_or_cpi
+version: v1
+description: >
+  Hours-from-now to the next FOMC statement or CPI release. Used by
+  the regime-gated FOMC+CPI portfolio strategy.
+type: derived
+inputs:
+  - source_id: econ_events
+  - feature_id: mes_1m_bars
+computation:
+  type: registered_transform
+  transform_id: time_to_next_event
+  parameters:
+    event_type_filter:
+      - fomc_statement
+      - cpi
+    max_lookahead_hours: 168.0
+cadence: 1m
+availability_latency_seconds: 0
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 168.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development
