@@ -313,11 +313,16 @@ def backtest(
         slippage_ticks_per_side=slippage_ticks,
         commission_per_contract_round_trip=commission_round_trip,
     )
+    # Derive session calendar from spec's market_scope.session. CMES
+    # for globex (24h futures), XNYS for RTH (cash-equity ETFs).
+    sess_to_cal = {"globex": "CMES", "RTH": "XNYS", "both": "CMES"}
+    session_calendar = sess_to_cal.get(spec.market_scope.session, "CMES")
     result = run_backtest(
         spec,
         start=_parse_iso(start),
         end=_parse_iso(end),
         cost=cost,
+        session_calendar=session_calendar,
     )
     s = result.stats
     console.print(

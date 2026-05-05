@@ -1,0 +1,46 @@
+# SPY-aligned scheduled-event quiet window flag.
+#
+# Phase 1 of the regime-gated range-scalp plan
+# (/Users/dan/.claude/plans/brainstorming-in-the-context-humming-balloon.md).
+#
+# Emits 1.0 at every SPY 1m bar timestamp where the bar lies within
+# T-2h to T+4h of any high-importance economic event from the
+# econ_events source. The widened post-event window (240m vs the
+# more-symmetric 120m used by some traders) captures trend-day
+# continuation after surprises — vol persists post-CPI/NFP for
+# several hours.
+#
+# Used by the strategy class as a deterministic gate: skip entries
+# when this flag is 1.0. Walk-forward-honest (no LLM, no external
+# API at backtest time).
+
+id: spy_econ_event_quiet_window_flag
+version: v1
+description: >
+  Boolean (0.0/1.0) flag at SPY 1m bar cadence: 1.0 if the bar's
+  timestamp lies within T-120m to T+240m of any high-importance
+  scheduled event (FOMC statements, FOMC SEP, FOMC press conferences,
+  CPI, NFP/Employment Situation, GDP). Importance levels with
+  `medium` or `low` are NOT counted — we want the gate sharpest
+  around tier-1 events only.
+type: derived
+inputs:
+  - source_id: econ_events
+  - feature_id: spy_1m_bars
+computation:
+  type: registered_transform
+  transform_id: event_window_flag
+  parameters:
+    pre_event_minutes: 120
+    post_event_minutes: 240
+    importance_filter:
+      - high
+cadence: 1m
+availability_latency_seconds: 0
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 1.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

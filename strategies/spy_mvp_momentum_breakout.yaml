@@ -1,0 +1,112 @@
+# SPY MVP — momentum_breakout port from the best MES variant.
+#
+# The MES version (mes_mvp_momentum_breakout) was the strongest of all
+# 14 mechanic-search variants on MES (Sharpe -0.193, 37.9% win rate
+# over 7yr). This is the same mechanic + same regime gates, ported to
+# SPY's 12.4-year history.
+#
+# Cross-instrument validation per Phase 6 of the original plan: if
+# the same mechanic that's marginal on MES (-0.19) is meaningfully
+# different on SPY (positive or much-more-negative), it's
+# instrument-specific. If both negative with similar magnitude, the
+# intraday-momentum-breakout pattern is exhausted on equity-index
+# futures/ETFs broadly.
+#
+# SPY adaptations:
+#   - Tick size 0.01 (vs MES 0.25). Stop_ticks scales accordingly.
+#   - SPY trades on XNYS (no globex extended-hours session boundary),
+#     so session is RTH-only and gates use XNYS calendar throughout.
+
+metadata:
+  id: spy_mvp_momentum_breakout
+  version: 0.1.0
+  schema_version: "1.0"
+  name: SPY MVP momentum breakout — port of best MES mechanic
+  status: draft
+  created_date: 2026-05-04
+  last_modified_date: 2026-05-04
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: mes_mvp_momentum_breakout
+  description: >
+    Same as mes_mvp_momentum_breakout, ported to SPY. Tier
+    proposal_only.
+
+market_scope:
+  market: ES   # SPY tracks S&P 500 — same market_scope class as ES
+  instrument: SPY
+  session: RTH
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: momentum_breakout
+  parameters:
+    return_feature_id: spy_5m_log_returns
+    entry_threshold: 0.001
+    max_attempts_per_session: 1
+  direction: both
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    - condition: time_of_session
+      parameters:
+        session_position_feature_id: spy_xnys_session_position
+        lo: 0.10
+        hi: 0.85
+    - condition: feature_threshold
+      parameters:
+        feature_id: vix_daily_pctile_252
+        operator: gt
+        threshold: 0.50
+    - condition: feature_threshold
+      parameters:
+        feature_id: spy_econ_event_quiet_window_flag
+        operator: lte
+        threshold: 0.0
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: atr_multiple
+    atr_feature_id: spy_atr_14m
+    atr_mult: 1.0
+    tick_size: 0.01
+    max_distance_ticks: 1000
+  adjustment_rules:
+    - action: trailing_atr
+      atr_feature_id: spy_atr_14m
+      multiplier: 3.0
+      activation_R: 1.0
+      tick_size: 0.01
+  hard_max_distance_ticks: 1000
+  time_stop:
+    enabled: true
+    max_holding_bars: 60
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only

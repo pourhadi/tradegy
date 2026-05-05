@@ -1,0 +1,32 @@
+# 5-minute OHLCV bars for SPY, aggregated from the databento 1m source.
+# Building block for tactical-horizon features (5m returns, etc.).
+#
+# Switched 2026-04-30 from spy_5s_ohlcv to spy_1m_ohlcv (databento) for
+# 24h coverage and a longer span; see spy_1m_bars.yaml for context.
+
+id: spy_5m_bars
+version: v1
+description: >
+  5-minute OHLCV bars for SPY front-month, aggregated from the
+  spy_1m_ohlcv data source via resample_ohlcv_bars. Right-labeled
+  close, left-closed window so each bar's ts_utc is the bar-close
+  instant. 24h coverage, 2019-05-06 → 2026-04-29.
+type: derived
+inputs:
+  - source_id: spy_1m_ohlcv
+computation:
+  type: registered_transform
+  transform_id: resample_ohlcv_bars
+  parameters:
+    cadence: 5m
+    bar_close_label: right
+    closed: left
+cadence: 5m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 100000.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

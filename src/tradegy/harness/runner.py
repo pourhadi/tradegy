@@ -172,6 +172,13 @@ def run_backtest(
         "feature_id",
         "session_position_feature_id",
         "atr_feature_id",
+        "return_feature_id",      # momentum_breakout-style classes
+        "vwap_feature_id",         # vwap_reversion
+        "upper_level_feature_id",  # range_break_*
+        "lower_level_feature_id",
+        "volume_zscore_feature_id",  # volume_spike_fade, range_break_continuation
+        "true_range_feature_id",    # compression_breakout
+        "prior_close_feature_id",   # gap_fill_fade
     )
 
     def _harvest(params: dict[str, Any]) -> None:
@@ -188,6 +195,12 @@ def run_backtest(
     _harvest(initial_stop_params)
     for rule in spec.stops.adjustment_rules:
         _harvest({k: v for k, v in rule.items() if k != "action"})
+    # Also harvest entry.parameters — strategy classes that take
+    # feature_id parameters (e.g. momentum_breakout's
+    # return_feature_id) need their target features loaded into the
+    # panel even though the class's static feature_dependencies list
+    # the MES default.
+    _harvest(spec.entry.parameters)
 
     bars = load_bar_stream(
         instrument,
