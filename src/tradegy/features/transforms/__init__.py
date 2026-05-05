@@ -62,6 +62,7 @@ from tradegy.features.transforms import (  # noqa: E402,F401
     rolling_zscore,
     session_position,
     session_vwap,
+    time_since_last_event,
     time_to_next_event,
     true_range,
 )

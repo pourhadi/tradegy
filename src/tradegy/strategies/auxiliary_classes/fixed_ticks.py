@@ -18,7 +18,7 @@ class FixedTicks(StopClass):
     id = "fixed_ticks"
     version = "v1"
     parameter_schema: dict[str, dict[str, Any]] = {
-        "stop_ticks": {"type": "integer", "min": 1, "max": 200, "default": 20},
+        "stop_ticks": {"type": "integer", "min": 1, "max": 5000, "default": 20},
         "tick_size": {"type": "number", "min": 0.0, "max": 100.0, "default": 0.25},
     }
 

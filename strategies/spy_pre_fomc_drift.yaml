@@ -1,0 +1,99 @@
+# SPY pre-FOMC drift — port of mes_pre_fomc_drift_no_stop to SPY's
+# 12.4yr history.
+#
+# Cross-instrument validation: same Lucca-Moench mechanism on the
+# longer SPY history. SPY trades XNYS only (no globex), so each
+# pre-FOMC window yields 2 sub-trades per event:
+#   T-24h to T-2h (in D-1 XNYS session, ~2 hours)
+#   T-2h to T-0.5h (after D-1 close, re-enter at D session open
+#     — actually no, that's overnight; entry at D 09:30 ET, exit
+#     at D 13:30 ET, ~4 hours).
+# Each sub-trade is intraday-compliant per harness session-flatten.
+#
+# Per-instrument tick / stop calibration:
+#   SPY tick = 0.01. ATR_14m on SPY 1m ~$0.07; for 24h hold a fixed
+#   200-tick stop = $2.00 (~0.5% of price). Comparable% to MES's
+#   200×$0.25 = $50 (~0.4% of price).
+
+metadata:
+  id: spy_pre_fomc_drift
+  version: 0.1.0
+  schema_version: "1.0"
+  name: SPY pre-FOMC drift — port of MES Lucca-Moench replication
+  status: draft
+  created_date: 2026-05-05
+  last_modified_date: 2026-05-05
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: mes_pre_fomc_drift_no_stop
+  description: >
+    Long SPY from T-24h to T-0.5h before FOMC statements. SPY's
+    12.4yr history (vs MES's 7yr) gives roughly 56 more FOMC events
+    for statistical power. Tier proposal_only.
+
+market_scope:
+  market: ES
+  instrument: SPY
+  session: RTH
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: gated_entry
+  parameters:
+    direction: long
+    max_attempts_per_session: 1
+  direction: long
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    - condition: feature_range
+      parameters:
+        feature_id: spy_hours_to_next_fomc
+        lo: 0.5
+        hi: 24.0
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: fixed_ticks
+    stop_ticks: 1000  # $10 = ~2.5% on $400 SPY (comparable to MES 50pt = 0.9%)
+    tick_size: 0.01
+  adjustment_rules: []
+  hard_max_distance_ticks: 1000
+  time_stop:
+    enabled: true
+    max_holding_bars: 1440
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions:
+    - condition: feature_threshold
+      parameters:
+        feature_id: spy_hours_to_next_fomc
+        operator: lt
+        threshold: 0.5
+      action: exit_market
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only

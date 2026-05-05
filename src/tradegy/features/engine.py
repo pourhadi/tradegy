@@ -98,6 +98,7 @@ def _resolve_inputs(
         "rolling_change": ["series"],
         "event_window_flag": ["events", "timeline"],
         "time_to_next_event": ["events", "timeline"],
+        "time_since_last_event": ["events", "timeline"],
     }
     transform_id = feature.computation.transform_id
     if transform_id not in slot_name_for_transform:

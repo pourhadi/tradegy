@@ -1,0 +1,91 @@
+# MES post-FOMC short — kneejerk-reversion candidate.
+#
+# Hypothesis: after FOMC announcement at 14:00 ET, the 14:00-14:30 ET
+# kneejerk move overshoots and partially reverses by session close.
+# Long bias on the post-event window: enter at 14:30 ET on FOMC day,
+# exit at session close. Tests if the average direction is up.
+#
+# Per academic literature (post-event reversion / overreaction
+# correction), the direction of correction depends on whether the
+# kneejerk was hawkish or dovish. A long-only bias only works if
+# announcements skew dovish on average. This is a directional bet
+# that can be falsified cheaply.
+
+metadata:
+  id: mes_post_fomc_short
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES post-FOMC short (14:30 ET → session close)
+  status: draft
+  created_date: 2026-05-05
+  last_modified_date: 2026-05-05
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: null
+  description: >
+    Short MES from 0.5h post-FOMC (14:30 ET) to session close.
+    Tier proposal_only.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: gated_entry
+  parameters:
+    direction: short
+    max_attempts_per_session: 1
+  direction: short
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    # Within 0.5 to 2.0 hours since the last FOMC statement.
+    # Captures the post-announcement reversion window before
+    # late-day flow / overnight risk dominates.
+    - condition: feature_range
+      parameters:
+        feature_id: mes_hours_since_last_fomc
+        lo: 0.5
+        hi: 2.0
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: fixed_ticks
+    stop_ticks: 200
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 1000
+  time_stop:
+    enabled: true
+    max_holding_bars: 90
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only
