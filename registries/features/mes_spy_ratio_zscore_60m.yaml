@@ -1,0 +1,31 @@
+# 60-bar (1-hour) rolling z-score of mes_spy_close_ratio.
+#
+# Captures intraday divergences from the rolling-mean basis. Positive
+# z-score → MES is "rich" relative to SPY (basis above local mean) →
+# expect mean reversion → short MES. Negative → MES is "cheap" → long
+# MES. The 60-bar window matches the timescale literature suggests
+# basis arbitrage clears (seconds to ~1 hour).
+
+id: mes_spy_ratio_zscore_60m
+version: v1
+description: >
+  Rolling 60-bar z-score of mes_spy_close_ratio. Used by spread-fade
+  strategies. Expected stationary around zero with rapid mean reversion.
+type: derived
+inputs:
+  - feature_id: mes_spy_close_ratio
+computation:
+  type: registered_transform
+  transform_id: rolling_zscore
+  parameters:
+    window_bars: 60
+    column: value
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: -10.0
+  max: 10.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

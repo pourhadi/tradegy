@@ -1,0 +1,38 @@
+# MES/SPY closing-price ratio at common 1m timestamps.
+#
+# Spread / pairs feature. SPY tracks 1/10th of S&P 500; MES tracks
+# 1/5th of S&P 500. Theoretical ratio: MES_price / SPY_price ≈ 10
+# (with small variation from futures-spot basis = interest carry -
+# dividends).
+#
+# Used by spread-fade strategies that key on z-score deviations from
+# the rolling mean of this ratio. Inner-join on ts_utc — only emits
+# rows where both MES and SPY have a 1m bar (i.e. RTH-aligned
+# overlap window).
+
+id: mes_spy_close_ratio
+version: v1
+description: >
+  Element-wise ratio mes_1m_bars.close / spy_1m_bars.close at every
+  1m timestamp where both have a bar. Approximately 10.0 with small
+  variation driven by futures basis. Inner-joined timestamps —
+  RTH-aligned overlap.
+type: derived
+inputs:
+  - feature_id: mes_1m_bars
+  - feature_id: spy_1m_bars
+computation:
+  type: registered_transform
+  transform_id: two_series_ratio
+  parameters:
+    column: close
+    join_strategy: inner
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 8.0
+  max: 12.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

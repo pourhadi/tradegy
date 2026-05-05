@@ -1,0 +1,106 @@
+# MES-SPY spread fade — LONG side.
+#
+# Hypothesis: MES "cheap" relative to SPY (z-score of close ratio
+# below -2.0) implies basis-arb mean-reversion → buy MES. Exit when
+# z-score returns to -0.5 or beyond.
+#
+# Single-leg approximation of a true MES-short-SPY pairs trade. Without
+# the SPY hedge we're directionally exposed to S&P 500 beta during
+# the trade. For an MVP edge-detection test, this isolates whether
+# the spread signal has predictive value vs trying to construct a
+# precise pair.
+#
+# Restricted to RTH (XNYS 09:30-16:00 ET) where SPY trading is
+# liquid; outside RTH SPY bars are sparse and the spread becomes
+# noisy.
+
+metadata:
+  id: mes_spy_spread_long
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES-SPY spread fade — long when MES cheap (z<-2)
+  status: draft
+  created_date: 2026-05-05
+  last_modified_date: 2026-05-05
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: null
+  description: >
+    Long MES when MES/SPY z-score < -2.0 (rich-cheap reversal anchored
+    on basis arb). Exit at z-score > -0.5 OR fixed stop OR time stop.
+    Tier proposal_only.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: gated_entry
+  parameters:
+    direction: long
+    max_attempts_per_session: 5  # multiple intraday opportunities
+  direction: long
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    # RTH only — SPY's liquid window
+    - condition: time_of_session
+      parameters:
+        session_position_feature_id: mes_xnys_session_position
+        lo: 0.05
+        hi: 0.90
+    # Spread anomaly: MES is "cheap" by 2+ σ
+    - condition: feature_threshold
+      parameters:
+        feature_id: mes_spy_ratio_zscore_60m
+        operator: lt
+        threshold: -2.0
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: fixed_ticks
+    stop_ticks: 40  # 10pt = $50 — modest stop for short-hold trades
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 1000
+  time_stop:
+    enabled: true
+    max_holding_bars: 30  # 30 min cap; basis arbs typically resolve in seconds-min
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions:
+    # Exit when z-score recovers to -0.5 (most of the divergence closed).
+    - condition: feature_threshold
+      parameters:
+        feature_id: mes_spy_ratio_zscore_60m
+        operator: gt
+        threshold: -0.5
+      action: exit_market
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only
