@@ -1,0 +1,42 @@
+# Hours-from-now to the next HIGH-importance event of any type.
+#
+# Combined-event variant of mes_hours_to_next_fomc, mes_hours_to_next_cpi,
+# etc. Captures the next event among:
+#   fomc_statement, fomc_sep, cpi, employment_situation (NFP), gdp
+# These are all event_types tagged `importance: high` in econ_events.
+#
+# Used by combined event-drift strategies that test the portfolio
+# pre-event premium across all high-importance scheduled events.
+# Avoids per-event-type cherry-picking — selecting only the events
+# that tested positive on the same sample is data-mining.
+
+id: mes_hours_to_next_high_importance_event
+version: v1
+description: >
+  Hours-from-now to the next high-importance scheduled event in
+  econ_events (FOMC statements/SEP, CPI, NFP/Employment Situation,
+  GDP). Output capped at 168 hours.
+type: derived
+inputs:
+  - source_id: econ_events
+  - feature_id: mes_1m_bars
+computation:
+  type: registered_transform
+  transform_id: time_to_next_event
+  parameters:
+    event_type_filter:
+      - fomc_statement
+      - fomc_sep
+      - cpi
+      - employment_situation
+      - gdp
+    max_lookahead_hours: 168.0
+cadence: 1m
+availability_latency_seconds: 0
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 168.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

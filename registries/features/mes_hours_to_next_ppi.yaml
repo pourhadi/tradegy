@@ -1,0 +1,40 @@
+# Hours-from-now to the next ppi release.
+#
+# Feature for event-anchored strategies (Round 4 N1 pre-ppi drift).
+# At every MES 1m bar, emits the float number of hours until the next
+# scheduled ppi release. Bars beyond 168 hours (1 week) from any
+# upcoming ppi are dropped — keeps the feature focused on the near-
+# event window.
+#
+# `ppi` is the canonical announcement event (typical 14:00
+# ET on ppi meeting Wednesdays — 8 meetings/year). This feature does
+# NOT include ppi minutes (released 3 weeks later) or speeches; those
+# are separately tracked event_types in econ_events.
+
+id: mes_hours_to_next_ppi
+version: v1
+description: >
+  Hours from current bar timestamp to the next ppi release
+  scheduled in econ_events. Used by event-anchored strategies that
+  trigger entries within a fixed pre-event window. Output capped at
+  168 hours (1 week); rows further away from any ppi are dropped.
+type: derived
+inputs:
+  - source_id: econ_events
+  - feature_id: mes_1m_bars
+computation:
+  type: registered_transform
+  transform_id: time_to_next_event
+  parameters:
+    event_type_filter:
+      - ppi
+    max_lookahead_hours: 168.0
+cadence: 1m
+availability_latency_seconds: 0
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 168.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

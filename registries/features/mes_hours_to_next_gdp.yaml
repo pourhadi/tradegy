@@ -1,0 +1,40 @@
+# Hours-from-now to the next gdp release.
+#
+# Feature for event-anchored strategies (Round 4 N1 pre-gdp drift).
+# At every MES 1m bar, emits the float number of hours until the next
+# scheduled gdp release. Bars beyond 168 hours (1 week) from any
+# upcoming gdp are dropped — keeps the feature focused on the near-
+# event window.
+#
+# `gdp` is the canonical announcement event (typical 14:00
+# ET on gdp meeting Wednesdays — 8 meetings/year). This feature does
+# NOT include gdp minutes (released 3 weeks later) or speeches; those
+# are separately tracked event_types in econ_events.
+
+id: mes_hours_to_next_gdp
+version: v1
+description: >
+  Hours from current bar timestamp to the next gdp release
+  scheduled in econ_events. Used by event-anchored strategies that
+  trigger entries within a fixed pre-event window. Output capped at
+  168 hours (1 week); rows further away from any gdp are dropped.
+type: derived
+inputs:
+  - source_id: econ_events
+  - feature_id: mes_1m_bars
+computation:
+  type: registered_transform
+  transform_id: time_to_next_event
+  parameters:
+    event_type_filter:
+      - gdp
+    max_lookahead_hours: 168.0
+cadence: 1m
+availability_latency_seconds: 0
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 168.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development
