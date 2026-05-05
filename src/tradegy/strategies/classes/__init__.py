@@ -9,6 +9,7 @@ from __future__ import annotations
 from tradegy.strategies.classes import (  # noqa: F401
     compression_breakout,
     gap_fill_fade,
+    gated_entry,
     momentum_breakout,
     range_break_continuation,
     range_break_fade,

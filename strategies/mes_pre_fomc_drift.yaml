@@ -1,0 +1,109 @@
+# MES pre-FOMC drift — academic-documented edge.
+#
+# Lucca & Moench (2015) "The Pre-FOMC Announcement Drift" documented
+# ~+0.49% mean drift on S&P 500 in the 24-hour window before FOMC
+# announcements, since 1994. Effect persists post-2014 though
+# attenuated. Cumulative drift of ~3-4 bps/year on simply being long
+# the market in the 24h pre-FOMC window over the full sample.
+#
+# Mechanism: uncertainty premium accruing pre-announcement. Market
+# participants demand return for holding through the announcement;
+# that return manifests as the pre-announce drift.
+#
+# Test setup: enter long MES at T-24h, exit at T-0.5h (avoid the
+# announcement crossfire). 1 entry per session within the gate window.
+# CMES session boundaries do force re-entry across the 24h window —
+# acceptable in MVP; clean continuous-hold version is a follow-up.
+#
+# Pre-registered: 1 spec, 1 parameter set, no tuning. ~56 FOMC events
+# in MES history (2019-05 → 2026-04). Test reports avg per-event drift
+# and significance vs the academic baseline of +49 bps mean.
+
+metadata:
+  id: mes_pre_fomc_drift
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES pre-FOMC drift (Round 4 N1) — long 24h pre-announcement
+  status: draft
+  created_date: 2026-05-04
+  last_modified_date: 2026-05-04
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: null
+  description: >
+    Long MES at T-24h before scheduled FOMC statement; exit at
+    T-0.5h or end-of-session, whichever first. Single entry per
+    session inside the pre-FOMC window. Tier proposal_only.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: gated_entry
+  parameters:
+    direction: long
+    max_attempts_per_session: 1
+  direction: long
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    # Pre-FOMC window: 0.5 hour to 24 hours before next FOMC statement.
+    # Lower bound 0.5 hour avoids announcement-crossfire entries.
+    - condition: feature_range
+      parameters:
+        feature_id: mes_hours_to_next_fomc
+        lo: 0.5
+        hi: 24.0
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: atr_multiple
+    atr_feature_id: mes_atr_14m
+    atr_mult: 3.0  # wide stop — pre-event drift can be choppy
+    tick_size: 0.25
+    max_distance_ticks: 800
+  adjustment_rules: []
+  hard_max_distance_ticks: 800
+  time_stop:
+    enabled: true
+    max_holding_bars: 1440  # 24 hours of 1m bars
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions:
+    # Exit when we drop below 0.5h to FOMC (i.e., past the announcement
+    # window opens — get out before crossfire).
+    - condition: feature_threshold
+      parameters:
+        feature_id: mes_hours_to_next_fomc
+        operator: lt
+        threshold: 0.5
+      action: exit_market
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only
