@@ -149,10 +149,36 @@ def load_labeled_examples(
     feature_root: Path | None = None,
 ) -> list[TrainingExample]:
     """Load all SessionLabels for `instrument` from disk and pair each
-    with its computed feature vector."""
+    with its computed feature vector.
+
+    Pre-loads bars + session_daily + events + VIX features ONCE up
+    front; passes them into build_snapshot per session. Avoids the
+    855× bars-parquet-reread that the naive version did (each read of
+    the 2.5M-row bars is ~5-10 sec).
+    """
+    from tradegy.regime.session_inputs import (
+        _read_bars,
+        _read_econ_events,
+        _read_feature_value,
+        aggregate_to_session_daily,
+    )
+
     inst_dir = labels_dir / instrument.upper()
     if not inst_dir.exists():
         return []
+
+    # Pre-load shared data ONCE.
+    try:
+        bars = _read_bars(instrument, raw_root=raw_root)
+    except FileNotFoundError as exc:
+        _log.warning("no raw bars for %s: %r", instrument, exc)
+        return []
+    session_daily = aggregate_to_session_daily(bars)
+    events = _read_econ_events(raw_root=raw_root)
+    vix_close_df = _read_feature_value("vix_daily_close", feature_root=feature_root)
+    vix_pctile_df = _read_feature_value("vix_daily_pctile_252", feature_root=feature_root)
+    vix_5d_df = _read_feature_value("vix_daily_5d_change", feature_root=feature_root)
+
     examples: list[TrainingExample] = []
     for path in sorted(inst_dir.glob("*.json")):
         try:
@@ -167,6 +193,12 @@ def load_labeled_examples(
                 instrument=instrument,
                 raw_root=raw_root,
                 feature_root=feature_root,
+                bars=bars,
+                session_daily=session_daily,
+                events=events,
+                vix_close_df=vix_close_df,
+                vix_pctile_df=vix_pctile_df,
+                vix_5d_df=vix_5d_df,
             )
         except FileNotFoundError as exc:
             _log.warning("no bars for %s: %r", label.session_date, exc)
