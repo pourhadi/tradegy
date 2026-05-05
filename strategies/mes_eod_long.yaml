@@ -1,0 +1,91 @@
+# MES end-of-day long — every-session EOD drift test.
+#
+# Tests whether MES has any persistent end-of-day directional drift
+# in the last 60 min of the XNYS session. Pure time-of-day bet, no
+# regime gating, no event filter. Pre-registered: 1 entry, 1 exit,
+# no tuning.
+#
+# Pattern in literature: "end-of-day" effect — late-session flow
+# (passive-fund rebalancing, retail close-buying, market-on-close
+# orders) tends to extend the day's direction. This spec tests
+# whether the AVERAGE late-session direction has any edge (ignoring
+# day's prior-direction).
+
+metadata:
+  id: mes_eod_long
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES end-of-day long (last 60 min of XNYS)
+  status: draft
+  created_date: 2026-05-04
+  last_modified_date: 2026-05-04
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: null
+  description: >
+    Long MES at 15:00 ET, exit at 15:55 ET. Pure intraday EOD
+    drift test. Tier proposal_only.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: gated_entry
+  parameters:
+    direction: long
+    max_attempts_per_session: 1
+  direction: long
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    # 15:00 ET = (15:00 - 09:30) / 6.5h = 0.846
+    # 15:05 ET = (15:05 - 09:30) / 6.5h = 0.859
+    # Narrow window so the entry fires once near 15:00 ET.
+    - condition: time_of_session
+      parameters:
+        session_position_feature_id: mes_xnys_session_position
+        lo: 0.846
+        hi: 0.860
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: fixed_ticks
+    stop_ticks: 100  # 25 pts; tight enough to cap session loss
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 1000
+  time_stop:
+    enabled: true
+    max_holding_bars: 55  # 55 min — exit at 15:55 ET
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: true
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only
