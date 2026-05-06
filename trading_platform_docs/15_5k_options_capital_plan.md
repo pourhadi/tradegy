@@ -151,11 +151,35 @@ efficiency at the same risk level.
      verified.
 
 2. **Adapted strategy classes:**
-   - `mes_0dte_iron_condor` — same as `iron_condor_45dte_d16` but on
-     MES, single-day expiry, sized for $5K SPAN
-   - `mes_0dte_pcs` — put credit spread, 0DTE
-   - `mes_0dte_short_strangle_defined` — sells ATM both sides
-   - All wrapped with the IV-gate (same `iv_gated_max=0.25` from Path 1)
+   - `mes_0dte_iron_condor` — **shipped 2026-05-06** as
+     `tradegy.options.strategies.mes_0dte_iron_condor.Mes0dteIronCondor`.
+     Dollar-offset strike selection (no IV/delta dependency since
+     databento ohlcv-1m carries trades only).  Defaults: short legs
+     at $50 from spot, $25 wings.  Same-day expiry filter.
+   - `mes_0dte_pcs` — TBD if 0DTE IC kill stands
+   - `mes_0dte_short_strangle_defined` — TBD
+   - **2023-2024 backtest result (2026-05-06)**: KILL.  At default
+     params over 368 0DTE-eligible sessions, with retail-style
+     commissions ($1.50/leg RT) and 1-tick-per-side slippage:
+     - 221 trades placed, 22.2% win rate, +$647 gross / **-$1,121 net**
+     - Median entry credit: $0.80/share = $4 gross, vs $8 RT cost
+     - Avg loss per trade: -$5.07
+     - Best parameter sweep variant ($25/$25 short, $25 wings):
+       321 trades, 57.9% win rate, +$1,090 gross / -$1,478 net
+     - Cost dominates premium across all tested variants
+     - Conclusion: with ohlcv-1m-only data + retail commissions at
+       $5K capital, 0DTE iron condor on MES is not EV-positive.
+       Kill recorded; honest finding.
+   - **What MIGHT change the verdict** (NOT explored yet, deferred):
+     - 2-leg variants (PCS, CCS) cut commissions in half — could
+       tip the math on a put credit spread
+     - mbp-1 quotes (~$1.5K for 5yr) would replace stale ohlcv-1m
+       bar prices with real bid/ask — current "credits" may be
+       systematically biased low
+     - IV-gating (only enter on low-IV days) à la doc-14 path 1 —
+       not yet implemented for 0DTE on databento
+     - $25K capital sizing — same per-trade economics, but the
+       fixed commission burden becomes proportionally smaller
 
 3. **Backtest infrastructure:** existing
    `tradegy/options/runner.py` consumes EOD snapshots. For 0DTE we'd
