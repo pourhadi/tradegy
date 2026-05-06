@@ -51,16 +51,19 @@
         <string>/Users/dan/code/tradegy/scripts/live_mes_0dte_entry.sh</string>
     </array>
 
-    <!-- Weekdays Mon-Thu at 10:25 ET (entry).  X-prefix daily MES
-         options expire Mon-Thu only; Friday options trade only as
-         third-Friday quarterlies which we DON'T target in this lane.
-         So skip Friday entry. -->
+    <!-- Weekdays Mon-Thu at 09:55 ET (entry).  Daemon's default
+         entry timestamp is 10:00 ET; firing at 09:55 gives the
+         script ~5 min to connect, refresh volatility data, qualify
+         contracts, and submit before the 10:00 anchor.  Daily MES
+         options expire Mon-Thu (X1A-X5D family); Friday options
+         trade only as third-Friday quarterlies which we don't
+         target in this lane. -->
     <key>StartCalendarInterval</key>
     <array>
-        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>25</integer></dict>
-        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>25</integer></dict>
-        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>25</integer></dict>
-        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>25</integer></dict>
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>55</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>55</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>55</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>55</integer></dict>
     </array>
 
     <key>StandardOutPath</key>

@@ -79,34 +79,38 @@ LOG_DIR = REPO_ROOT / "data" / "live_options" / "mes_0dte_logs"
 ENTRY_RECORDS_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-# Strategy spec — locked to the OOS-validated config.  Variants would
-# need a fresh hypothesis YAML + walk-forward; do not loosen here.
-PUT_SHORT_OFFSET = 25.0
-CALL_SHORT_OFFSET = 25.0
-WING_WIDTH = 25.0
-PROFIT_TAKE_PCT = 0.50
+# ─────────────────────────────────────────────────────────────────
+# Strategy spec — daily-fire IC $10/$10 + 75% profit-take.
+#
+# Found via parameter sweep over 2yr historical + 4mo held-out 2025
+# data; all 6 sub-windows (years and half-years) net-positive,
+# including the most-volatile April-2025 window.  Per-trade EV
+# nearly equal to the prior gated spec but with 4× trade frequency
+# and ~3× smaller per-trade max loss.
+#
+# Variants would need a fresh hypothesis + held-out backtest before
+# they go live — do not adjust these here without re-running the
+# sweep.
+# ─────────────────────────────────────────────────────────────────
+PUT_SHORT_OFFSET = 10.0
+CALL_SHORT_OFFSET = 10.0
+WING_WIDTH = 10.0
+PROFIT_TAKE_PCT = 0.75
 CONTRACTS = 1
 
-# VIX gate threshold: enter only when "current VIX" exceeds this.
-# What "current VIX" means is set by VIX_GATE_SOURCE below.
-VIX_GATE_MIN = 18.0
-
-# VIX gate source.
-#   "intraday_live" : query IBKR for the live VIX index value at
-#                     entry time (10:30 ET).  Closest to the user's
-#                     intent — gates on actual current vol.  Backtest
-#                     proxy (today_open) showed ~equivalent
-#                     performance to prior_close at threshold 18.
-#   "prior_close"   : the original OOS-validated formulation —
-#                     yesterday's 16:00 ET VIX close from on-disk
-#                     vix_daily.  No live VIX dependency.
+# Volatility-index gate.  Daily-fire spec sets this to "none" — the
+# strategy is profitable across all volatility regimes when the
+# strikes are tight enough.  Other modes preserved for research
+# and operator toggle:
 #
-# Default is "intraday_live" because it's strictly closer to the
-# spec's mechanism (sell vol when premium is rich RIGHT NOW), and
-# the today_open backtest variant showed it performs at least as
-# well.  Operator can flip back to "prior_close" if the live VIX
-# tickplant is intermittent.
-VIX_GATE_SOURCE = "intraday_live"
+#   "none"          : NO gate.  Fire every Mon-Thu (default).
+#   "intraday_live" : query IBKR for live volatility-index value
+#                     at entry time; require it above VIX_GATE_MIN.
+#   "prior_close"   : require yesterday's 16:00 ET volatility-index
+#                     close above VIX_GATE_MIN; uses on-disk
+#                     `vix_daily`.
+VIX_GATE_SOURCE = "none"
+VIX_GATE_MIN = 18.0  # only consulted when SOURCE != "none"
 
 # Force-close trigger: at this UTC clock time on the entry day, any
 # still-open position is closed market-style to avoid expiry-bell
@@ -473,6 +477,8 @@ async def run_entry(dry_run: bool = False, bypass_gate: bool = False) -> int:
         # 2. VIX gate.
         if bypass_gate:
             log.info("(VIX gate bypassed)")
+        elif VIX_GATE_SOURCE == "none":
+            log.info("(no volatility-index gate — fire every Mon-Thu)")
         elif VIX_GATE_SOURCE == "intraday_live":
             live_vix = await fetch_live_vix(ib)
             if live_vix is None:

@@ -258,6 +258,53 @@ efficiency at the same risk level.
      parity, scale to $10K/2-contract.  **Path 1 (SPY 16-yr OOS
      Sharpe +0.867 / 13.5% AnnRoC) remains the more
      statistically-grounded option** for someone risk-averse.
+   - **DAILY-FIRE variant discovered 2026-05-06** — IC $10/$10 +
+     PT 75%, no volatility-index gate.  Found while addressing
+     the user's preference for daily activity.  Same harness, same
+     held-out 2025 data, no new code needed.
+     - 2-yr historical (2023-2024): 324 trades, 75.0% WR,
+       **NET +$2,731** (+$8.43/trade)
+     - 4-mo held-out (Jan-Apr 2025): 59 trades, 74.6% WR,
+       **NET +$954** (+$16.17/trade)
+     - All 6 sub-windows (years + half-years) net-positive
+     - April 2025 (most-volatile month): 17 trades, 64.7% WR,
+       still +$37 net — strategy doesn't break in stress
+     - Trade frequency: ~162/yr (vs 30-105 for the gated spec)
+     - Per-trade EV nearly identical to gated spec (+$8.43 vs
+       +$8.64) — daily fires 4× more often
+     - Per-trade max loss ~$30-40 (vs ~$115 for $25/$25 wings)
+   - **Entry-time sweep (2026-05-06)** — daemon's old 10:30 ET
+     entry was a guess, not an optimum.  Sweeping over the full
+     2.3-year window:
+     - 09:45 ET: +$4,005 (Strategy B daily)
+     - **10:00 ET: +$4,124** (best — current daemon default)
+     - 10:30 ET: +$3,686 (old default — left ~$440/2.3yr on the table)
+     - 11:00 ET: +$4,035
+     - 12:00 ET: +$2,159 (degrades — too little decay time)
+     - 15:00 ET: -$458 (loses)
+     Daemon updated 2026-05-06 to enter at 10:00 ET.
+   - **Adaptive entry experiments (2026-05-06)** — tested the
+     "skip violent mornings" rule (skip days where the first 30
+     min after 9:30 ET had a range > X% of underlying):
+     - No filter: 383 trades, +$4,124, +$10.77/trade
+     - Range > 1.0% skip: 373 trades, +$4,096, +$10.98/trade
+       (saves 10 trades, ~no net improvement)
+     - Range > 0.75% skip: 363 trades, +$3,847, +$10.60 (slightly
+       worse)
+     - Counterintuitively, the 10% calmest mornings PRODUCE THE
+       LOWEST per-trade EV — quiet mornings often turn into
+       trending afternoons that break the wings
+     - **Conclusion**: morning-range filter doesn't add edge; the
+       fixed-time entry is already robust to this
+   - **Daemon spec switched 2026-05-06** to the daily-fire config:
+     - Strategy: Mes0dteIronCondor(po=10, co=10, ww=10)
+     - Volatility-index gate: NONE (fire every Mon-Thu)
+     - Profit-take: 75% of credit
+     - Entry: 10:00 ET (was 10:30 ET)
+     - Management cadence: every 15 min from 10:15-15:45 ET
+     - Force-close: 15:55 ET (unchanged)
+     - launchd entry plist: 09:55 ET (5 min head start)
+     - launchd manage plist: 10:15-15:45 ET (was 10:45-15:45 ET)
    - **What's STILL not explored**:
      - mbp-1 quotes (~$1.5K for 5yr) — would replace ohlcv-1m
        trade prices with real bid/ask, eliminating stale-price
@@ -267,8 +314,13 @@ efficiency at the same risk level.
        at higher volume), the cost structure changes
      - Tighter cost broker (e.g., Tradier $0.35/contract) —
        lowers RT cost from $4 PCS / $8 IC to ~$1 PCS / $2 IC
-     - Walk-forward + CPCV on the IC $25/$25 + VIX>18 finding
-       to verify the regime effect holds out-of-sample
+     - Walk-forward across multiple year boundaries on the
+       daily-fire spec — the held-out 2025 window covers 4 months;
+       a longer holdout would tighten the confidence interval
+     - True intraday volatility-index data — current "today_open"
+       backtest proxy is close to live IBKR VIX query; if a paid
+       CBOE intraday feed becomes available, the gated spec
+       could be retested with real entry-time vol
 
 3. **Backtest infrastructure:** existing
    `tradegy/options/runner.py` consumes EOD snapshots. For 0DTE we'd

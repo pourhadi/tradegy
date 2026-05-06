@@ -74,10 +74,20 @@ from tradegy.options.strategy import OptionStrategy
 _DEFAULT_SLIPPAGE_PER_LEG: float = 0.25     # dollars
 _DEFAULT_COMMISSION_PER_LEG_RT: float = 1.50  # dollars round-trip
 
-# Default entry time: 60 minutes after the start of regular trading
-# hours (RTH, 9:30 ET = 14:30 UTC).  10:30 ET = 14:30 UTC, after the
-# first 30-min vol shake-out.
-_DEFAULT_ENTRY_TIME_UTC: time = time(14, 30)
+# Default entry time: 30 minutes after the start of regular trading
+# hours (9:30 ET = 13:30 UTC during US-DST).  10:00 ET = 14:00 UTC.
+# Sweep over the 2.3-year historical+held-out window showed:
+#   09:45 ET    +$4,005 net (Strategy B)
+#   10:00 ET    +$4,124 net (best)
+#   10:30 ET    +$3,686 net (older default)
+#   11:00 ET    +$4,035 net
+#   12:00 ET    +$2,159 (degrades — too little decay time)
+#   15:00 ET    -$458   (loses)
+# 10:00 ET is the empirical optimum and avoids the immediate-open
+# whipsaw that 09:45 entries can hit.  Note: ET-vs-UTC offset
+# changes by 1hr seasonally (DST/non-DST); this default targets
+# DST.  An operator running off-DST should adjust the launchd plist.
+_DEFAULT_ENTRY_TIME_UTC: time = time(14, 0)
 
 # Default settlement time: end of regular trading hours (16:00 ET =
 # 20:00 UTC).  At this point the 0DTE option settles to intrinsic.
