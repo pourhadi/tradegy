@@ -180,16 +180,47 @@ efficiency at the same risk level.
      - Conclusion: with ohlcv-1m-only data + retail commissions at
        $5K capital, 0DTE iron condor on MES is not EV-positive.
        Kill recorded; honest finding.
-   - **What MIGHT change the verdict** (NOT explored yet, deferred):
-     - 2-leg variants (PCS, CCS) cut commissions in half — could
-       tip the math on a put credit spread
-     - mbp-1 quotes (~$1.5K for 5yr) would replace stale ohlcv-1m
-       bar prices with real bid/ask — current "credits" may be
-       systematically biased low
-     - IV-gating (only enter on low-IV days) à la doc-14 path 1 —
-       not yet implemented for 0DTE on databento
-     - $25K capital sizing — same per-trade economics, but the
-       fixed commission burden becomes proportionally smaller
+   - **VIX-gated wrapper (2026-05-06)**: `VixGatedStrategy` in
+     `tradegy.options.strategies.vix_gated`.  Composes any
+     OptionStrategy with a prior-session VIX-close gate (no
+     lookahead).  Tested with 0DTE strategies — counter-canonical
+     finding: HIGH-VIX gates produce a HINT of edge, low-VIX
+     gates do worse.  Mirror-opposite of the doc-14 SPY 45-DTE
+     finding (where IV<0.25 was the winning gate).
+   - **2-yr backtest under VIX-gating (2026-05-06)**:
+     - **IC $25/$25 + VIX > 18**: 82 trades, 70.7% win rate,
+       +$776 gross / **+$120 net** (+$1.46/trade)
+     - **IC $25/$25 + VIX > 20**: 36 trades, 72.2% win rate,
+       +$361 gross / **+$73 net** (+$2.03/trade)
+     - PCS variants under VIX>20 mostly negative; only PCS 25/25
+       at VIX>20 reached -$8 net (essentially flat)
+     - Year-split robustness: 2023 alone +$84 net (44 trades,
+       75% WR), 2024 alone +$36 net (38 trades, 65.8% WR) —
+       BOTH years positive, signal isn't a single-year fluke.
+     - Half-year breakdown: 3 of 4 H1/H2 sub-windows positive;
+       2023 H2 (+$236 from 12 trades, 91.7% WR) drives most of
+       the alpha — probably regional banking + Fed surprises.
+   - **Verdict (2026-05-06)**: PROMISING but NOT YET DEPLOYABLE.
+     The IC $25/$25 + VIX>18 configuration shows a small but
+     consistent positive edge in-sample.  However the per-trade
+     EV (+$1.46 net) and the small absolute dollar amounts
+     ($120 over 2 years) mean a single bad day can wipe a year's
+     edge.  The proper next step before any live capital is
+     walk-forward + CPCV, both of which are TBD.  In the
+     meantime, **Path 1 (validated SPY 16-yr OOS Sharpe +0.867,
+     13.5% AnnRoC) remains the deployable option** — its
+     statistical evidence is overwhelmingly stronger.
+   - **What's STILL not explored**:
+     - mbp-1 quotes (~$1.5K for 5yr) — would replace ohlcv-1m
+       trade prices with real bid/ask, eliminating stale-price
+       contamination in entry credits
+     - $25K capital sizing — same per-trade economics, but if
+       the broker offers volume-tier commissions ($0.50/contract
+       at higher volume), the cost structure changes
+     - Tighter cost broker (e.g., Tradier $0.35/contract) —
+       lowers RT cost from $4 PCS / $8 IC to ~$1 PCS / $2 IC
+     - Walk-forward + CPCV on the IC $25/$25 + VIX>18 finding
+       to verify the regime effect holds out-of-sample
 
 3. **Backtest infrastructure:** existing
    `tradegy/options/runner.py` consumes EOD snapshots. For 0DTE we'd
