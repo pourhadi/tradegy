@@ -32,6 +32,32 @@ cd "${REPO_ROOT}"
 today=$(date +%Y-%m-%d)
 echo "[$(date)] === live_mes_0dte ENTRY ${today} ===" | tee -a "${LOG_FILE}"
 
+# 0. Refresh VIX daily — the gate needs the prior session's close,
+# and CBOE's daily cash-VIX file is updated overnight after the
+# 16:00 ET close.  Cheap (<200KB pull, no API key).  If this fails
+# we still proceed — the daemon's gate uses the most recent VIX
+# close on disk, which may be stale but won't crash.
+DATA_REPO="${DATA_REPO:-/Users/dan/code/data}"
+echo "[$(date)] step 0/2 — refresh VIX daily" | tee -a "${LOG_FILE}"
+if ! python "${DATA_REPO}/download_vix_daily.py" --confirm \
+        2>&1 | tee -a "${LOG_FILE}"; then
+    echo "[$(date)] WARN: VIX refresh failed — proceeding with on-disk data" \
+        | tee -a "${LOG_FILE}"
+fi
+
+# Re-ingest VIX so the new rows land in the parquet partitions the
+# daemon reads.  This is fast (single CSV → date-partitioned parquet).
+if [ -f "${DATA_REPO}/vix_daily/vix_daily.csv" ]; then
+    if ! uv run tradegy ingest \
+            "${DATA_REPO}/vix_daily/vix_daily.csv" \
+            --source-id vix_daily \
+            2>&1 | tee -a "${LOG_FILE}"; then
+        echo "[$(date)] WARN: VIX re-ingest failed — daemon may use stale data" \
+            | tee -a "${LOG_FILE}"
+    fi
+fi
+echo "[$(date)] step 1/2 — daemon entry" | tee -a "${LOG_FILE}"
+
 notify() {
     local title="$1"
     local body="$2"

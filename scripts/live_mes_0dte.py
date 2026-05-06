@@ -108,8 +108,10 @@ IBKR_CLIENT_ID = int(os.environ.get("IBKR_CLIENT_ID", "23"))
 # ── VIX gate ───────────────────────────────────────────────────────
 
 
-def prior_session_vix_close(today: date) -> float | None:
-    """Return the most recent vix_daily close strictly BEFORE `today`."""
+def prior_session_vix_close(today: date) -> tuple[float, date] | None:
+    """Return (close, prior_trade_date) of the most recent vix_daily
+    close strictly BEFORE `today`, or None if no prior data.
+    """
     vix_root = REPO_ROOT / "data" / "raw" / "source=vix_daily"
     if not vix_root.exists():
         log.error("vix_daily source not found at %s", vix_root)
@@ -120,7 +122,15 @@ def prior_session_vix_close(today: date) -> float | None:
     prior = df.filter(pl.col("trade_date") < today)
     if prior.height == 0:
         return None
-    return float(prior.tail(1)["close"].item())
+    last = prior.tail(1).row(0, named=True)
+    return float(last["close"]), last["trade_date"]
+
+
+# Maximum acceptable VIX staleness in calendar days.  CBOE publishes
+# the cash-VIX overnight after the 16:00 ET close — the file is
+# typically <12h stale by next morning.  3-day window covers a
+# Mon-following-holiday-weekend gap; refuse entry beyond that.
+VIX_MAX_STALENESS_DAYS = 3
 
 
 # ── MES front-month price ──────────────────────────────────────────
@@ -138,10 +148,10 @@ async def fetch_mes_front_price(ib) -> tuple[float, str] | None:
     fut = Future(symbol="MES", lastTradeDateOrContractMonth=yyyymm,
                  exchange="CME", currency="USD")
     qualified = await ib.qualifyContractsAsync(fut)
-    if not qualified or qualified[0].conId == 0:
+    front = qualified[0] if qualified else None
+    if front is None or getattr(front, "conId", 0) == 0:
         log.error("could not qualify MES front-month %s", yyyymm)
         return None
-    front = qualified[0]
     log.info("MES front-month: %s (conId=%d)", front.localSymbol, front.conId)
 
     ticker = ib.reqMktData(front, "", snapshot=False, regulatorySnapshot=False)
@@ -246,11 +256,11 @@ async def build_chain_snapshot_for_legs(ib, order, ts_utc: datetime,
             tradingClass=tc,
         )
         qualified = await ib.qualifyContractsAsync(contract)
-        if not qualified or qualified[0].conId == 0:
+        c = qualified[0] if qualified else None
+        if c is None or getattr(c, "conId", 0) == 0:
             log.error("could not qualify leg %s K=%s %s tc=%s",
                       leg_order.expiry, leg_order.strike, right, tc)
             return None
-        c = qualified[0]
         ticker = ib.reqMktData(c, "", snapshot=False, regulatorySnapshot=False)
         for _ in range(20):
             await asyncio.sleep(0.5)
@@ -352,11 +362,19 @@ async def run_entry(dry_run: bool = False) -> int:
         return 0
 
     # 1. VIX gate.
-    vix = prior_session_vix_close(today)
-    if vix is None:
+    result = prior_session_vix_close(today)
+    if result is None:
         log.error("could not load prior-session VIX close")
         return 1
-    log.info("prior-session VIX close: %.2f", vix)
+    vix, vix_date = result
+    staleness_days = (today - vix_date).days
+    log.info("prior-session VIX close: %.2f (from %s, %d day(s) stale)",
+             vix, vix_date, staleness_days)
+    if staleness_days > VIX_MAX_STALENESS_DAYS:
+        log.error("VIX data is too stale (%d days > %d max) — refusing "
+                  "entry.  Run download_vix_daily.py + ingest first.",
+                  staleness_days, VIX_MAX_STALENESS_DAYS)
+        return 1
     if vix <= VIX_GATE_MIN_CLOSE:
         log.info("VIX gate not passing (%.2f ≤ %.2f) — no entry today",
                  vix, VIX_GATE_MIN_CLOSE)

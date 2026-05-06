@@ -182,6 +182,37 @@ def test_mark_entry_closed_updates_fields(
     assert updated["client_order_id"] == record["client_order_id"]
 
 
+def test_prior_session_vix_close_signature(daemon, tmp_path, monkeypatch) -> None:
+    """The VIX-gate helper must return (close_price, trade_date)
+    so the entry job can compute staleness.  Regression: an earlier
+    version returned just the float and we couldn't enforce a
+    freshness gate.
+    """
+    import polars as pl
+    from datetime import date as _date, datetime as _dt, timezone as _tz
+
+    # Build a synthetic vix_daily layout under tmp_path.
+    vix_root = tmp_path / "data" / "raw" / "source=vix_daily"
+    for d, c in [(_date(2026, 4, 30), 19.5), (_date(2026, 5, 1), 20.0)]:
+        part = vix_root / f"date={d.isoformat()}"
+        part.mkdir(parents=True)
+        df = pl.DataFrame({
+            "ts_utc": [_dt(d.year, d.month, d.day, 20, 0, tzinfo=_tz.utc)],
+            "open": [c],
+            "high": [c],
+            "low": [c],
+            "close": [c],
+        })
+        df.write_parquet(part / "data.parquet")
+
+    monkeypatch.setattr(daemon, "REPO_ROOT", tmp_path)
+    result = daemon.prior_session_vix_close(_date(2026, 5, 6))
+    assert result is not None
+    close, prior_date = result
+    assert close == 20.0
+    assert prior_date == _date(2026, 5, 1)
+
+
 def test_mark_entry_closed_is_idempotent(
     daemon, tmp_path, monkeypatch,
 ) -> None:
