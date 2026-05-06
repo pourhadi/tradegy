@@ -112,11 +112,17 @@ CONTRACTS = 1
 VIX_GATE_SOURCE = "none"
 VIX_GATE_MIN = 18.0  # only consulted when SOURCE != "none"
 
-# Force-close trigger: at this UTC clock time on the entry day, any
-# still-open position is closed market-style to avoid expiry-bell
-# settlement complications.  19:55 UTC = 15:55 ET = 5 minutes before
-# the regular cash close (16:00 ET).
-FORCE_CLOSE_UTC: time = time(19, 55)
+# Force-close trigger: at-or-after this UTC clock time, any still-
+# open position is closed.  19:30 UTC = 15:30 ET — 30 min before
+# regular cash close (16:00 ET).  This MUST land on or before a
+# management-tick boundary so the trigger actually fires before
+# expiry.  Management runs every 15 min from 10:15 ET (14:15 UTC),
+# so :30/:45/:00/:15 are the available ticks.  19:30 is the
+# earliest tick that gives PT a fair shake but still leaves time
+# to close on real quotes (post-19:45 the chain is at expiry-edge
+# illiquidity; at 20:00 quotes go to 0 and the daemon CAN'T mark
+# meaningfully).
+FORCE_CLOSE_UTC: time = time(19, 30)
 
 # Kill-switch file path.  If present (regardless of contents), the
 # entry job blocks new entries AND the management job force-closes
@@ -748,6 +754,7 @@ async def run_management() -> int:
 
     # Connect once for the management run.
     from ib_async import IB
+    from tradegy.options.chain import OptionSide
 
     ib = IB()
     try:
@@ -777,13 +784,35 @@ async def run_management() -> int:
             -leg["quantity"] * leg["entry_mid"]
             for leg in record["legs"]
         )
-        # close_cost = -quantity × current_mid summed over original
-        # entry-leg directions (NOT flipped — this is the cost to
-        # CLOSE at current quotes given our existing position).
-        close_cost = sum(
-            -orig["quantity"] * ((cl.bid + cl.ask) / 2.0)
-            for orig, cl in zip(record["legs"], snapshot.legs)
-        )
+        # Per-leg current "close mark" — usually the live mid from
+        # the chain snapshot.  But: when bid==ask==0 (e.g. the option
+        # has expired and IBKR no longer publishes a quote), the
+        # naive (bid+ask)/2 = 0 silently turns a real-money settlement
+        # into a "free close" in our math.  Fall back to INTRINSIC
+        # value vs the current underlying when the quote collapses.
+        # This matches what the backtest harness does at session
+        # close.  Surfaced 2026-05-06 when the first live trade
+        # closed at expiry, recorded +$3.25/share PnL on what was
+        # actually a -$6.75/share loss because the call-side ITM
+        # legs had bid=ask=0 quotes.
+        close_cost = 0.0
+        for orig, cl in zip(record["legs"], snapshot.legs):
+            quoted_mid = (cl.bid + cl.ask) / 2.0
+            if cl.bid <= 0 and cl.ask <= 0:
+                # Mark to intrinsic — the underlying-vs-strike payoff
+                # an option holder would actually realize at expiry.
+                if cl.side == OptionSide.CALL:
+                    intrinsic = max(0.0, cur_price - orig["strike"])
+                else:
+                    intrinsic = max(0.0, orig["strike"] - cur_price)
+                quoted_mid = intrinsic
+                log.warning(
+                    "leg %s K=%.0f q=%+d quotes collapsed (bid=0 ask=0) — "
+                    "marking to intrinsic %.2f vs S=%.2f",
+                    orig["side"], orig["strike"], orig["quantity"],
+                    intrinsic, cur_price,
+                )
+            close_cost += -orig["quantity"] * quoted_mid
         pnl_per_share = entry_credit - close_cost
         pnl_frac = pnl_per_share / entry_credit if entry_credit > 0 else 0.0
         log.info("entry credit %+.2f, close cost %+.2f, PnL %+.2f (%.1f%% of credit)",

@@ -26,9 +26,12 @@
         <string>/Users/dan/code/tradegy/scripts/live_mes_0dte_manage.sh</string>
     </array>
 
-    <!-- 15-min cadence Mon-Thu, 10:15 → 15:45 ET.  Starts 15 min
-         after the daemon's 10:00 ET entry so a fast-moving position
-         can hit the 75% profit-take and exit promptly.  23
+    <!-- 15-min cadence Mon-Thu, 10:15 → 15:45 ET.  The daemon's
+         force-close trigger fires at-or-after 15:30 ET — the 15:30
+         management tick catches it cleanly.  Past 15:45 the chain
+         goes illiquid as expiry approaches; we deliberately don't
+         schedule a 16:00 tick because at that point quotes
+         collapse to bid=0/ask=0 and the close math breaks.  23
          invocations per day per weekday (10:15, 10:30, ..., 15:45). -->
     <key>StartCalendarInterval</key>
     <array>
