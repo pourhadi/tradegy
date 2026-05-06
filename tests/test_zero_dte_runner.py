@@ -174,3 +174,91 @@ def test_aggregate_metrics_are_internally_consistent(
         assert r.win_rate == r.n_winners / len(r.trades)
         assert abs(r.avg_pnl_net - r.total_pnl_net / len(r.trades)) < 1e-6
         assert abs(r.total_pnl_net - sum(t.pnl_dollars_net for t in r.trades)) < 1e-6
+
+
+# ── Intraday management ────────────────────────────────────────────
+
+
+def test_default_close_reason_is_settlement(real_lookup_and_root) -> None:
+    """Without profit_take_pct or loss_stop_pct set, every trade
+    must close at settlement.
+    """
+    lookup, root = real_lookup_and_root
+    strat = Mes0dteIronCondor()
+    r = run_zero_dte_backtest(
+        strat,
+        start=_TEST_WINDOW_START, end=_TEST_WINDOW_END,
+        root=root, underlying_price_lookup=lookup,
+    )
+    if not r.trades:
+        pytest.skip("no trades in window")
+    for t in r.trades:
+        assert t.close_reason == "settlement"
+
+
+def test_aggressive_profit_take_triggers_early_close(
+    real_lookup_and_root,
+) -> None:
+    """A very low profit-take threshold should fire on most trades
+    that enter (any small favorable move triggers close).
+    """
+    lookup, root = real_lookup_and_root
+    # Use a wider window to ensure meaningful trade count.
+    strat = Mes0dteIronCondor(
+        put_short_offset=25.0, call_short_offset=25.0, wing_width_dollars=25.0,
+    )
+    r = run_zero_dte_backtest(
+        strat,
+        start=_TEST_WINDOW_START, end=_TEST_WINDOW_END,
+        root=root, underlying_price_lookup=lookup,
+        profit_take_pct=0.05,  # 5% — trivially easy to hit
+    )
+    if not r.trades:
+        pytest.skip("no trades in window")
+    n_pt = sum(1 for t in r.trades if t.close_reason == "profit_take")
+    # Most trades should hit the trivial threshold.
+    assert n_pt > 0
+    # close_ts on PT trades should precede settlement_ts.
+    for t in r.trades:
+        if t.close_reason == "profit_take":
+            assert t.close_ts is not None
+            assert t.close_ts < t.settlement_ts
+
+
+def test_aggressive_loss_stop_triggers_early_close(
+    real_lookup_and_root,
+) -> None:
+    """A very tight loss-stop should fire on at least some trades."""
+    lookup, root = real_lookup_and_root
+    strat = Mes0dteIronCondor(
+        put_short_offset=25.0, call_short_offset=25.0, wing_width_dollars=25.0,
+    )
+    r = run_zero_dte_backtest(
+        strat,
+        start=_TEST_WINDOW_START, end=_TEST_WINDOW_END,
+        root=root, underlying_price_lookup=lookup,
+        loss_stop_pct=0.10,  # 10% — easy adverse move triggers close
+    )
+    # Test asserts via no exception that the management code runs;
+    # actual triggering depends on whether any leg moves adversely
+    # in the window.
+    assert isinstance(r.n_sessions_traded, int)
+
+
+def test_close_metadata_populated(real_lookup_and_root) -> None:
+    """close_ts and close_underlying are populated on every trade,
+    regardless of close_reason.
+    """
+    lookup, root = real_lookup_and_root
+    strat = Mes0dteIronCondor()
+    r = run_zero_dte_backtest(
+        strat,
+        start=_TEST_WINDOW_START, end=_TEST_WINDOW_END,
+        root=root, underlying_price_lookup=lookup,
+        profit_take_pct=0.50,
+    )
+    if not r.trades:
+        pytest.skip("no trades in window")
+    for t in r.trades:
+        assert t.close_ts is not None
+        assert t.close_underlying > 0

@@ -86,7 +86,17 @@ _DEFAULT_SETTLEMENT_TIME_UTC: time = time(20, 0)
 
 @dataclass(frozen=True)
 class TradeRecord:
-    """One 0DTE round-trip trade outcome."""
+    """One 0DTE round-trip trade outcome.
+
+    `close_reason` is "settlement" by default (held to expiry, intrinsic
+    cash settlement) or one of "profit_take" / "loss_stop" when intraday
+    management triggers fired.
+
+    `close_ts` and `close_underlying` reflect the actual close — for
+    settlement they equal `settlement_ts` and `underlying_at_settlement`;
+    for early management they may be hours earlier and at a different
+    underlying price.
+    """
 
     session_date: date
     entry_ts: datetime
@@ -96,7 +106,7 @@ class TradeRecord:
     n_legs: int
     contracts: int
     entry_credit_per_share: float    # signed: + credit received, - debit paid
-    settlement_intrinsic_per_share: float  # cost to close in intrinsic terms
+    settlement_intrinsic_per_share: float  # cost to close at the actual close (intrinsic OR market)
     pnl_per_share_gross: float       # entry_credit - settlement_intrinsic
     pnl_dollars_gross: float         # × multiplier × contracts
     slippage_dollars: float
@@ -105,6 +115,9 @@ class TradeRecord:
     leg_strikes: tuple[float, ...]
     leg_sides: tuple[str, ...]
     leg_quantities: tuple[int, ...]
+    close_reason: str = "settlement"     # one of: settlement, profit_take, loss_stop
+    close_ts: datetime | None = None
+    close_underlying: float = 0.0
     notes: str = ""
 
 
@@ -284,6 +297,61 @@ def _find_chain_leg(
     return None
 
 
+def _close_cost_per_share_at_ts(
+    sess_df: pl.DataFrame,
+    order_legs: tuple,
+    check_ts: datetime,
+    fallback_underlying_price: float | None = None,
+) -> float | None:
+    """Compute the cost-to-close-per-share at `check_ts` from the
+    most recent bars of each leg.
+
+    Per leg, close_cost = -quantity × leg_price.  We use each leg's
+    most recent bar at-or-before check_ts as its mark.  If a leg
+    has no bar yet (didn't trade between session open and check_ts)
+    AND no fallback_underlying_price, returns None — caller skips.
+
+    If `fallback_underlying_price` is provided, missing legs mark
+    to intrinsic vs that price.  This is only used at settlement;
+    intraday checks should pass None and let the caller skip the
+    interval.
+    """
+    total = 0.0
+    for leg in order_legs:
+        # Filter sess_df to bars for this contract at-or-before check_ts.
+        leg_bars = sess_df.filter(
+            (pl.col("strike") == leg.strike)
+            & (pl.col("side") == leg.side.value)
+            & (pl.col("expiry") == leg.expiry)
+            & (pl.col("ts_utc") <= check_ts)
+        )
+        if leg_bars.height > 0:
+            mark = float(leg_bars.tail(1)["close"].item())
+        elif fallback_underlying_price is not None:
+            if leg.side == OptionSide.CALL:
+                mark = max(0.0, fallback_underlying_price - leg.strike)
+            else:
+                mark = max(0.0, leg.strike - fallback_underlying_price)
+        else:
+            return None
+        total += -leg.quantity * mark
+    return total
+
+
+def _intraday_check_intervals(
+    entry_ts: datetime, settlement_ts: datetime, interval_minutes: int = 15,
+) -> list[datetime]:
+    """Generate timestamps from entry+interval up to settlement
+    (exclusive) at `interval_minutes` cadence.
+    """
+    out: list[datetime] = []
+    cur = entry_ts + timedelta(minutes=interval_minutes)
+    while cur < settlement_ts:
+        out.append(cur)
+        cur += timedelta(minutes=interval_minutes)
+    return out
+
+
 def run_zero_dte_backtest(
     strategy: OptionStrategy,
     *,
@@ -298,6 +366,9 @@ def run_zero_dte_backtest(
     underlying_price_lookup: UnderlyingPriceLookup | None = None,
     slippage_per_leg_dollars: float = _DEFAULT_SLIPPAGE_PER_LEG,
     commission_per_leg_round_trip: float = _DEFAULT_COMMISSION_PER_LEG_RT,
+    profit_take_pct: float | None = None,
+    loss_stop_pct: float | None = None,
+    intraday_check_interval_minutes: int = 15,
 ) -> BacktestResult:
     """Run a 0DTE backtest of `strategy` over the given window.
 
@@ -381,8 +452,53 @@ def run_zero_dte_backtest(
             n_skipped += 1
             continue
 
-        # Settle each leg to intrinsic.
-        settlement_cost = _settle_position_intrinsic(order.legs, S_settle)
+        # Intraday management: check at periodic intervals between
+        # entry and settlement.  Trigger profit-take if MTM ≥
+        # profit_take_pct of credit; loss-stop if MTM ≤
+        # -loss_stop_pct of credit.  First triggering interval wins;
+        # otherwise fall through to settlement.
+        close_reason = "settlement"
+        close_ts: datetime | None = None
+        close_underlying = 0.0
+        close_cost_at_close: float | None = None
+
+        if (profit_take_pct is not None or loss_stop_pct is not None) and ec > 0:
+            for check_ts in _intraday_check_intervals(
+                entry_ts, settlement_ts, intraday_check_interval_minutes,
+            ):
+                cc = _close_cost_per_share_at_ts(sess_df, order.legs, check_ts)
+                if cc is None:
+                    continue  # not all legs have a bar yet
+                # Per-share PnL at this check.
+                pnl_chk = ec - cc
+                # Convert to fraction of entry credit.
+                pnl_frac = pnl_chk / ec
+                if profit_take_pct is not None and pnl_frac >= profit_take_pct:
+                    close_reason = "profit_take"
+                    close_ts = check_ts
+                    close_underlying = float(
+                        underlying_price_lookup(check_ts, target_underlying)
+                    )
+                    close_cost_at_close = cc
+                    break
+                if loss_stop_pct is not None and pnl_frac <= -loss_stop_pct:
+                    close_reason = "loss_stop"
+                    close_ts = check_ts
+                    close_underlying = float(
+                        underlying_price_lookup(check_ts, target_underlying)
+                    )
+                    close_cost_at_close = cc
+                    break
+
+        # Determine settlement_cost: for early management it's the
+        # close_cost at the trigger time; for held-to-settlement it's
+        # intrinsic at settlement_ts.
+        if close_cost_at_close is not None:
+            settlement_cost = close_cost_at_close
+        else:
+            settlement_cost = _settle_position_intrinsic(order.legs, S_settle)
+            close_ts = settlement_ts
+            close_underlying = S_settle
 
         pnl_per_share = ec - settlement_cost
         # MES options multiplier is $5 per point.
@@ -414,6 +530,9 @@ def run_zero_dte_backtest(
             leg_strikes=tuple(l.strike for l in order.legs),
             leg_sides=tuple(l.side.value for l in order.legs),
             leg_quantities=tuple(l.quantity for l in order.legs),
+            close_reason=close_reason,
+            close_ts=close_ts,
+            close_underlying=close_underlying,
         ))
 
     return BacktestResult(

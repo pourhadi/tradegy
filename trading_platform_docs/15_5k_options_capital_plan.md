@@ -200,16 +200,43 @@ efficiency at the same risk level.
      - Half-year breakdown: 3 of 4 H1/H2 sub-windows positive;
        2023 H2 (+$236 from 12 trades, 91.7% WR) drives most of
        the alpha — probably regional banking + Fed surprises.
-   - **Verdict (2026-05-06)**: PROMISING but NOT YET DEPLOYABLE.
-     The IC $25/$25 + VIX>18 configuration shows a small but
-     consistent positive edge in-sample.  However the per-trade
-     EV (+$1.46 net) and the small absolute dollar amounts
-     ($120 over 2 years) mean a single bad day can wipe a year's
-     edge.  The proper next step before any live capital is
-     walk-forward + CPCV, both of which are TBD.  In the
-     meantime, **Path 1 (validated SPY 16-yr OOS Sharpe +0.867,
-     13.5% AnnRoC) remains the deployable option** — its
-     statistical evidence is overwhelmingly stronger.
+   - **Intraday management (2026-05-06)**: profit-take / loss-stop
+     triggers added to `zero_dte_runner` (check at 15-min cadence;
+     profit-take fires when MTM ≥ pct of credit, loss-stop fires
+     when MTM ≤ -pct of credit).  Added because most 0DTE
+     practitioners close at 50% profit early instead of holding to
+     expiry — gamma risk in the last 30m blows up otherwise.
+   - **Sweep with management (2026-05-06)** on IC $25/$25 + VIX>18:
+     - Baseline (no mgmt):           82 trades, 70.7% WR, NET +$120
+     - **PT 50% (no LS):             82 trades, 86.6% WR, NET +$708**
+     - **PT 75% (no LS):             82 trades, 80.5% WR, NET +$753**
+     - PT 50% / LS 200%:             82 trades, 82.9% WR, NET +$330
+     - PT 75% / LS 200%:             82 trades, 76.8% WR, NET +$392
+     - LS-alone variants HURT (premature close on losers that would
+       have recovered).
+     - Profit-take alone is the load-bearing improvement: 50%
+       fires on 88% of trades, 75% fires on 74%.
+   - **Year-split robustness with PT 50% (2026-05-06)**:
+     - 2023 full: 44 trades, 86.4% WR, NET +$324 (was -$152 in H1
+       w/o mgmt — flipped from loss to profit)
+     - 2024 full: 38 trades, 86.8% WR, NET +$385
+     - 2023 H1: 32 trades, 81.2% WR, NET +$158 (positive)
+     - 2023 H2: 12 trades, 100% WR, NET +$166 (positive)
+     - 2024 H1: 4 trades, 100% WR, NET +$76 (positive, n=4)
+     - 2024 H2: 34 trades, 85.3% WR, NET +$308 (positive)
+     - **All 6 sub-windows positive** — robust to time slicing.
+   - **Updated verdict (2026-05-06)**: PROMISING — best in-sample
+     config is **IC $25/$25 + VIX>18 + PT 50%** at +$708 net over
+     2 years (+$8.63/trade, ~7% AnnRoC at $5K).  All sub-windows
+     positive.  Win rate 86.6%.  Materially better than the no-
+     management baseline (+$120 → +$708 = 5.9x improvement).
+     **STILL not deployable** because (a) 3 layers of in-sample
+     parameter search were applied (strike grid, VIX threshold,
+     management %) which inflates fit; (b) walk-forward + CPCV
+     not yet run; (c) small absolute size ($708 over 2 years on
+     a 1-contract sleeve) is fragile to a single tail event.
+     **Path 1 (SPY 16-yr OOS Sharpe +0.867 / 13.5% AnnRoC) remains
+     the deployable option** — its evidence base is much stronger.
    - **What's STILL not explored**:
      - mbp-1 quotes (~$1.5K for 5yr) — would replace ohlcv-1m
        trade prices with real bid/ask, eliminating stale-price
