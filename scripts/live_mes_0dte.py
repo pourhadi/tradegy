@@ -88,6 +88,17 @@ VIX_GATE_MIN_CLOSE = 18.0
 PROFIT_TAKE_PCT = 0.50
 CONTRACTS = 1
 
+# Force-close trigger: at this UTC clock time on the entry day, any
+# still-open position is closed market-style to avoid expiry-bell
+# settlement complications.  19:55 UTC = 15:55 ET = 5 minutes before
+# the regular cash close (16:00 ET).
+FORCE_CLOSE_UTC: time = time(19, 55)
+
+# Kill-switch file path.  If present (regardless of contents), the
+# entry job blocks new entries AND the management job force-closes
+# any open position at next run.  Operator-friendly halt control.
+KILL_SWITCH_FILE = REPO_ROOT / "data" / "live_options" / "MES_0DTE_KILL"
+
 # Connection.
 IBKR_HOST = os.environ.get("IBKR_HOST", "127.0.0.1")
 IBKR_PORT = int(os.environ.get("IBKR_PORT", "4002"))
@@ -284,6 +295,40 @@ def load_entry_record(session_date: date) -> dict | None:
     return json.loads(path.read_text())
 
 
+def mark_entry_closed(
+    session_date: date,
+    *,
+    close_reason: str,
+    close_ts: datetime,
+    close_coid: str,
+    close_legs: list[dict],
+    close_credit_per_share: float,
+    pnl_per_share: float,
+) -> Path:
+    """Update the entry record to reflect that the position is closed.
+
+    Idempotent: re-marking an already-closed record is allowed and
+    just updates the close metadata (useful if the operator
+    re-submitted via TWS and wants to overwrite the auto-close
+    record).
+    """
+    path = ENTRY_RECORDS_DIR / f"{session_date.isoformat()}.json"
+    record = json.loads(path.read_text())
+    record["closed"] = True
+    record["close_reason"] = close_reason
+    record["close_ts"] = close_ts.isoformat()
+    record["close_client_order_id"] = close_coid
+    record["close_legs"] = close_legs
+    record["close_credit_per_share"] = close_credit_per_share
+    record["pnl_per_share"] = pnl_per_share
+    path.write_text(json.dumps(record, indent=2, default=str))
+    return path
+
+
+def kill_switch_active() -> bool:
+    return KILL_SWITCH_FILE.exists()
+
+
 # ── Main flows ─────────────────────────────────────────────────────
 
 
@@ -294,6 +339,11 @@ async def run_entry(dry_run: bool = False) -> int:
     # Skip weekends.
     if today.weekday() >= 5:
         log.info("weekend (dow=%d) — skipping", today.weekday())
+        return 0
+
+    # Kill-switch — operator-friendly halt.
+    if kill_switch_active():
+        log.warning("KILL-SWITCH active at %s — refusing entry", KILL_SWITCH_FILE)
         return 0
 
     # Don't double-enter.
@@ -400,34 +450,169 @@ async def run_entry(dry_run: bool = False) -> int:
         ib.disconnect()
 
 
+async def _quote_legs_into_snapshot(
+    ib, record_legs: list[dict], underlying_price: float, ts: datetime,
+):
+    """Re-quote each entry leg from IBKR live data and build a
+    ChainSnapshot suitable for the router's combo-pricing.
+    """
+    from ib_async import FuturesOption
+    from tradegy.execution.ibkr_options_router import (
+        _futures_option_trading_class,
+    )
+    from tradegy.options.chain import ChainSnapshot, OptionLeg, OptionSide
+
+    legs_out: list[OptionLeg] = []
+    for leg in record_legs:
+        expiry = date.fromisoformat(leg["expiry"])
+        tc = _futures_option_trading_class(expiry, "MES")
+        right = "C" if leg["side"] == "call" else "P"
+        contract = FuturesOption(
+            symbol="MES",
+            lastTradeDateOrContractMonth=expiry.strftime("%Y%m%d"),
+            strike=leg["strike"], right=right,
+            exchange="CME", currency="USD",
+            multiplier="5", tradingClass=tc,
+        )
+        qualified = await ib.qualifyContractsAsync(contract)
+        if not qualified or qualified[0].conId == 0:
+            log.error("could not qualify leg %s K=%s %s tc=%s",
+                      expiry, leg["strike"], right, tc)
+            return None
+        c = qualified[0]
+        ticker = ib.reqMktData(c, "", snapshot=False, regulatorySnapshot=False)
+        for _ in range(20):
+            await asyncio.sleep(0.5)
+            if (ticker.bid is not None and ticker.ask is not None
+                    and ticker.bid > 0 and ticker.ask > 0):
+                break
+        bid = ticker.bid if ticker.bid and ticker.bid > 0 else 0.0
+        ask = ticker.ask if ticker.ask and ticker.ask > 0 else 0.0
+        ib.cancelMktData(c)
+        log.info("leg %s K=%.0f q=%+d: bid=%.2f ask=%.2f",
+                 leg["side"], leg["strike"], leg["quantity"],
+                 bid, ask)
+        side = OptionSide.CALL if leg["side"] == "call" else OptionSide.PUT
+        legs_out.append(OptionLeg(
+            underlying=f"MES{expiry.strftime('%y%m')}",
+            expiry=expiry, strike=leg["strike"], side=side,
+            bid=bid, ask=ask, iv=0.0,
+            volume=0, open_interest=0, multiplier=5,
+        ))
+
+    return ChainSnapshot(
+        underlying="MES",
+        ts_utc=ts, underlying_price=underlying_price,
+        risk_free_rate=0.05, legs=tuple(legs_out),
+    )
+
+
+def build_close_order_from_record(record: dict):
+    """Build a CLOSING MultiLegOrder from an open-position entry
+    record.  Quantities are flipped vs entry: longs (+1) become
+    sells (-1) and shorts (-1) become buys (+1).  The combo is
+    tagged "<entry_tag>_close" so audit trails distinguish.
+
+    Pulled out as a pure helper so unit tests can verify the
+    flipping invariant without running asyncio / IBKR.
+    """
+    from tradegy.options.chain import OptionSide
+    from tradegy.options.positions import LegOrder, MultiLegOrder
+
+    expiry = date.fromisoformat(record["legs"][0]["expiry"])
+    flipped_legs = tuple(
+        LegOrder(
+            expiry=expiry,
+            strike=leg["strike"],
+            side=OptionSide.CALL if leg["side"] == "call" else OptionSide.PUT,
+            quantity=-leg["quantity"],
+        )
+        for leg in record["legs"]
+    )
+    return MultiLegOrder(
+        tag=f"{record['tag']}_close",
+        contracts=record["contracts"],
+        legs=flipped_legs,
+    )
+
+
+def build_close_coid(entry_coid: str, close_reason: str) -> str:
+    """Deterministic client_order_id for a closing combo.  The
+    router enforces idempotency by coid; using a per-reason
+    suffix means a second close attempt for a different reason
+    won't collide with the first."""
+    return f"{entry_coid}_close_{close_reason}"
+
+
+async def _submit_closing_combo(
+    ib, record: dict, snapshot, ts: datetime,
+    close_reason: str,
+) -> tuple[bool, str, list[dict], float]:
+    """Submit a CLOSING combo for the open position recorded in
+    `record` against the live `snapshot`.  Wraps the pure
+    `build_close_order_from_record` helper with the actual IBKR
+    submission.
+
+    Returns (success, close_coid, close_legs_metadata,
+    close_credit_per_share).  close_credit_per_share is the
+    cash flow at close (signed: + credit received, - debit paid).
+    """
+    from tradegy.execution.ibkr_options_router import IbkrOptionsRouter
+
+    close_order = build_close_order_from_record(record)
+    close_coid = build_close_coid(record["client_order_id"], close_reason)
+
+    router = IbkrOptionsRouter(ib=ib)
+    try:
+        managed = await router.place_combo(
+            order=close_order, snapshot=snapshot,
+            client_order_id=close_coid, ts_utc=ts,
+        )
+    except Exception as exc:
+        log.error("close place_combo failed: %r", exc)
+        return False, close_coid, [], 0.0
+
+    log.info("CLOSE combo placed: %s state=%s broker_id=%s",
+             close_coid, managed.state.name, managed.broker_order_id)
+
+    # Compute close credit per share for the receipt.  Closing a
+    # credit IC is a DEBIT (we pay to buy back) so this is typically
+    # negative.  signed sum(-quantity × mid) over CLOSE legs.
+    close_credit = sum(
+        -fl.quantity * ((cl.bid + cl.ask) / 2.0)
+        for fl, cl in zip(close_order.legs, snapshot.legs)
+    )
+    close_legs_meta = [
+        {
+            "expiry": fl.expiry.isoformat(),
+            "strike": fl.strike,
+            "side": fl.side.value,
+            "quantity": fl.quantity,
+            "close_bid": cl.bid,
+            "close_ask": cl.ask,
+            "close_mid": (cl.bid + cl.ask) / 2.0,
+        }
+        for fl, cl in zip(close_order.legs, snapshot.legs)
+    ]
+    return True, close_coid, close_legs_meta, close_credit
+
+
 async def run_management() -> int:
     today = date.today()
-    log.info("=== live_mes_0dte MGMT %s ===", today)
+    now_utc = datetime.now(tz=timezone.utc)
+    log.info("=== live_mes_0dte MGMT %s @ %s ===", today, now_utc.time())
+
     record = load_entry_record(today)
     if record is None:
         log.info("no entry record for %s — nothing to manage", today)
         return 0
     if record.get("closed"):
-        log.info("position already closed today — nothing to manage")
+        log.info("position already closed today (reason=%s) — nothing to do",
+                 record.get("close_reason", "?"))
         return 0
 
-    # Compute entry credit per share (signed: + credit, - debit).
-    # entry_per_share_signed = sum(-quantity × entry_mid) per leg.
-    entry_credit = sum(
-        -leg["quantity"] * leg["entry_mid"]
-        for leg in record["legs"]
-    )
-    log.info("entry credit per share: %+.2f", entry_credit)
-    if entry_credit <= 0:
-        log.warning("entry was a debit (%.2f) — profit-take logic may not "
-                    "apply; skipping", entry_credit)
-        return 0
-
-    # Connect, mark legs to current quote, compute MTM.
-    from ib_async import IB, FuturesOption
-    from tradegy.execution.ibkr_options_router import (
-        _futures_option_trading_class,
-    )
+    # Connect once for the management run.
+    from ib_async import IB
 
     ib = IB()
     try:
@@ -437,46 +622,81 @@ async def run_management() -> int:
         log.error("IB Gateway connection failed: %r", exc)
         return 2
 
-    close_cost_per_share = 0.0
     try:
-        for leg in record["legs"]:
-            expiry = date.fromisoformat(leg["expiry"])
-            tc = _futures_option_trading_class(expiry, "MES")
-            right = "C" if leg["side"] == "call" else "P"
-            contract = FuturesOption(
-                symbol="MES",
-                lastTradeDateOrContractMonth=expiry.strftime("%Y%m%d"),
-                strike=leg["strike"], right=right,
-                exchange="CME", currency="USD",
-                multiplier="5", tradingClass=tc,
-            )
-            qualified = await ib.qualifyContractsAsync(contract)
-            c = qualified[0]
-            ticker = ib.reqMktData(c, "", snapshot=False, regulatorySnapshot=False)
-            for _ in range(20):
-                await asyncio.sleep(0.5)
-                if ticker.bid is not None and ticker.ask is not None and ticker.bid > 0:
-                    break
-            mid = ((ticker.bid or 0.0) + (ticker.ask or 0.0)) / 2.0
-            ib.cancelMktData(c)
-            close_cost_per_share += -leg["quantity"] * mid
-            log.info("leg %s K=%.0f q=%+d: bid=%.2f ask=%.2f mid=%.2f",
-                     leg["side"], leg["strike"], leg["quantity"],
-                     ticker.bid or 0.0, ticker.ask or 0.0, mid)
+        # Pull current MES front-month price (used both to decide
+        # close-time triggers and to seed snapshot.underlying_price).
+        result = await fetch_mes_front_price(ib)
+        if result is None:
+            return 3
+        cur_price, _front_local_sym = result
 
-        pnl_per_share = entry_credit - close_cost_per_share
-        pnl_frac = pnl_per_share / entry_credit
-        log.info("PnL per share: %+.2f (%.1f%% of credit)", pnl_per_share, pnl_frac * 100)
+        # Re-quote the four legs from IBKR live data.
+        snapshot = await _quote_legs_into_snapshot(
+            ib, record["legs"], cur_price, now_utc,
+        )
+        if snapshot is None:
+            return 5
 
-        if pnl_frac >= PROFIT_TAKE_PCT:
-            log.info("PROFIT TAKE TRIGGERED (%.1f%% ≥ %.1f%%) — placing closing combo",
+        # Compute entry credit + current MTM.
+        entry_credit = sum(
+            -leg["quantity"] * leg["entry_mid"]
+            for leg in record["legs"]
+        )
+        # close_cost = -quantity × current_mid summed over original
+        # entry-leg directions (NOT flipped — this is the cost to
+        # CLOSE at current quotes given our existing position).
+        close_cost = sum(
+            -orig["quantity"] * ((cl.bid + cl.ask) / 2.0)
+            for orig, cl in zip(record["legs"], snapshot.legs)
+        )
+        pnl_per_share = entry_credit - close_cost
+        pnl_frac = pnl_per_share / entry_credit if entry_credit > 0 else 0.0
+        log.info("entry credit %+.2f, close cost %+.2f, PnL %+.2f (%.1f%% of credit)",
+                 entry_credit, close_cost, pnl_per_share, pnl_frac * 100)
+
+        # Decide close trigger.
+        force_close_due = now_utc.timetz() >= time(
+            FORCE_CLOSE_UTC.hour, FORCE_CLOSE_UTC.minute,
+            tzinfo=timezone.utc,
+        )
+        kill_switch = kill_switch_active()
+        close_reason: str | None = None
+        if kill_switch:
+            close_reason = "kill_switch"
+            log.warning("KILL-SWITCH file present at %s — force-closing",
+                        KILL_SWITCH_FILE)
+        elif pnl_frac >= PROFIT_TAKE_PCT:
+            close_reason = "profit_take"
+            log.info("PROFIT TAKE TRIGGERED (%.1f%% ≥ %.1f%%)",
                      pnl_frac * 100, PROFIT_TAKE_PCT * 100)
-            # TODO: wire actual closing combo through router.
-            log.warning("closing-combo submission NOT yet wired in this version; "
-                        "manually close in TWS or extend the daemon")
+        elif force_close_due:
+            close_reason = "force_close_eod"
+            log.info("FORCE-CLOSE TRIGGERED — past %s UTC, closing before "
+                     "expiry-bell mechanics", FORCE_CLOSE_UTC)
         else:
-            log.info("hold (%.1f%% < %.1f%% PT threshold)",
-                     pnl_frac * 100, PROFIT_TAKE_PCT * 100)
+            log.info("hold — no trigger fired (PT=%.1f%% < %.1f%%, "
+                     "force-close cutoff %s not reached)",
+                     pnl_frac * 100, PROFIT_TAKE_PCT * 100, FORCE_CLOSE_UTC)
+            return 0
+
+        # Submit closing combo.
+        success, close_coid, close_legs_meta, close_credit = (
+            await _submit_closing_combo(ib, record, snapshot, now_utc, close_reason)
+        )
+        if not success:
+            return 6
+
+        # Mark record closed atomically.
+        mark_entry_closed(
+            today,
+            close_reason=close_reason,
+            close_ts=now_utc,
+            close_coid=close_coid,
+            close_legs=close_legs_meta,
+            close_credit_per_share=close_credit,
+            pnl_per_share=pnl_per_share,
+        )
+        log.info("entry record marked closed (reason=%s)", close_reason)
         return 0
 
     finally:
