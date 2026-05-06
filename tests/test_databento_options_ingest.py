@@ -63,16 +63,32 @@ def test_parse_definitions_filters_to_outright_options_only(
         assert n_null == 0, f"unexpected nulls in {col}: {n_null}"
 
 
-def test_parse_definitions_deduplicates_by_instrument_id(
+def test_parse_definitions_deduplicates_by_raw_symbol(
     mes_options_x1a_csv_pair: dict[str, Path],
 ) -> None:
-    """Each instrument_id should appear exactly once after parsing.
+    """Each raw_symbol should appear exactly once after parsing.
     The raw definition file has many rows per contract (one per
     update event); the parser keeps only the first.
+
+    Why raw_symbol and not instrument_id: databento reuses
+    instrument_ids across contract listings (after a contract
+    expires, its id can be reassigned to a different new contract).
+    raw_symbol is unique per-contract for the contract's full
+    lifetime, making it the correct join key.  Detected 2026-05-06
+    when bars dated June 2024 were silently mis-paired with
+    Feb-2024 expirations via an instrument_id-keyed join.
     """
     defs = _parse_definitions(mes_options_x1a_csv_pair["definition"])
-    n_unique = defs["instrument_id"].n_unique()
-    assert len(defs) == n_unique
+    n_unique_raw_symbol = defs["raw_symbol"].n_unique()
+    assert len(defs) == n_unique_raw_symbol
+    # And as a sanity check on the bug's existence: at least one
+    # instrument_id appears more than once across the deduplicated
+    # frame (=> id is reused; raw_symbol-dedup keeps both).
+    n_unique_iid = defs["instrument_id"].n_unique()
+    assert n_unique_raw_symbol > n_unique_iid, (
+        "expected at least one instrument_id reuse in this dataset; "
+        "if zero, the test is no longer exercising the regression"
+    )
 
 
 def test_parse_definitions_underlying_links_to_mes_quarterly(

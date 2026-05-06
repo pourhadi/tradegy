@@ -37,6 +37,7 @@ _SLOW_FIXTURES = frozenset({
     "real_spx_chain_snapshots",
     "spy_chain_present",
     "mes_options_x1a_csv_pair",
+    "mes_options_chain_ingested",
 })
 
 
@@ -208,3 +209,38 @@ def mes_options_x1a_csv_pair():
             f"Missing: {[str(p) for p in missing]}"
         )
     return {"definition": def_csv, "ohlcv_1m": bars_csv}
+
+
+# ── Ingested mes_options_chain partitions ─────────────────────────
+#
+# The chain-reader tests exercise the parquet partitions written by
+# `scripts/ingest_mes_options_full_grid.py`.  That script unions all
+# 21 (1 quarterly + 20 daily) MES options CSV pairs into the
+# `mes_options_chain` source.  Tests fail clearly with the run
+# command if the partitions aren't on disk.
+
+
+@pytest.fixture(scope="session")
+def mes_options_chain_ingested():
+    """Confirm the mes_options_chain parquet partitions exist on
+    disk and return the source-root path.
+    """
+    raw_root = config.repo_root() / "data" / "raw"
+    chain_root = raw_root / "source=mes_options_chain"
+    if not chain_root.exists():
+        pytest.fail(
+            "mes_options_chain partitions are not on disk. "
+            "Per the no-synthetic-data rule, chain-reader tests "
+            "exercise real ingested partitions only. Run:\n"
+            "  uv run python scripts/ingest_mes_options_full_grid.py\n"
+            "(requires the 21 (definition + ohlcv-1m) CSV pairs "
+            "under /Users/dan/code/data/mes_options_*/)"
+        )
+    parts = list(chain_root.glob("date=*/data.parquet"))
+    if len(parts) < 100:
+        pytest.fail(
+            f"mes_options_chain has only {len(parts)} partitions; "
+            "expected hundreds (586 for the 2023-2024 dataset). "
+            "Re-run scripts/ingest_mes_options_full_grid.py."
+        )
+    return {"raw_root": raw_root, "chain_root": chain_root, "n_partitions": len(parts)}

@@ -104,13 +104,21 @@ _OHLCV_COLS_NEEDED = (
 
 def _parse_definitions(def_csv: Path) -> pl.DataFrame:
     """Read a databento definition CSV and reduce to one row per
-    instrument_id with strike/expiry/side/underlying.
+    raw_symbol with strike/expiry/side/underlying.
 
-    We take the FIRST row per instrument_id because the metadata
-    fields we use (strike, expiry, instrument_class, underlying) are
-    invariant after contract listing.  Update/correction rows
-    (security_update_action != 'A') still carry the same metadata but
-    we only need one copy.
+    We deduplicate by **raw_symbol** rather than instrument_id
+    because databento reuses instrument_ids across listings —
+    after a contract expires, its instrument_id can be reassigned
+    to a brand new (different strike, different expiry) contract.
+    raw_symbol is the human-readable contract identifier
+    (e.g., 'X1BM4 P5300') and is unique across the lifetime of
+    each contract.  Joining bars to definitions via raw_symbol
+    gives the correct strike/expiry pairing regardless of any
+    instrument_id reuse.
+
+    instrument_id is preserved on each row for downstream lookups
+    that need the venue-internal identifier, but it is NOT the
+    join key.
     """
     df = pl.read_csv(
         def_csv,
@@ -150,8 +158,11 @@ def _parse_definitions(def_csv: Path) -> pl.DataFrame:
         "strike_price"
     )
 
-    # Dedupe — take first occurrence per instrument_id.
-    df = df.unique(subset=["instrument_id"], keep="first", maintain_order=True)
+    # Dedupe — take first occurrence per raw_symbol.  raw_symbol is
+    # the contract's human-readable identifier and is unique per
+    # contract across its full lifetime; instrument_id is venue-
+    # internal and gets reused after expiry.
+    df = df.unique(subset=["raw_symbol"], keep="first", maintain_order=True)
 
     return df.select(["instrument_id", "raw_symbol", "underlying", "expiry", "strike", "side"])
 
@@ -190,11 +201,35 @@ def _parse_ohlcv(bars_csv: Path) -> pl.DataFrame:
 
 
 def _join_pair(def_csv: Path, bars_csv: Path) -> pl.DataFrame:
-    """Join one (definition, ohlcv-1m) pair into a per-leg time-series."""
-    defs = _parse_definitions(def_csv)
-    bars = _parse_ohlcv(bars_csv)
+    """Join one (definition, ohlcv-1m) pair into a per-leg time-
+    series, keying on raw_symbol/symbol.
 
-    joined = bars.join(defs, on="instrument_id", how="left")
+    Why raw_symbol and not instrument_id: databento reuses
+    instrument_ids across contract listings (after expiry, the
+    same numeric id can be reassigned to a new contract).  Joining
+    on instrument_id silently mis-pairs bars to stale definitions
+    and produces bars whose stated expiry predates the bar
+    timestamp.  raw_symbol is unique per-contract for the contract's
+    full lifetime.
+
+    Drop the bars' instrument_id before the join because the
+    definition's instrument_id is the canonical one and we don't
+    want a duplicate column.
+    """
+    defs = _parse_definitions(def_csv)
+    bars = _parse_ohlcv(bars_csv).drop("instrument_id")
+
+    # Join on bars.symbol == defs.raw_symbol.
+    joined = bars.join(
+        defs,
+        left_on="symbol",
+        right_on="raw_symbol",
+        how="left",
+    )
+    # The right-side raw_symbol gets renamed to None on suffix
+    # collision; keep the original `symbol` from bars and add a
+    # raw_symbol alias derived from it for downstream readers.
+    joined = joined.with_columns(pl.col("symbol").alias("raw_symbol"))
 
     # Rows that didn't match a C/P definition row are multi-leg
     # user-defined-strategy combos (instrument_class='T' in the raw
