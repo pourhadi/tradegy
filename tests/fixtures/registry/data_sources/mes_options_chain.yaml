@@ -1,0 +1,127 @@
+# Data source registry entry for MES (Micro E-mini S&P 500) futures
+# options chain, sourced from databento GLBX.MDP3.
+#
+# Added 2026-05-06 to support the $5K options capital plan Path 2 —
+# per trading_platform_docs/15_5k_options_capital_plan.md.
+#
+# This source is fundamentally different from spx_options_chain (and
+# its sibling equity-options sources):
+#
+#   * spx_options_chain (and ETF cousins) are EOD daily snapshots
+#     from ORATS — one row per (date, expiry, strike) with both call
+#     and put leg side-by-side, full bid/ask + IV.
+#   * mes_options_chain is an INTRADAY 1m time-series of trade prices
+#     keyed by (ts_utc, instrument_id) — one row per (minute,
+#     contract).  Bid/ask is NOT carried; mbp-1 quotes would cost
+#     ~$1.5K for 5yr, while ohlcv-1m gives us trades for ~$3.
+#
+# The data covers TWO option product families on MES futures, both
+# unioned into this one source:
+#
+#   * MES.OPT          — quarterly options (3rd-Friday Mar/Jun/Sep/Dec).
+#                        Useless for 0DTE (4 expiries/yr) but kept
+#                        for completeness.
+#   * X[1-5][A-D].OPT  — daily MES options (CME launched 2022-09-27).
+#                        Letter = day of week (A=Mon..D=Thu); number =
+#                        n-th occurrence of that weekday in the listing
+#                        month.  20 parents total, covering Mon-Thu of
+#                        every week of the year.
+#
+# Cadence is 1m (vs 1d for SPX/ETF chain sources) because 0DTE
+# strategies need intraday entry/exit.  Trade-off: ohlcv-1m only
+# emits a row when a contract trades in that minute, so the chain
+# is SPARSE — at any given minute only the contracts that traded
+# in that minute are present.  Strategies must handle a sparse
+# chain, looking up the front-month + nearest-strike + active expiry
+# rather than iterating over every listed contract.
+#
+# IMPORTANT: bid/ask approximation.  Because we have trades only,
+# the chain reader emits OptionLeg.bid = OptionLeg.ask = bar close.
+# Strategies that want a realistic spread must inflate ask /
+# deflate bid by the configured slippage at fill time.  The
+# slippage model is per-strategy, not per-source, since 0DTE iron
+# condors and 0DTE put credit spreads have different bid/ask
+# expectations.
+
+id: mes_options_chain
+version: v1
+description: >
+  MES (Micro E-mini S&P 500) futures options 1-minute OHLCV bars
+  from databento GLBX.MDP3, joined with the definition schema to
+  enrich each bar with strike / expiry / option-side / underlying
+  metadata.  Covers both the MES.OPT quarterly product and the
+  X[1-5][A-D].OPT daily product family.  Intraday cadence; sparse
+  chain (only contracts that traded in a given minute are present).
+type: market_data
+provider: databento
+revisable: false
+revision_policy: never_revised
+admission_rationale: >
+  Databento ohlcv-1m + definition is append-only, exchange-canonical
+  (CME GLBX.MDP3 venue feed).  Trade prices are venue-published trade
+  events aggregated to 1m bars; definition rows are venue-published
+  contract metadata at listing.  The ingest joins them on
+  instrument_id to produce a per-minute per-contract OHLCV time-
+  series.  Lookahead-free by construction.
+coverage:
+  start_date: 2023-01-01
+  end_date: 2024-12-31
+  gaps: []
+cadence: 1m
+fields:
+  - {name: ts_utc, type: timestamp}            # bar timestamp, UTC
+  - {name: instrument_id, type: int}           # databento contract id
+  - {name: raw_symbol, type: string}           # e.g. "X1AM4 C5050"
+  - {name: symbol, type: string}               # ohlcv-emitted symbol (same)
+  - {name: underlying, type: string}           # e.g. "MESM4"
+  - {name: expiry, type: date}                 # expiration date
+  - {name: strike, type: float}                # strike price
+  - {name: side, type: string}                 # "call" or "put"
+  - {name: open, type: float}
+  - {name: high, type: float}
+  - {name: low, type: float}
+  - {name: close, type: float}
+  - {name: volume, type: int}
+ingest:
+  format: databento_options_csv
+  timestamp_columns: [ts_event]
+session_calendar: CMES
+# MES options trade Globex hours.  Most contracts are illiquid until
+# near-expiry — only ATM / front-month near-expiry strikes have
+# minute-by-minute prints during RTH.  The week-long ceiling is the
+# same as MES futures (longest CME closure window).
+max_inactivity_seconds: 604800
+availability_latency:
+  median_seconds: 0.0
+  p99_seconds: 60.0
+  notes: >
+    Historical CSV has zero replay latency.  There is no live adapter
+    paired with this source yet; live trading would need a CME
+    options-on-futures live feed (databento live or IBKR-aggregated)
+    registered under the live/historical parity contract.
+licensing:
+  live_use: false   # no live adapter wired yet
+  backtest_use: true
+  redistribution: false
+known_issues:
+  - >
+    No bid/ask quotes — only trade prices (ohlcv-1m).  Per-leg bid/ask
+    is required for realistic fills; mbp-1 (~$1.5K for 5yr) carries
+    quotes but we have not yet ingested it.  The chain reader emits
+    OptionLeg.bid = OptionLeg.ask = bar close as a sentinel; strategies
+    MUST apply explicit slippage at fill time (recommended: 1-2 ticks
+    per side, where MES options tick = 0.05 = $0.25 per contract).
+  - >
+    Sparse chain — only contracts that traded in a given minute appear
+    in that minute's snapshot.  Strategies that want "the full chain
+    at time T" must look back to the most recent prior trade per
+    contract.  Iron-condor leg selection should expect that not every
+    target strike will have a recent print; the strategy must skip or
+    fall back when the desired leg is stale beyond the configured
+    freshness window.
+  - >
+    Two product families (quarterlies + dailies) live in one source.
+    The chain reader can filter by raw_symbol prefix when a strategy
+    only wants one family (e.g. 0DTE strategies want X-prefix only;
+    longer-DTE strategies might want MES.OPT only).
+audit_history: []

@@ -57,6 +57,7 @@ IngestFormat = Literal[
     "generic_csv",
     "sierra_chart_csv",
     "databento_ohlcv_csv",
+    "databento_options_csv",
     "orats_strikes_csv",
 ]
 

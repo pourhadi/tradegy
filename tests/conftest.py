@@ -36,6 +36,7 @@ _TESTS_REGISTRY_ROOT = Path(__file__).parent / "fixtures" / "registry"
 _SLOW_FIXTURES = frozenset({
     "real_spx_chain_snapshots",
     "spy_chain_present",
+    "mes_options_x1a_csv_pair",
 })
 
 
@@ -166,3 +167,44 @@ def real_spx_chain_snapshots():
             "snapshots — re-pull a non-empty window."
         )
     return snaps
+
+
+# ── Real databento options-chain fixture ──────────────────────────
+#
+# Per the same no-synthetic-data rule, the databento options ingest
+# tests exercise real on-disk CSV pairs pulled by
+# `/Users/dan/code/data/download_mes_options.py`.  X1A (1st Monday-
+# of-month MES daily options) was chosen as the test fixture parent
+# because it has the largest definition file (~75MB) and broadest
+# 2-yr coverage.
+
+
+@pytest.fixture(scope="session")
+def mes_options_x1a_csv_pair():
+    """Resolve the on-disk paths to the X1A definition + ohlcv-1m
+    CSVs.  Fails clearly with the pull command if either is missing.
+    """
+    data_root = Path("/Users/dan/code/data")
+    def_csv = (
+        data_root
+        / "mes_options_daily_x1a_definition"
+        / "x1a_definition_2023-01-01_2024-12-31.csv"
+    )
+    bars_csv = (
+        data_root
+        / "mes_options_daily_x1a_ohlcv_1m"
+        / "x1a_ohlcv_1m_2023-01-01_2024-12-31.csv"
+    )
+    missing = [p for p in (def_csv, bars_csv) if not p.exists()]
+    if missing:
+        pytest.fail(
+            "Real databento MES options X1A CSVs are not on disk. "
+            "Per the no-synthetic-data rule, options-ingest tests "
+            "exercise real CSVs only. Pull with:\n"
+            "  DATABENTO_API_KEY=... /Users/dan/code/data/.venv/bin/python "
+            "/Users/dan/code/data/download_mes_options.py --product X1A.OPT "
+            "--schema definition --start 2023-01-01 --end 2024-12-31 --confirm\n"
+            "  (also: --schema ohlcv-1m)\n"
+            f"Missing: {[str(p) for p in missing]}"
+        )
+    return {"definition": def_csv, "ohlcv_1m": bars_csv}
