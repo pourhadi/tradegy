@@ -49,7 +49,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Protocol
 
 from tradegy.execution.lifecycle import (
@@ -113,6 +113,87 @@ _OPTION_TRADING_CLASS = {
     "NDX": "NDXP",
     "RUT": "RUTW",
 }
+
+# Underlying families that route to IBKR FuturesOption (FOP) contracts
+# instead of the equity-style Option contract.  MES is the only one
+# admitted today; ES / NQ / MNQ / etc. would join here when needed.
+#
+# These futures-options universes have a complex tradingClass scheme
+# because CME lists daily-expiring options under a separate trading
+# class per (week-of-month, day-of-week) pair, distinct from the
+# quarterly product:
+#
+#   tradingClass = "MES"              → quarterly options on the third
+#                                       Friday of Mar/Jun/Sep/Dec.
+#                                       Same letter as the underlying
+#                                       future symbol.
+#   tradingClass = "X<W><D>"          → daily options:
+#                                         W = 1..5  week-of-month
+#                                         D = A (Mon), B (Tue),
+#                                             C (Wed), D (Thu)
+#                                       e.g. X1A = 1st Monday option,
+#                                            X3C = 3rd Wednesday option.
+#                                       (Friday options are covered
+#                                       by the quarterly product OR
+#                                       by EOM products which we don't
+#                                       trade in this lane.)
+#
+# The right tradingClass per expiry is computed on demand from the
+# expiry's day-of-week and which-occurrence-of-that-day-in-month.
+_FUTURES_OPTION_FAMILIES: frozenset[str] = frozenset({"MES"})
+
+# Day-of-week → trading-class letter for daily futures options.  CME's
+# convention: A=Mon, B=Tue, C=Wed, D=Thu (Friday isn't in the daily
+# product family for MES; quarterly Fridays use class "MES").
+_DAILY_OPT_DOW_LETTER: dict[int, str] = {
+    0: "A",  # Monday
+    1: "B",  # Tuesday
+    2: "C",  # Wednesday
+    3: "D",  # Thursday
+}
+
+
+def _is_quarterly_third_friday(d: date) -> bool:
+    """Return True iff d is the third Friday of Mar/Jun/Sep/Dec."""
+    if d.weekday() != 4:  # Friday
+        return False
+    if d.month not in (3, 6, 9, 12):
+        return False
+    # Third-Friday check: day must be 15..21.
+    return 15 <= d.day <= 21
+
+
+def _futures_option_trading_class(expiry: date, family: str) -> str:
+    """Return the IBKR tradingClass for a futures-option expiry.
+
+    Quarterly third Fridays (Mar/Jun/Sep/Dec) → tradingClass = family
+        (e.g. "MES").
+    Daily Mon-Thu                            → tradingClass = "X<W><D>"
+        where W = (day - 1)//7 + 1 in 1..5 and D = A/B/C/D for Mon..Thu.
+
+    Other dates (Friday weeklies, EOM, etc.) raise — the doc-15 spec
+    only trades quarterly Fridays + Mon-Thu dailies and we want a hard
+    failure if the strategy tries to enter a contract type we haven't
+    validated.
+    """
+    if _is_quarterly_third_friday(expiry):
+        return family
+    weekday = expiry.weekday()
+    if weekday not in _DAILY_OPT_DOW_LETTER:
+        raise ValueError(
+            f"_futures_option_trading_class: expiry {expiry} (weekday "
+            f"{weekday}) is not a Mon-Thu daily NOR a third-Friday "
+            f"quarterly — refusing to map.  Friday weeklies and EOM "
+            "products would need an explicit family extension."
+        )
+    week_of_month = (expiry.day - 1) // 7 + 1
+    if week_of_month not in (1, 2, 3, 4, 5):
+        raise ValueError(
+            f"_futures_option_trading_class: expiry {expiry} produced "
+            f"week_of_month={week_of_month} (must be 1..5)"
+        )
+    letter = _DAILY_OPT_DOW_LETTER[weekday]
+    return f"X{week_of_month}{letter}"
 
 
 class _IBLike(Protocol):
@@ -357,7 +438,7 @@ class IbkrOptionsRouter:
         self, underlying: str, leg_order: LegOrder,
     ) -> tuple[Any, tuple]:
         # Lazy import: ib_async excluded from unit-test path.
-        from ib_async import Option
+        from ib_async import FuturesOption, Option
 
         key = (
             underlying, leg_order.expiry,
@@ -366,6 +447,25 @@ class IbkrOptionsRouter:
         right = "C" if leg_order.side == OptionSide.CALL else "P"
         # IBKR option expiry format: YYYYMMDD (no dashes).
         expiry_str = leg_order.expiry.strftime("%Y%m%d")
+
+        # ── Futures-options branch (MES and friends) ─────────────
+        if underlying in _FUTURES_OPTION_FAMILIES:
+            tc = _futures_option_trading_class(leg_order.expiry, underlying)
+            # MES futures options use $5 multiplier (i.e. $5 per index
+            # point of premium).  Exchange is CME (the futures venue).
+            contract_kwargs = dict(
+                symbol=underlying,
+                lastTradeDateOrContractMonth=expiry_str,
+                strike=leg_order.strike,
+                right=right,
+                exchange="CME",
+                currency="USD",
+                multiplier="5",
+                tradingClass=tc,
+            )
+            return FuturesOption(**contract_kwargs), key
+
+        # ── Equity / index options branch (SPX, SPY, etc.) ───────
         exchange = _OPTION_EXCHANGE.get(underlying, _DEFAULT_OPTION_EXCHANGE)
         contract_kwargs = dict(
             symbol=underlying,
@@ -419,23 +519,29 @@ class IbkrOptionsRouter:
         """
         from ib_async import Bag, ComboLeg
 
+        # Exchange resolution: futures-options live on CME, equity/
+        # index options route via _OPTION_EXCHANGE → SMART/CBOE.
+        if underlying in _FUTURES_OPTION_FAMILIES:
+            bag_exchange = "CME"
+        else:
+            bag_exchange = _OPTION_EXCHANGE.get(
+                underlying, _DEFAULT_OPTION_EXCHANGE,
+            )
+
         legs: list[Any] = []
         for leg_order, leg_contract in zip(leg_orders, leg_contracts):
             ratio = abs(leg_order.quantity)
             action = "BUY" if leg_order.quantity > 0 else "SELL"
-            exchange = _OPTION_EXCHANGE.get(
-                underlying, _DEFAULT_OPTION_EXCHANGE,
-            )
             legs.append(ComboLeg(
                 conId=leg_contract.conId,
                 ratio=ratio,
                 action=action,
-                exchange=exchange,
+                exchange=bag_exchange,
             ))
         return Bag(
             symbol=underlying,
             currency="USD",
-            exchange=_OPTION_EXCHANGE.get(underlying, _DEFAULT_OPTION_EXCHANGE),
+            exchange=bag_exchange,
             comboLegs=legs,
         )
 

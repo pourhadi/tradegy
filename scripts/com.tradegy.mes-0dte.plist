@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd plist for the MES 0DTE paper-trading daemon.
+
+  Two scheduled invocations:
+
+    1. ENTRY    — weekdays at 10:25 ET (= 14:25 UTC during ET-DST,
+                  15:25 UTC during ET-Standard).  Connects to IB
+                  Gateway, checks VIX gate, computes strikes, places
+                  the IC combo if the gate is passing.
+
+    2. MANAGE   — weekdays every 15 min from 10:45 to 15:45 ET.
+                  Re-quotes the legs, computes MTM, triggers
+                  profit-take close at 50% of credit.
+
+  launchd uses LOCAL TIME by default; we set local-clock times.
+  Weekdays are 1..5 (Mon..Fri).
+
+  Install both:
+    cp scripts/com.tradegy.mes-0dte.plist \
+       ~/Library/LaunchAgents/com.tradegy.mes-0dte.plist
+    launchctl load ~/Library/LaunchAgents/com.tradegy.mes-0dte.plist
+
+  Verify:
+    launchctl list | grep tradegy.mes
+    tail -f data/live_options/mes_0dte_logs/$(date +%Y-%m-%d)_entry.log
+    tail -f data/live_options/mes_0dte_logs/$(date +%Y-%m-%d)_manage.log
+
+  Disable:
+    launchctl unload ~/Library/LaunchAgents/com.tradegy.mes-0dte.plist
+
+  Required env (read from ~/.zprofile):
+    IBKR_PAPER_ACCOUNT
+    IBKR_HOST           (default 127.0.0.1)
+    IBKR_PORT           (default 4002)
+
+  Prerequisites:
+    - IB Gateway running with paper credentials on the configured port
+    - The vix_daily source on disk has the prior session's close
+      (run /Users/dan/code/data/download_vix_daily.py daily before
+      market open if not already automated).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tradegy.mes-0dte-entry</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/dan/code/tradegy/scripts/live_mes_0dte_entry.sh</string>
+    </array>
+
+    <!-- Weekdays Mon-Thu at 10:25 ET (entry).  X-prefix daily MES
+         options expire Mon-Thu only; Friday options trade only as
+         third-Friday quarterlies which we DON'T target in this lane.
+         So skip Friday entry. -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>25</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>25</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>25</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>25</integer></dict>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/Users/dan/code/tradegy/data/live_options/mes_0dte_logs/launchd_entry.out</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/dan/code/tradegy/data/live_options/mes_0dte_logs/launchd_entry.err</string>
+
+    <key>KeepAlive</key>
+    <false/>
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

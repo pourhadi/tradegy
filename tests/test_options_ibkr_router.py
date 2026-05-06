@@ -139,6 +139,18 @@ def _stub_ib_async(monkeypatch):
         conId: int = 0
 
     @dataclass
+    class _StubFuturesOption:
+        symbol: str = ""
+        lastTradeDateOrContractMonth: str = ""
+        strike: float = 0.0
+        right: str = ""
+        exchange: str = ""
+        currency: str = ""
+        multiplier: str = ""
+        tradingClass: str = ""
+        conId: int = 0
+
+    @dataclass
     class _StubComboLeg:
         conId: int = 0
         ratio: int = 0
@@ -165,6 +177,7 @@ def _stub_ib_async(monkeypatch):
     import types
     mod = types.ModuleType("ib_async")
     mod.Option = _StubOption
+    mod.FuturesOption = _StubFuturesOption
     mod.Bag = _StubBag
     mod.ComboLeg = _StubComboLeg
     mod.LimitOrder = _StubLimitOrder
@@ -334,3 +347,105 @@ def test_subscriber_notified_on_submission(real_spx_chain_snapshots):
     coid, target = notifications[0]
     assert coid == "notify"
     assert target == OrderState.SUBMITTED
+
+
+# ── Futures-options (MES) trading-class logic ────────────────────
+
+
+def test_futures_option_trading_class_quarterly_third_friday():
+    """Third Friday of Mar/Jun/Sep/Dec → tradingClass = family root."""
+    from datetime import date
+    from tradegy.execution.ibkr_options_router import (
+        _futures_option_trading_class,
+    )
+    # Mar 21 2025 is the third Friday of March 2025.
+    assert _futures_option_trading_class(date(2025, 3, 21), "MES") == "MES"
+    # Jun 20 2025 — third Friday of June.
+    assert _futures_option_trading_class(date(2025, 6, 20), "MES") == "MES"
+
+
+def test_futures_option_trading_class_daily():
+    """Mon-Thu daily expiries → tradingClass = X<week-of-month><dow>."""
+    from datetime import date
+    from tradegy.execution.ibkr_options_router import (
+        _futures_option_trading_class,
+    )
+    # Jun 2 2025 = first Monday of June → X1A
+    assert _futures_option_trading_class(date(2025, 6, 2), "MES") == "X1A"
+    # Jun 3 2025 = first Tuesday of June → X1B
+    assert _futures_option_trading_class(date(2025, 6, 3), "MES") == "X1B"
+    # Jun 4 2025 = first Wednesday → X1C
+    assert _futures_option_trading_class(date(2025, 6, 4), "MES") == "X1C"
+    # Jun 5 2025 = first Thursday → X1D
+    assert _futures_option_trading_class(date(2025, 6, 5), "MES") == "X1D"
+    # Jun 9 2025 = second Monday → X2A
+    assert _futures_option_trading_class(date(2025, 6, 9), "MES") == "X2A"
+    # Jun 30 2025 = fifth Monday (day=30 → week = (30-1)//7+1 = 5) → X5A
+    assert _futures_option_trading_class(date(2025, 6, 30), "MES") == "X5A"
+
+
+def test_futures_option_trading_class_rejects_friday_non_quarterly():
+    """A non-third-Friday Friday (e.g. weekly Friday) is not in our
+    admitted spec — must raise.
+    """
+    from datetime import date
+    import pytest
+    from tradegy.execution.ibkr_options_router import (
+        _futures_option_trading_class,
+    )
+    # Jun 6 2025 is a Friday but not the third Friday (Jun 20 is).
+    with pytest.raises(ValueError, match="Mon-Thu daily NOR a third-Friday"):
+        _futures_option_trading_class(date(2025, 6, 6), "MES")
+
+
+def test_build_unqualified_contract_emits_futures_option_for_mes():
+    """For MES underlyings the router must emit FuturesOption with
+    multiplier='5', exchange='CME', and the right tradingClass.
+    """
+    from datetime import date
+    from tradegy.execution.ibkr_options_router import IbkrOptionsRouter
+    from tradegy.options.chain import OptionSide
+    from tradegy.options.positions import LegOrder
+
+    ib = _MockIB()
+    router = IbkrOptionsRouter(ib=ib)
+    leg = LegOrder(
+        expiry=date(2025, 6, 9),  # 2nd Monday of June 2025
+        strike=5400.0,
+        side=OptionSide.PUT,
+        quantity=-1,
+    )
+    contract, key = router._build_unqualified_contract("MES", leg)
+    assert contract.symbol == "MES"
+    assert contract.lastTradeDateOrContractMonth == "20250609"
+    assert contract.strike == 5400.0
+    assert contract.right == "P"
+    assert contract.exchange == "CME"
+    assert contract.multiplier == "5"
+    assert contract.tradingClass == "X2A"
+    # Equity Option fields (tradingClass) shouldn't bleed; the
+    # FuturesOption stub is its own type.  Verify by class name.
+    assert type(contract).__name__ == "_StubFuturesOption"
+
+
+def test_build_unqualified_contract_emits_equity_option_for_spx():
+    """Non-MES underlyings still go through the equity-options
+    branch (Option, not FuturesOption).
+    """
+    from datetime import date
+    from tradegy.execution.ibkr_options_router import IbkrOptionsRouter
+    from tradegy.options.chain import OptionSide
+    from tradegy.options.positions import LegOrder
+
+    ib = _MockIB()
+    router = IbkrOptionsRouter(ib=ib)
+    leg = LegOrder(
+        expiry=date(2026, 1, 16),
+        strike=4500.0,
+        side=OptionSide.CALL,
+        quantity=-1,
+    )
+    contract, key = router._build_unqualified_contract("SPX", leg)
+    assert type(contract).__name__ == "_StubOption"
+    assert contract.symbol == "SPX"
+    assert contract.tradingClass == "SPXW"
