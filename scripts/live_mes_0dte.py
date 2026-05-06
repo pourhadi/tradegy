@@ -342,9 +342,17 @@ def kill_switch_active() -> bool:
 # ── Main flows ─────────────────────────────────────────────────────
 
 
-async def run_entry(dry_run: bool = False) -> int:
+async def run_entry(dry_run: bool = False, bypass_gate: bool = False) -> int:
     today = date.today()
     log.info("=== live_mes_0dte ENTRY %s ===", today)
+    if bypass_gate and not dry_run:
+        log.error("--bypass-gate REQUIRES --dry-run.  Bypassing the VIX gate "
+                  "in live mode would submit trades outside the validated "
+                  "regime, against the pre-registered spec.  Refusing.")
+        return 1
+    if bypass_gate:
+        log.warning("--bypass-gate active — VIX freshness + threshold checks "
+                    "are SKIPPED.  Strictly for dry-run plumbing verification.")
 
     # Skip weekends.
     if today.weekday() >= 5:
@@ -362,23 +370,27 @@ async def run_entry(dry_run: bool = False) -> int:
         return 0
 
     # 1. VIX gate.
-    result = prior_session_vix_close(today)
-    if result is None:
-        log.error("could not load prior-session VIX close")
-        return 1
-    vix, vix_date = result
-    staleness_days = (today - vix_date).days
-    log.info("prior-session VIX close: %.2f (from %s, %d day(s) stale)",
-             vix, vix_date, staleness_days)
-    if staleness_days > VIX_MAX_STALENESS_DAYS:
-        log.error("VIX data is too stale (%d days > %d max) — refusing "
-                  "entry.  Run download_vix_daily.py + ingest first.",
-                  staleness_days, VIX_MAX_STALENESS_DAYS)
-        return 1
-    if vix <= VIX_GATE_MIN_CLOSE:
-        log.info("VIX gate not passing (%.2f ≤ %.2f) — no entry today",
-                 vix, VIX_GATE_MIN_CLOSE)
-        return 0
+    if bypass_gate:
+        vix, vix_date = -1.0, today
+        log.info("(VIX gate bypassed)")
+    else:
+        result = prior_session_vix_close(today)
+        if result is None:
+            log.error("could not load prior-session VIX close")
+            return 1
+        vix, vix_date = result
+        staleness_days = (today - vix_date).days
+        log.info("prior-session VIX close: %.2f (from %s, %d day(s) stale)",
+                 vix, vix_date, staleness_days)
+        if staleness_days > VIX_MAX_STALENESS_DAYS:
+            log.error("VIX data is too stale (%d days > %d max) — refusing "
+                      "entry.  Run download_vix_daily.py + ingest first.",
+                      staleness_days, VIX_MAX_STALENESS_DAYS)
+            return 1
+        if vix <= VIX_GATE_MIN_CLOSE:
+            log.info("VIX gate not passing (%.2f ≤ %.2f) — no entry today",
+                     vix, VIX_GATE_MIN_CLOSE)
+            return 0
 
     # 2. Connect.
     from ib_async import IB
@@ -730,12 +742,18 @@ def main() -> int:
                    help="Run intraday management instead of entry.")
     p.add_argument("--dry-run", action="store_true",
                    help="Run entry pipeline but skip the actual submission.")
+    p.add_argument("--bypass-gate", action="store_true",
+                   help="Skip the VIX freshness + threshold gate "
+                        "(requires --dry-run).  Use only to verify the "
+                        "full entry pipeline plumbing on a no-trade day.")
     args = p.parse_args()
 
     if args.manage:
         return asyncio.run(run_management())
     else:
-        return asyncio.run(run_entry(dry_run=args.dry_run))
+        return asyncio.run(run_entry(
+            dry_run=args.dry_run, bypass_gate=args.bypass_gate,
+        ))
 
 
 if __name__ == "__main__":
