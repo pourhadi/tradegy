@@ -1,0 +1,30 @@
+# MES/MNQ closing-price ratio at common 1m timestamps.
+# Cross-index pair ratio per QuantStart-style sector-rotation thesis.
+# Documented half-life of cross-index pairs is 30-60 minutes per literature
+# (vs basis-arb pairs at <1m which are HFT-exhausted).
+
+id: mes_mnq_close_ratio
+version: v1
+description: >
+  Element-wise ratio mes_1m_bars.close / mnq_1m_bars.close at every
+  1m timestamp where both have a bar. Cross-index pair: documented
+  rotation timescale of 30-60 minutes; not arbitrage-tethered.
+type: derived
+inputs:
+  - feature_id: mes_1m_bars
+  - feature_id: mnq_1m_bars
+computation:
+  type: registered_transform
+  transform_id: two_series_ratio
+  parameters:
+    column: close
+    join_strategy: inner
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 100.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

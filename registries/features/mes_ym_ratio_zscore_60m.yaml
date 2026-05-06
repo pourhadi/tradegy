@@ -1,0 +1,27 @@
+# 60-bar (1-hour) rolling z-score of mes_ym_close_ratio.
+# Lookback matches research-suggested 30-60 minute half-life of
+# cross-index pair mean reversion.
+
+id: mes_ym_ratio_zscore_60m
+version: v1
+description: >
+  Rolling 60-bar z-score of mes_ym_close_ratio. Used by spread-fade
+  pairs strategies on cross-index futures.
+type: derived
+inputs:
+  - feature_id: mes_ym_close_ratio
+computation:
+  type: registered_transform
+  transform_id: rolling_zscore
+  parameters:
+    window_bars: 60
+    column: value
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: -10.0
+  max: 10.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development
