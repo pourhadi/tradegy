@@ -128,11 +128,27 @@ efficiency at the same risk level.
      122,965 1m bars + 357,034 definition records, total spend $0.59.
      Stored at `/Users/dan/code/data/mes_options_ohlcv_1m/` and
      `/Users/dan/code/data/mes_options_definition/`. Quarterlies-only
-     dataset is **NOT sufficient** for 0DTE; the X-prefix dailies are
-     the next acquisition.
-   - Probe scripts: `download_mes_options.py` (parent-symbol
-     downloader), `probe_polygon_mes_options.py` (now retracted —
-     probe was not needed once databento was verified).
+     dataset is **NOT sufficient** for 0DTE — only 4 expiries/yr.
+   - **2023-2024 X-prefix dailies acquired 2026-05-06** (the actual
+     0DTE feed). All 20 X[1-5][A-D] parent symbols downloaded for
+     both `definition` and `ohlcv-1m` schemas:
+     - **2.26M definition records** (per-contract metadata; 1.43GB raw CSV)
+     - **898K ohlcv-1m bars** (per-minute trades; 98MB raw CSV)
+     - **364 distinct 0DTE expirations** in the 2023-2024 window
+       (90% of the theoretical 403 = 252 trading days × 4 Mon-Thu / 5
+       weekdays). DoW spread: 88 Mon, 95 Tue, 94 Wed, 92 Thu — all
+       four 0DTE weekdays uniformly covered.
+     - 9 underlying futures (MESH3..MESZ4 quarterlies)
+     - Round spend: $1.51 definitions + $3.09 bars = **$4.60**
+     - **Total round spend (quarterlies + dailies): $5.19** for full
+       retail-grade 2-year MES options coverage.
+     - Stored at `/Users/dan/code/data/mes_options_daily_<parent>_
+       <schema>/` (40 directories total, one per parent × schema).
+   - Downloader: `/Users/dan/code/data/download_mes_options.py`
+     supports `--product {quarterlies|dailies|all|<parent>}` with
+     resume + retry semantics. The Polygon probe `probe_polygon_mes_
+     options.py` is retracted — was not needed once databento was
+     verified.
 
 2. **Adapted strategy classes:**
    - `mes_0dte_iron_condor` — same as `iron_condor_45dte_d16` but on
