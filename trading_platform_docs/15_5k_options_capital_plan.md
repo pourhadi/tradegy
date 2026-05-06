@@ -102,12 +102,37 @@ efficiency at the same risk level.
 ### What we need
 
 1. **MES options chain data with intraday quotes** (for 0DTE testing):
-   - Polygon.io: $99-199/mo, has options/futures historical
-   - CBOE Datashop: ~$300-1000 one-time for MES options historical
-   - CME DataMine: enterprise pricing, generally not retail
-   - **My recommendation:** Polygon $99/mo trial → 1 month of historical
-     covers the backtest scope; cancel after if strategy fails
-     validation.
+   - **Resolved 2026-05-05**: covered by existing databento `GLBX.MDP3`
+     subscription. No Polygon, no CBOE Datashop, no extra subscription
+     needed. Two parent symbology trees, both verified live via
+     `metadata.get_cost`:
+     - `MES.OPT` → standard quarterly options on quarterly futures
+       (3rd Friday of Mar/Jun/Sep/Dec). 4 expiries/year. **Useless for
+       0DTE** (only 4 zero-DTE days/year). Cost: ~$0.41/yr `ohlcv-1m`,
+       ~$0.18/yr `definition`.
+     - `X[1-5][A-D].OPT` → daily MES options. Letter = day of week
+       (A=Mon, B=Tue, C=Wed, D=Thu). Number = nth occurrence of that
+       weekday in the listing month. **This is the 0DTE feed.** Up to
+       20 parent symbols (5 weeks × 4 weekdays). Cost: ~$0.10/yr per
+       parent for `ohlcv-1m`, ~$0.05/yr for `definition`. Daily MES
+       options launched at CME 2022-09-27, so dailies coverage starts
+       there.
+   - **Total cost for full retail MES options coverage** (verified
+     via `metadata.get_cost` 2026-05-05; full X[1-5][A-D] grid):
+     - 2024 (1 year): $0.59 quarterlies + $2.64 dailies = **$3.23**
+       (dailies breakdown: $1.80 ohlcv-1m + $0.84 definition across
+       all 20 daily-options parent symbols)
+     - 2020-2024 (5 years, dailies only post-Sep-2022):
+       ~$2.95 quarterlies + ~$5.93 dailies ≈ **$8.88**
+   - 2024 quarterly snapshot already pulled 2026-05-05 (sanity check):
+     122,965 1m bars + 357,034 definition records, total spend $0.59.
+     Stored at `/Users/dan/code/data/mes_options_ohlcv_1m/` and
+     `/Users/dan/code/data/mes_options_definition/`. Quarterlies-only
+     dataset is **NOT sufficient** for 0DTE; the X-prefix dailies are
+     the next acquisition.
+   - Probe scripts: `download_mes_options.py` (parent-symbol
+     downloader), `probe_polygon_mes_options.py` (now retracted —
+     probe was not needed once databento was verified).
 
 2. **Adapted strategy classes:**
    - `mes_0dte_iron_condor` — same as `iron_condor_45dte_d16` but on
@@ -163,7 +188,7 @@ deploy. Same standard that killed pre-FOMC drift.
 
 | Metric | Path 1: $5K SPY validated | Path 2: $5K MES 0DTE proposed |
 |---|---|---|
-| Data needed | None (we have it) | Polygon $99/mo or CBOE $300-1k |
+| Data needed | None (we have it) | Existing databento, ~$10 for 5yr full daily |
 | Strategy code | Exists | Needs ~1 day eng |
 | Walk-forward validated? | YES (16yr, +0.867 OOS Sharpe) | Not yet |
 | Intraday-compliant? | NO (multi-day) | YES (0DTE) |
@@ -179,10 +204,16 @@ deploy. Same standard that killed pre-FOMC drift.
    Run the validated SPY config at $5K capital sizing. Paper-trade for
    one full options cycle (~30 days) to confirm execution + verify
    the live behavior matches the backtest.
-2. **Sign up for Polygon $99/mo trial** for MES options data.
+2. **Pull X-prefix daily MES options data** via the existing
+   `download_mes_options.py` script (databento subscription already
+   covers it). 2-3 year window first (~$5), extend if Phase 2 results
+   warrant it.
 
 ### Weeks 2-4
-3. **Pull MES options data** via Polygon. Cost-then-stop convention.
+3. **Build option-chain assembly logic** — convert databento
+   `definition` records to the project's `ChainSnapshot`/`OptionLeg`
+   dataclasses (`src/tradegy/options/chain.py`), with the X-prefix
+   contracts mapped to their MES future underlying.
 4. **Build 0DTE strategy classes** (`mes_0dte_iron_condor`,
    `mes_0dte_pcs`, etc.) — extension of the existing options strategy
    framework.
@@ -191,7 +222,8 @@ deploy. Same standard that killed pre-FOMC drift.
 ### Weeks 4-6
 6. **If MES 0DTE passes gates**: paper-trade alongside the live SPY
    strategy. Compare AnnRoC and drawdown profile.
-7. **If MES 0DTE fails gates**: stick with Path 1. Cancel Polygon sub.
+7. **If MES 0DTE fails gates**: stick with Path 1. The data spend
+   was ~$10 — sunk cost is trivial; honest kill, not a regret.
 
 ### Months 2-6
 8. **Scale Path 1 to $10-15K** as capital grows (mechanism scales
