@@ -259,7 +259,8 @@ def ingest_databento_options_pair(
     *,
     out_dir: Path | None = None,
     append: bool = False,
-) -> IngestResult:
+    skip_empty: bool = False,
+) -> IngestResult | None:
     """Ingest a single (definition, ohlcv-1m) CSV pair.
 
     The source's `IngestSpec.format` must be `databento_options_csv`.
@@ -289,6 +290,8 @@ def ingest_databento_options_pair(
     joined = _join_pair(def_csv, bars_csv)
     rows_in_pair = joined.height
     if rows_in_pair == 0:
+        if skip_empty:
+            return None
         raise ValueError(
             f"join of {def_csv.name} + {bars_csv.name} produced zero rows"
         )
@@ -377,11 +380,24 @@ def ingest_databento_options_grid(
         raise ValueError("pairs list is empty")
 
     last_result: IngestResult | None = None
-    for i, (def_csv, bars_csv) in enumerate(pairs):
-        last_result = ingest_databento_options_pair(
+    n_skipped_empty = 0
+    n_appended = 0
+    for def_csv, bars_csv in pairs:
+        result = ingest_databento_options_pair(
             def_csv, bars_csv, source,
             out_dir=out_dir,
-            append=(i > 0),
+            append=(n_appended > 0),
+            skip_empty=True,
         )
-    assert last_result is not None
+        if result is None:
+            n_skipped_empty += 1
+            continue
+        last_result = result
+        n_appended += 1
+    if last_result is None:
+        raise ValueError(
+            f"all {len(pairs)} pairs were empty — no data ingested"
+        )
+    if n_skipped_empty > 0:
+        print(f"  ({n_skipped_empty} empty CSV pair(s) skipped)")
     return last_result

@@ -225,18 +225,39 @@ efficiency at the same risk level.
      - 2024 H1: 4 trades, 100% WR, NET +$76 (positive, n=4)
      - 2024 H2: 34 trades, 85.3% WR, NET +$308 (positive)
      - **All 6 sub-windows positive** — robust to time slicing.
-   - **Updated verdict (2026-05-06)**: PROMISING — best in-sample
-     config is **IC $25/$25 + VIX>18 + PT 50%** at +$708 net over
-     2 years (+$8.63/trade, ~7% AnnRoC at $5K).  All sub-windows
-     positive.  Win rate 86.6%.  Materially better than the no-
-     management baseline (+$120 → +$708 = 5.9x improvement).
-     **STILL not deployable** because (a) 3 layers of in-sample
-     parameter search were applied (strike grid, VIX threshold,
-     management %) which inflates fit; (b) walk-forward + CPCV
-     not yet run; (c) small absolute size ($708 over 2 years on
-     a 1-contract sleeve) is fragile to a single tail event.
-     **Path 1 (SPY 16-yr OOS Sharpe +0.867 / 13.5% AnnRoC) remains
-     the deployable option** — its evidence base is much stronger.
+   - **Pre-registered OOS holdout (2026-05-06)**: spec
+     IC $25/$25 + VIX>18 + PT 50% locked BEFORE pulling Jan-Apr
+     2025 data.  Pass criterion (also pre-registered): avg net
+     P&L per trade ≥ +$4.32 (= 50% of in-sample +$8.63).
+     **OOS RESULT: PASS — by huge margin.**
+     - 35 trades, **91.4% win rate**, NET **+$1,427** in 4 months
+     - **+$40.78 per trade** (4.7x in-sample EV)
+     - Best trade +$202, worst -$97
+     - 30 of 35 closed via PT 50% (5 settled to expiry)
+     - Per-month: Jan +$-7 (flat, 3 trades), Feb +$56, Mar +$415
+       (100% WR), Apr +$963 (94.1% WR)
+     - April 7-9 tariff-news days contributed +$494 (3 trades).
+       Even excluding those, OOS = +$933/32 trades = +$29/trade
+       (still 3.4x in-sample EV)
+     - $1.59 OOS data acquisition cost
+   - **Updated verdict (2026-05-06)**: VALIDATED at small scale.
+     The IC $25/$25 + VIX>18 + PT 50% spec passed pre-registered
+     OOS by 9.4x the threshold, on a 4-month holdout that
+     included the April-2025 tariff-driven vol spike (favorable
+     regime for short-vol).  In-sample evidence + pre-registered
+     OOS pass = significantly stronger than "in-sample only".
+     **Caveats remaining**: (a) 35 OOS trades is still a small
+     sample; (b) the OOS window over-sampled high-vol days from
+     the tariff regime; (c) walk-forward across multiple year
+     boundaries + CPCV still not run; (d) deployment requires a
+     SPAN broker (IBKR works) and the IC is short-vol — a vol-
+     of-vol shock can blow through the wings before management
+     fires.  **Recommended deploy decision**: paper-trade at
+     1-contract sizing with $5K notional capital allocation for
+     30 sessions of live conditions; compare to backtest. If
+     parity, scale to $10K/2-contract.  **Path 1 (SPY 16-yr OOS
+     Sharpe +0.867 / 13.5% AnnRoC) remains the more
+     statistically-grounded option** for someone risk-averse.
    - **What's STILL not explored**:
      - mbp-1 quotes (~$1.5K for 5yr) — would replace ohlcv-1m
        trade prices with real bid/ask, eliminating stale-price
