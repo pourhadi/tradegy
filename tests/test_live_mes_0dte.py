@@ -213,6 +213,166 @@ def test_prior_session_vix_close_signature(daemon, tmp_path, monkeypatch) -> Non
     assert prior_date == _date(2026, 5, 1)
 
 
+# ── compute_close_cost / intrinsic-fallback regression ──────────
+
+
+class _FakeSide:
+    """Mimics OptionSide enum's `.value` attribute for the helper."""
+
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+
+class _FakeLeg:
+    """Quoted leg shape the helper consumes.  Mirrors the live
+    OptionLeg's shape (`side`, `bid`, `ask`) without importing the
+    project's options module — keeps this test file usable from
+    helpers tests alone."""
+
+    def __init__(self, side: str, bid: float, ask: float) -> None:
+        self.side = _FakeSide(side)
+        self.bid = bid
+        self.ask = ask
+
+
+def test_compute_leg_close_mid_uses_quoted_mid_when_quotes_present(daemon) -> None:
+    mid, used_intrinsic = daemon.compute_leg_close_mid(
+        leg_side="call", strike=5400.0, bid=2.0, ask=2.4, cur_underlying=5450.0,
+    )
+    assert mid == pytest.approx(2.2)
+    assert used_intrinsic is False
+
+
+def test_compute_leg_close_mid_falls_back_to_intrinsic_when_quotes_collapse(
+    daemon,
+) -> None:
+    """Both bid and ask zero — the canonical post-expiry quote
+    collapse.  Must mark to intrinsic vs current underlying, not
+    silently average to zero.  This is the regression for the
+    2026-05-06 bug where the daemon recorded +$3.25 profit_take on
+    an expired position.
+    """
+    # Call ITM by 8 points → intrinsic = 8.0.
+    mid, used_intrinsic = daemon.compute_leg_close_mid(
+        leg_side="call", strike=5400.0, bid=0.0, ask=0.0, cur_underlying=5408.0,
+    )
+    assert mid == pytest.approx(8.0)
+    assert used_intrinsic is True
+
+
+def test_compute_leg_close_mid_call_otm_intrinsic_is_zero(daemon) -> None:
+    mid, used_intrinsic = daemon.compute_leg_close_mid(
+        leg_side="call", strike=5400.0, bid=0.0, ask=0.0, cur_underlying=5395.0,
+    )
+    assert mid == pytest.approx(0.0)
+    assert used_intrinsic is True
+
+
+def test_compute_leg_close_mid_put_itm_intrinsic(daemon) -> None:
+    # Put ITM by 5 points (underlying below strike).
+    mid, used_intrinsic = daemon.compute_leg_close_mid(
+        leg_side="put", strike=5400.0, bid=0.0, ask=0.0, cur_underlying=5395.0,
+    )
+    assert mid == pytest.approx(5.0)
+    assert used_intrinsic is True
+
+
+def test_compute_close_cost_full_ic_max_profit_at_expiry(daemon) -> None:
+    """IC keeps full credit at expiry: underlying lands inside the
+    short strikes and all legs collapse to bid=0/ask=0.  Without
+    the intrinsic fallback this would falsely report close_cost=0
+    and PnL = full credit, hiding any actual settlement loss.
+    Here the underlying really is between strikes, so intrinsic IS
+    zero for all legs and total close cost IS zero — the fallback
+    just ensures that conclusion comes from the math, not from a
+    quote-collapse coincidence.
+    """
+    legs = [
+        # Long  put  K=5350 q=+1
+        {"strike": 5350.0, "side": "put",  "quantity": +1, "entry_mid": 1.10},
+        # Short put  K=5375 q=-1
+        {"strike": 5375.0, "side": "put",  "quantity": -1, "entry_mid": 2.50},
+        # Short call K=5425 q=-1
+        {"strike": 5425.0, "side": "call", "quantity": -1, "entry_mid": 2.40},
+        # Long  call K=5450 q=+1
+        {"strike": 5450.0, "side": "call", "quantity": +1, "entry_mid": 1.05},
+    ]
+    snap = [
+        _FakeLeg("put",  0.0, 0.0),
+        _FakeLeg("put",  0.0, 0.0),
+        _FakeLeg("call", 0.0, 0.0),
+        _FakeLeg("call", 0.0, 0.0),
+    ]
+    close_cost, used_intrinsic = daemon.compute_close_cost(legs, snap, 5400.0)
+    assert close_cost == pytest.approx(0.0)
+    assert used_intrinsic == [True, True, True, True]
+
+
+def test_compute_close_cost_full_ic_max_loss_at_expiry(daemon) -> None:
+    """IC takes max loss when underlying breaks the short strike on
+    one side.  Without the intrinsic fallback, both call-side legs
+    would falsely register $0 (bid=0/ask=0 collapse) and the daemon
+    would record +full credit instead of recognising the spread
+    settled at max width.
+    """
+    legs = [
+        {"strike": 5350.0, "side": "put",  "quantity": +1, "entry_mid": 1.10},
+        {"strike": 5375.0, "side": "put",  "quantity": -1, "entry_mid": 2.50},
+        {"strike": 5425.0, "side": "call", "quantity": -1, "entry_mid": 2.40},
+        {"strike": 5450.0, "side": "call", "quantity": +1, "entry_mid": 1.05},
+    ]
+    snap = [
+        _FakeLeg("put",  0.0, 0.0),
+        _FakeLeg("put",  0.0, 0.0),
+        _FakeLeg("call", 0.0, 0.0),
+        _FakeLeg("call", 0.0, 0.0),
+    ]
+    # Underlying expires far above the long call → short call ITM
+    # by 75 (5500 - 5425), long call ITM by 50 (5500 - 5450).
+    # close_cost = -(-1)*75 + -(+1)*50 = 75 - 50 = 25.
+    # Plus the put side: both worthless → 0 contribution.
+    close_cost, _ = daemon.compute_close_cost(legs, snap, 5500.0)
+    assert close_cost == pytest.approx(25.0)
+
+
+def test_compute_close_cost_mixed_quotes_and_collapsed_quotes(daemon) -> None:
+    """Mid-day case: some legs still quote normally, others have
+    crossed into wide-spread territory.  The intrinsic fallback
+    fires only on full bid/ask collapse, not on wide-but-real
+    spreads.
+    """
+    legs = [
+        {"strike": 5350.0, "side": "put",  "quantity": +1, "entry_mid": 1.10},
+        {"strike": 5375.0, "side": "put",  "quantity": -1, "entry_mid": 2.50},
+    ]
+    snap = [
+        _FakeLeg("put", 0.4, 0.6),    # quoted, mid 0.5
+        _FakeLeg("put", 0.0, 0.0),    # collapsed → intrinsic
+    ]
+    # Cur underlying 5360 → second-leg intrinsic = max(0, 5375 - 5360) = 15.
+    close_cost, used_intrinsic = daemon.compute_close_cost(legs, snap, 5360.0)
+    # close_cost = -(+1)*0.5 + -(-1)*15 = -0.5 + 15 = 14.5
+    assert close_cost == pytest.approx(14.5)
+    assert used_intrinsic == [False, True]
+
+
+def test_compute_close_cost_does_not_fall_back_on_one_sided_quotes(daemon) -> None:
+    """One-sided quote (bid=0 ask>0 or bid>0 ask=0) is a wide
+    market, not a quote collapse.  The fallback must NOT trigger
+    or we'd silently override real broker pricing with intrinsic.
+    """
+    legs = [
+        {"strike": 5400.0, "side": "call", "quantity": -1, "entry_mid": 2.0},
+    ]
+    snap = [
+        _FakeLeg("call", 0.0, 0.5),  # bid 0, ask 0.5 — wide but real
+    ]
+    close_cost, used_intrinsic = daemon.compute_close_cost(legs, snap, 5395.0)
+    # mid = 0.25; close_cost = -(-1)*0.25 = 0.25.  NOT intrinsic.
+    assert close_cost == pytest.approx(0.25)
+    assert used_intrinsic == [False]
+
+
 def test_mark_entry_closed_is_idempotent(
     daemon, tmp_path, monkeypatch,
 ) -> None:

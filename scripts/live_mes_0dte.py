@@ -648,6 +648,71 @@ async def _quote_legs_into_snapshot(
     )
 
 
+def compute_leg_close_mid(
+    leg_side: str,
+    strike: float,
+    bid: float,
+    ask: float,
+    cur_underlying: float,
+) -> tuple[float, bool]:
+    """Per-leg close-mark in option points.
+
+    Live IBKR quotes are usually `(bid + ask) / 2`.  But when both
+    sides go to zero — typical in the expiry minute when IBKR stops
+    publishing quotes for a contract — naive averaging silently
+    converts a real-money settlement into a "free close", which
+    masks the actual P&L.  Fall back to **intrinsic value** vs the
+    current underlying when the quote collapses; that's what the
+    contract is worth to a holder at expiry regardless of whether
+    the broker is still streaming a quote.
+
+    Returns:
+        (close_mid, used_intrinsic_fallback)
+
+    Surfaced 2026-05-06 — the first live paper trade recorded
+    `+$3.25/share PnL` on a position that had no quotes at
+    expiry; the daemon read all four legs as `bid=0/ask=0` and
+    averaged them to a $0 close cost, falsely tripping
+    profit-take.
+    """
+    if bid <= 0 and ask <= 0:
+        if leg_side == "call":
+            intrinsic = max(0.0, cur_underlying - strike)
+        else:
+            intrinsic = max(0.0, strike - cur_underlying)
+        return intrinsic, True
+    return (bid + ask) / 2.0, False
+
+
+def compute_close_cost(
+    record_legs: list[dict],
+    snapshot_legs,
+    cur_underlying: float,
+) -> tuple[float, list[bool]]:
+    """Total close cost for the IC, applying the intrinsic fallback
+    per-leg.  Pure function — testable without IBKR.
+
+    `record_legs` carries the original entry quantities (`+1` long /
+    `-1` short).  `snapshot_legs` is the per-leg quote at the manage
+    tick (an `OptionLeg`-like object exposing `bid`, `ask`, `side`).
+
+    Convention: short legs (q=-1) contribute *negative* cost (we
+    receive the close credit); long legs (q=+1) contribute
+    *positive* cost (we pay the close debit).  Total close_cost is
+    what we'd pay net to flatten the structure right now.
+    """
+    close_cost = 0.0
+    used_intrinsic: list[bool] = []
+    for orig, cl in zip(record_legs, snapshot_legs):
+        side_str = cl.side.value if hasattr(cl.side, "value") else str(cl.side)
+        mid, intrinsic_used = compute_leg_close_mid(
+            side_str, orig["strike"], cl.bid, cl.ask, cur_underlying,
+        )
+        used_intrinsic.append(intrinsic_used)
+        close_cost += -orig["quantity"] * mid
+    return close_cost, used_intrinsic
+
+
 def build_close_order_from_record(record: dict):
     """Build a CLOSING MultiLegOrder from an open-position entry
     record.  Quantities are flipped vs entry: longs (+1) become
@@ -784,35 +849,23 @@ async def run_management() -> int:
             -leg["quantity"] * leg["entry_mid"]
             for leg in record["legs"]
         )
-        # Per-leg current "close mark" — usually the live mid from
-        # the chain snapshot.  But: when bid==ask==0 (e.g. the option
-        # has expired and IBKR no longer publishes a quote), the
-        # naive (bid+ask)/2 = 0 silently turns a real-money settlement
-        # into a "free close" in our math.  Fall back to INTRINSIC
-        # value vs the current underlying when the quote collapses.
-        # This matches what the backtest harness does at session
-        # close.  Surfaced 2026-05-06 when the first live trade
-        # closed at expiry, recorded +$3.25/share PnL on what was
-        # actually a -$6.75/share loss because the call-side ITM
-        # legs had bid=ask=0 quotes.
-        close_cost = 0.0
-        for orig, cl in zip(record["legs"], snapshot.legs):
-            quoted_mid = (cl.bid + cl.ask) / 2.0
-            if cl.bid <= 0 and cl.ask <= 0:
-                # Mark to intrinsic — the underlying-vs-strike payoff
-                # an option holder would actually realize at expiry.
-                if cl.side == OptionSide.CALL:
-                    intrinsic = max(0.0, cur_price - orig["strike"])
-                else:
-                    intrinsic = max(0.0, orig["strike"] - cur_price)
-                quoted_mid = intrinsic
+        # Per-leg close mark with intrinsic fallback.  See
+        # `compute_close_cost` for the why; the fallback exists
+        # because IBKR stops publishing quotes for expired contracts
+        # and the naive (bid+ask)/2 collapses to 0, falsely tripping
+        # profit-take in the expiry minute.
+        close_cost, used_intrinsic = compute_close_cost(
+            record["legs"], snapshot.legs, cur_price,
+        )
+        for orig, cl, intrinsic_used in zip(
+            record["legs"], snapshot.legs, used_intrinsic,
+        ):
+            if intrinsic_used:
                 log.warning(
                     "leg %s K=%.0f q=%+d quotes collapsed (bid=0 ask=0) — "
-                    "marking to intrinsic %.2f vs S=%.2f",
-                    orig["side"], orig["strike"], orig["quantity"],
-                    intrinsic, cur_price,
+                    "marked to intrinsic vs S=%.2f",
+                    orig["side"], orig["strike"], orig["quantity"], cur_price,
                 )
-            close_cost += -orig["quantity"] * quoted_mid
         pnl_per_share = entry_credit - close_cost
         pnl_frac = pnl_per_share / entry_credit if entry_credit > 0 else 0.0
         log.info("entry credit %+.2f, close cost %+.2f, PnL %+.2f (%.1f%% of credit)",
