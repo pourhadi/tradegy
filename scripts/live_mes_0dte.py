@@ -84,9 +84,29 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 PUT_SHORT_OFFSET = 25.0
 CALL_SHORT_OFFSET = 25.0
 WING_WIDTH = 25.0
-VIX_GATE_MIN_CLOSE = 18.0
 PROFIT_TAKE_PCT = 0.50
 CONTRACTS = 1
+
+# VIX gate threshold: enter only when "current VIX" exceeds this.
+# What "current VIX" means is set by VIX_GATE_SOURCE below.
+VIX_GATE_MIN = 18.0
+
+# VIX gate source.
+#   "intraday_live" : query IBKR for the live VIX index value at
+#                     entry time (10:30 ET).  Closest to the user's
+#                     intent — gates on actual current vol.  Backtest
+#                     proxy (today_open) showed ~equivalent
+#                     performance to prior_close at threshold 18.
+#   "prior_close"   : the original OOS-validated formulation —
+#                     yesterday's 16:00 ET VIX close from on-disk
+#                     vix_daily.  No live VIX dependency.
+#
+# Default is "intraday_live" because it's strictly closer to the
+# spec's mechanism (sell vol when premium is rich RIGHT NOW), and
+# the today_open backtest variant showed it performs at least as
+# well.  Operator can flip back to "prior_close" if the live VIX
+# tickplant is intermittent.
+VIX_GATE_SOURCE = "intraday_live"
 
 # Force-close trigger: at this UTC clock time on the entry day, any
 # still-open position is closed market-style to avoid expiry-bell
@@ -106,6 +126,68 @@ IBKR_CLIENT_ID = int(os.environ.get("IBKR_CLIENT_ID", "23"))
 
 
 # ── VIX gate ───────────────────────────────────────────────────────
+
+
+async def fetch_live_vix(ib) -> float | None:
+    """Query IBKR for the current cash VIX index level via reqMktData.
+
+    VIX is the CBOE Volatility Index — a CASH index, not a future.
+    IBKR symbology: Index('VIX', 'CBOE').  During RTH (9:30-16:15 ET)
+    the live value updates roughly every 15 sec from real-time SPX
+    option quotes.  Many retail/paper accounts don't have the live
+    CBOE index subscription; we ask for delayed data first
+    (`reqMarketDataType(3)`) so the gate works without a paid
+    subscription.  Delayed VIX is ~15-20 min stale, which is well
+    within our gate-decision tolerance for a 10:30 ET entry — the
+    10:10 ET VIX value is plenty close to "right now".
+    """
+    from ib_async import Index
+
+    # 3 = delayed; 1 = live; 4 = delayed-frozen.  Asking for delayed
+    # forces IBKR to return a delayed tick if the live subscription
+    # isn't active; live ticks take precedence when subscribed.
+    try:
+        ib.reqMarketDataType(3)
+    except Exception as exc:
+        log.warning("reqMarketDataType(3) failed: %r — proceeding anyway", exc)
+
+    vix = Index(symbol="VIX", exchange="CBOE", currency="USD")
+    qualified = await ib.qualifyContractsAsync(vix)
+    c = qualified[0] if qualified else None
+    if c is None or getattr(c, "conId", 0) == 0:
+        log.error("could not qualify VIX index")
+        return None
+    ticker = ib.reqMktData(c, "", snapshot=False, regulatorySnapshot=False)
+    val = None
+    for _ in range(20):
+        await asyncio.sleep(0.5)
+        # VIX has no bid/ask (it's an index).  Live subscription
+        # populates `last`; delayed sub populates `delayedLast`.
+        # Try live first, then delayed, then market-price fallback.
+        last_live = getattr(ticker, "last", None)
+        if last_live is not None and last_live > 0:
+            val = float(last_live)
+            break
+        delayed_last = getattr(ticker, "delayedLast", None)
+        if delayed_last is not None and delayed_last > 0:
+            val = float(delayed_last)
+            break
+    if val is None:
+        # Last-resort fallback: marketPrice() picks whichever
+        # tick field is populated.
+        mp = ticker.marketPrice() if hasattr(ticker, "marketPrice") else None
+        if mp is not None and mp == mp and mp > 0:
+            val = float(mp)
+        else:
+            # Try delayed close (yesterday's published close,
+            # populated even when no current tick streams).
+            dc = getattr(ticker, "delayedClose", None) or getattr(ticker, "close", None)
+            if dc is not None and dc > 0:
+                val = float(dc)
+                log.warning("using VIX close fallback (%.2f) — "
+                            "no live or delayed tick", val)
+    ib.cancelMktData(c)
+    return val
 
 
 def prior_session_vix_close(today: date) -> tuple[float, date] | None:
@@ -369,30 +451,10 @@ async def run_entry(dry_run: bool = False, bypass_gate: bool = False) -> int:
         log.info("entry record already exists for %s — skipping", today)
         return 0
 
-    # 1. VIX gate.
-    if bypass_gate:
-        vix, vix_date = -1.0, today
-        log.info("(VIX gate bypassed)")
-    else:
-        result = prior_session_vix_close(today)
-        if result is None:
-            log.error("could not load prior-session VIX close")
-            return 1
-        vix, vix_date = result
-        staleness_days = (today - vix_date).days
-        log.info("prior-session VIX close: %.2f (from %s, %d day(s) stale)",
-                 vix, vix_date, staleness_days)
-        if staleness_days > VIX_MAX_STALENESS_DAYS:
-            log.error("VIX data is too stale (%d days > %d max) — refusing "
-                      "entry.  Run download_vix_daily.py + ingest first.",
-                      staleness_days, VIX_MAX_STALENESS_DAYS)
-            return 1
-        if vix <= VIX_GATE_MIN_CLOSE:
-            log.info("VIX gate not passing (%.2f ≤ %.2f) — no entry today",
-                     vix, VIX_GATE_MIN_CLOSE)
-            return 0
-
-    # 2. Connect.
+    # 1. Connect early so we can query live VIX before doing
+    # any other work that depends on the gate.  (For prior_close
+    # source we don't need IB yet, but we'll need it momentarily
+    # for the chain — keeping connect order simple.)
     from ib_async import IB
     from tradegy.execution.ibkr_options_router import IbkrOptionsRouter
 
@@ -405,7 +467,44 @@ async def run_entry(dry_run: bool = False, bypass_gate: bool = False) -> int:
         log.error("IB Gateway connection failed: %r", exc)
         return 2
 
+    # The rest of the entry runs inside a try/finally so we always
+    # disconnect from IB on exit.
     try:
+        # 2. VIX gate.
+        if bypass_gate:
+            log.info("(VIX gate bypassed)")
+        elif VIX_GATE_SOURCE == "intraday_live":
+            live_vix = await fetch_live_vix(ib)
+            if live_vix is None:
+                log.error("could not fetch live VIX from IBKR — refusing entry")
+                return 1
+            log.info("live VIX (intraday): %.2f", live_vix)
+            if live_vix <= VIX_GATE_MIN:
+                log.info("VIX gate not passing (%.2f ≤ %.2f) — no entry today",
+                         live_vix, VIX_GATE_MIN)
+                return 0
+        elif VIX_GATE_SOURCE == "prior_close":
+            result = prior_session_vix_close(today)
+            if result is None:
+                log.error("could not load prior-session VIX close")
+                return 1
+            vix, vix_date = result
+            staleness_days = (today - vix_date).days
+            log.info("prior-session VIX close: %.2f (from %s, %d day(s) stale)",
+                     vix, vix_date, staleness_days)
+            if staleness_days > VIX_MAX_STALENESS_DAYS:
+                log.error("VIX data is too stale (%d days > %d max) — refusing "
+                          "entry.  Run download_vix_daily.py + ingest first.",
+                          staleness_days, VIX_MAX_STALENESS_DAYS)
+                return 1
+            if vix <= VIX_GATE_MIN:
+                log.info("VIX gate not passing (%.2f ≤ %.2f) — no entry today",
+                         vix, VIX_GATE_MIN)
+                return 0
+        else:
+            log.error("unknown VIX_GATE_SOURCE %r", VIX_GATE_SOURCE)
+            return 1
+
         # 3. Underlying price.
         result = await fetch_mes_front_price(ib)
         if result is None:
@@ -456,7 +555,7 @@ async def run_entry(dry_run: bool = False, bypass_gate: bool = False) -> int:
             "broker_order_id": managed.broker_order_id,
             "ts_utc": ts.isoformat(),
             "underlying_at_entry": cur_price,
-            "vix_prior_close": vix,
+            "vix_gate_source": VIX_GATE_SOURCE,
             "legs": [
                 {
                     "expiry": leg.expiry.isoformat(),

@@ -78,6 +78,32 @@ def _prior_trading_day_vix(
     return last["trade_date"], float(last["close"])
 
 
+def _same_session_vix(
+    vix_df: pl.DataFrame, target: date, field: str,
+) -> tuple[date, float] | None:
+    """Look up `target`'s OWN VIX OHLC bar field (not the prior
+    session's).  Used for the intraday-VIX gate variant — the VIX
+    OPEN is published at 9:30 ET, an hour before our 10:30 entry,
+    so it's a no-lookahead measurement of "vol at session start
+    today" rather than "vol at the close yesterday".
+
+    `field` must be one of: "open", "high", "low", "close".
+    Returns (date, value) or None if `target` has no VIX bar.
+
+    Note: for backtest cleanliness the ENTRY-time gate should use
+    "open" (knowable at 10:30 entry).  "high" / "low" / "close"
+    introduce lookahead — they're useful only for retrospective
+    analysis or for management-time triggers.
+    """
+    if field not in ("open", "high", "low", "close"):
+        raise ValueError(f"unknown VIX field {field!r}")
+    same = vix_df.filter(pl.col("trade_date") == target)
+    if same.height == 0:
+        return None
+    row = same.row(0, named=True)
+    return row["trade_date"], float(row[field])
+
+
 def _percentile_rank(
     sorted_values: list[float], x: float,
 ) -> float:
@@ -100,6 +126,22 @@ class VixGatedStrategy(OptionStrategy):
     Set any subset of the threshold parameters; all set thresholds
     must pass for the gate to allow the trade.  An unset threshold
     (None) is not enforced.
+
+    `gate_source` controls where the VIX value comes from:
+
+      "prior_close" (default): the most recent VIX close strictly
+        BEFORE the entry session — yesterday's 16:00 ET print.
+        No-lookahead by construction.  This is the OOS-validated
+        spec.
+
+      "today_open":  today's VIX OPEN (9:30 ET print) — known by
+        the 10:30 ET entry time, no lookahead, but reflects the
+        morning's actual vol level rather than yesterday's
+        residual fear.  EXPERIMENTAL — needs separate validation.
+
+    `min_vix_close` / `max_vix_close` are kept as parameter names
+    for backward compatibility — they apply to whichever VIX value
+    `gate_source` selects.
     """
 
     base: OptionStrategy
@@ -107,6 +149,7 @@ class VixGatedStrategy(OptionStrategy):
     max_vix_close: float | None = None
     min_vix_pctile_252: float | None = None
     max_vix_pctile_252: float | None = None
+    gate_source: str = "prior_close"
     vix_root: Path | None = None
     id: str = ""
 
@@ -115,8 +158,15 @@ class VixGatedStrategy(OptionStrategy):
     _vix_closes_by_date: dict = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if self.gate_source not in ("prior_close", "today_open"):
+            raise ValueError(
+                f"unknown gate_source {self.gate_source!r} (use "
+                f"'prior_close' or 'today_open')"
+            )
         if not self.id:
             parts = ["vix_gated"]
+            if self.gate_source != "prior_close":
+                parts.append(self.gate_source)
             if self.min_vix_close is not None:
                 parts.append(f"vixmin{self.min_vix_close}")
             if self.max_vix_close is not None:
@@ -137,30 +187,46 @@ class VixGatedStrategy(OptionStrategy):
             for d, c in zip(df["trade_date"].to_list(), df["close"].to_list())
         }
 
-    def _gate_passes(self, snap_date: date) -> bool:
-        """Return True iff the prior-day VIX passes all thresholds."""
-        result = _prior_trading_day_vix(self._vix_df, snap_date)
-        if result is None:
-            return False  # insufficient history
-        prior_date, prior_vix = result
+    def _gate_value_for(self, snap_date: date) -> tuple[date, float] | None:
+        """Resolve the VIX value the gate compares against, per
+        `gate_source` configuration.
+        """
+        if self.gate_source == "prior_close":
+            return _prior_trading_day_vix(self._vix_df, snap_date)
+        if self.gate_source == "today_open":
+            # Same-session OPEN (9:30 ET print) — no lookahead at
+            # the 10:30 ET entry time.
+            return _same_session_vix(self._vix_df, snap_date, "open")
+        raise ValueError(f"unknown gate_source {self.gate_source!r}")
 
-        if self.min_vix_close is not None and prior_vix < self.min_vix_close:
+    def _gate_passes(self, snap_date: date) -> bool:
+        """Return True iff the configured VIX value passes all thresholds."""
+        result = self._gate_value_for(snap_date)
+        if result is None:
+            return False  # insufficient history / no bar for snap_date
+        ref_date, vix_val = result
+
+        if self.min_vix_close is not None and vix_val < self.min_vix_close:
             return False
-        if self.max_vix_close is not None and prior_vix > self.max_vix_close:
+        if self.max_vix_close is not None and vix_val > self.max_vix_close:
             return False
 
         if (
             self.min_vix_pctile_252 is not None
             or self.max_vix_pctile_252 is not None
         ):
-            # 252-day rolling window of VIX closes ending on prior_date.
-            window_start = prior_date - timedelta(days=365)
+            # 252-day rolling window of VIX closes ending on ref_date.
+            # NOTE: rank is always computed on prior CLOSES (the
+            # canonical "VIX rank" definition), regardless of
+            # gate_source — only the threshold-comparison field
+            # changes between prior-close vs intraday OPEN.
+            window_start = ref_date - timedelta(days=365)
             window = self._vix_df.filter(
                 (pl.col("trade_date") >= window_start)
-                & (pl.col("trade_date") <= prior_date)
+                & (pl.col("trade_date") <= ref_date)
             )
             sorted_window = sorted(window["close"].to_list())
-            rank = _percentile_rank(sorted_window, prior_vix)
+            rank = _percentile_rank(sorted_window, vix_val)
             if (
                 self.min_vix_pctile_252 is not None
                 and rank < self.min_vix_pctile_252
