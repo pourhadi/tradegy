@@ -156,7 +156,17 @@ efficiency at the same risk level.
      Dollar-offset strike selection (no IV/delta dependency since
      databento ohlcv-1m carries trades only).  Defaults: short legs
      at $50 from spot, $25 wings.  Same-day expiry filter.
-   - `mes_0dte_pcs` — TBD if 0DTE IC kill stands
+   - `mes_0dte_pcs` — **shipped 2026-05-06** as
+     `tradegy.options.strategies.mes_0dte_pcs.Mes0dtePcs`.  2-leg
+     put credit spread (long put + short put), same dollar-offset
+     selection.  Defaults: short put $50 below spot, $25 wing.
+     Cuts commissions in half vs the IC ($4 RT vs $8).
+   - **2-yr backtest result for PCS (2026-05-06)**: ALSO KILL.
+     Cost halving wasn't enough.  Best variant (`$15/$10 ultra-tight`
+     short put / $10 wing) at 68.6% win rate, +$745 gross over 325
+     trades, **-$555 net** = -$1.71 per trade.  Other variants worse.
+     Two-leg structure cut the per-trade cost from $8 to $4 but the
+     premium still doesn't cover even the reduced cost on losers.
    - `mes_0dte_short_strangle_defined` — TBD
    - **2023-2024 backtest result (2026-05-06)**: KILL.  At default
      params over 368 0DTE-eligible sessions, with retail-style
