@@ -289,6 +289,27 @@ unblocked (see "What's next" above).
 
 ---
 
+## Cross-platform context
+
+This project is one of two automated-trading platforms the operator runs.
+The other is `~/code/predigy` — a Rust-based prediction-market trading
+system on Kalshi (live in production) and Polymarket (reference data
+only).  Strategies on predigy harvest different return mechanisms
+(cross-venue arbitrage, prediction-market microstructure, news-data
+latency, statistical model alpha) than what tradegy harvests (variance
+risk premium on equity index options + futures).
+
+The two platforms harvest **uncorrelated** return streams.  Running both
+is real diversification of mechanism, not just instrument.
+
+The joint strategic plan — including capital projections at each tier,
+what's reusable between the platforms, and the priority sequence for
+extending each — lives at `~/code/MOONSHOT_PLAN.md`.  Read that doc
+when planning cross-platform work or evaluating where to allocate
+operator time.
+
+---
+
 ## Memory
 
 User's auto-memory lives at
