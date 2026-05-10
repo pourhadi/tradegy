@@ -1,6 +1,6 @@
 # MES Intraday Directional Research Plan
 
-**Status:** First executable batch killed at sanity, 2026-05-10  
+**Status:** First executable batches killed at sanity; Sierra Chart VX path scoped, 2026-05-10  
 **Purpose:** Define the next disciplined attempt to find profitable MES intraday trades without repeating the killed MES-only, price-only search.
 
 ## Thesis
@@ -145,6 +145,7 @@ Metadata/cost probes run 2026-05-10 against the current Databento key. No downlo
 | Intraday VX | Databento `XCBF.PITCH`, `VX.FUT` 1m, 2019-05-06 to 2026-04-30 | $1,849.93 | Too expensive for a first pass; use daily VIX or pull a narrow event window only. |
 | Intraday VX trades | Databento `XCBF.PITCH`, `VX.FUT` trades, same window | $10,456.88 | Reject for now. |
 | Intraday VX top-of-book | Databento `XCBF.PITCH`, `VX.FUT` `mbp-1`, same window | $30,077.70 | Reject for now. |
+| Intraday VX pilot | Sierra Chart Denali / Historical Data Service, CFE VX chart export | Existing Sierra package plus CFE exchange fee: $10/month top-of-book or $12/month depth if real-time is needed | Preferred low-cost VX pilot path; validate one exported VX continuous 1m file before admitting as a registry source. |
 | SPX options gamma | Databento `OPRA.PILLAR`, `SPX.OPT`, 2020-2024 definitions | $13.61 | Pull with `statistics` and `cbbo-1m` if gamma work is approved. |
 | SPX options gamma | Databento `OPRA.PILLAR`, `SPX.OPT`, 2020-2024 statistics | $39.09 | Likely needed for OI/stat fields; verify schema before download. |
 | SPX options gamma | Databento `OPRA.PILLAR`, `SPX.OPT`, 2020-2024 `cbbo-1m` | $486.71 | Feasible for serious gamma-surface research. |
@@ -154,12 +155,39 @@ Metadata/cost probes run 2026-05-10 against the current Databento key. No downlo
 | Sector ETF breadth proxy | Databento `DBEQ.BASIC`, 11 sector ETFs, 2024 `ohlcv-1m` | $2.98 | Cheap but short history; useful for pilot only. |
 | Sector ETF breadth proxy | Databento `EQUS.MINI`, 11 sector ETFs, 2024 `ohlcv-1m` | $0.66 | Cheapest 2024-only breadth proxy. |
 
+### Sierra Chart VX Decision
+
+Sierra Chart is the preferred next VX path over full-history Databento VX for this research lane.
+
+Evidence from Sierra documentation checked 2026-05-10:
+
+| Question | Finding | Research implication |
+|---|---|---|
+| Does Sierra cover CFE? | Denali lists CFE in the supported exchange set, and the Historical Data Service includes CBOE Futures Exchange (CFE). | VX futures are plausible through Sierra rather than Databento `XCBF.PITCH`. |
+| Is intraday history available? | Denali and the Historical Data Service both document historical intraday data. For non-CME/EUREX futures and cash-index symbols, 1-minute history is generally at least back to 2010 if the symbol traded then, with symbol-dependent depth. | The 2019-2026 VX research window should be feasible, but this must be verified by downloading/exporting one continuous VX chart. |
+| What is the expected marginal cost? | CFE Top Of Book is documented at $10/month; CFE Market Depth is $12/month. Historical-only access may be available through the included Historical Data Service, but real-time/non-delayed CFE needs the exchange activation. | Cost is low enough for a pilot and far below the Databento full-history VX estimate. |
+| Can it export data usable by this repo? | `Edit >> Export Bar Data to Text File` exports loaded chart bars with `Date, Time, Open, High, Low, Last, Volume, NumberOfTrades, BidVolume, AskVolume`; this matches `src/tradegy/ingest/csv_sierra.py`. | Existing Sierra CSV ingest can be reused; pass `input_tz="UTC"` if the export is from `Export and Edit Intraday Data`, or set the chart timezone to UTC before `Export Bar Data to Text File`. |
+| How should continuous VX be exported? | `Export and Edit Intraday Data` exports the underlying current symbol file only for continuous futures charts. `Export Bar Data to Text File` exports the loaded chart bars, and Sierra's docs explicitly direct enabling Continuous Futures Contract for larger futures history exports. | Use chart-level bar export, not raw intraday-file export, for continuous VX research data. |
+| Is this admitted data yet? | No. We have documentation evidence only; no VX file has been exported and ingested. | Do not create VX features/specs until the exported file passes coverage, timestamp, and no-duplicate checks. |
+
+Validation workflow before source admission:
+
+1. Activate or confirm Sierra Chart CFE access, update symbol settings, and open the current VX futures contract from `File >> Find Symbol`.
+2. Set the chart to a 1-minute intraday bar period, UTC timezone, and non-back-adjusted continuous contract mode unless the research explicitly needs adjusted prices.
+3. Set the load range to 2019-05-06 through 2026-04-30, then force `Edit >> Delete All Data And Download` and select all needed contract months.
+4. Enable rollover-date display and inspect the Message Log for missing contract months, bad transitions, or download-limit errors.
+5. Export with `Edit >> Export Bar Data to Text File`, not `Export and Edit Intraday Data`.
+6. Ingest the exported CSV through `ingest_sierra_csv(..., input_tz="UTC")` into a new `vix_1m_ohlcv` or `vx_1m_ohlcv` data source only after the file proves full-window coverage.
+
+Decision: pursue Sierra Chart VX as the low-cost pilot if intraday VX confirmation becomes the binding blocker. Do not purchase full-history Databento VX before this Sierra validation fails.
+
 Acquisition order if continuing MES intraday research:
 
 1. Pull `ZN.FUT` and `ZT.FUT` 1m from Databento; implement rates-confirmed event continuation/fade features.
-2. If willing to spend ~$250-$550, pull SPX OPRA definitions/statistics/`cbbo-1m` for 2023-2025 first, then 2020-2024 only if the feature pipeline looks sound.
-3. Use equity breadth proxies only as a pilot; they do not solve the 2019-2026 walk-forward window unless a longer equities source is admitted.
-4. Do not buy full-history VX yet. If VX is needed, cost-check a narrow CPI/FOMC-only window or a recent 1-year pilot first.
+2. If VX is required before gamma work, validate Sierra Chart VX export/ingest with one continuous 1m file before any Databento VX spend.
+3. If willing to spend ~$250-$550, pull SPX OPRA definitions/statistics/`cbbo-1m` for 2023-2025 first, then 2020-2024 only if the feature pipeline looks sound.
+4. Use equity breadth proxies only as a pilot; they do not solve the 2019-2026 walk-forward window unless a longer equities source is admitted.
+5. Do not buy full-history VX from Databento unless Sierra cannot provide a complete VX window and a VX-specific hypothesis still justifies the spend.
 
 ## Gate Discipline
 
