@@ -131,6 +131,36 @@ These ideas are not being implemented as dummy substitutes. They require the mis
 | `gamma_strike_pin_fade` | No gamma exposure feature. | Build SPX/SPY chain-derived gamma features from point-in-time chains. |
 | `eod_breadth_continuation` | No breadth/day-trend gate. | Add day-trend and breadth features before testing. |
 
+## Data Acquisition Matrix
+
+Metadata/cost probes run 2026-05-10 against the current Databento key. No downloads were performed.
+
+| Need | Source | Probe result | Recommendation |
+|---|---|---:|---|
+| Treasury/rates confirmation | Databento `GLBX.MDP3`, `ZN.FUT` 1m, 2019-05-06 to 2026-04-30 | $11.11 | Pull when ready; cheap and directly useful. |
+| Treasury/rates confirmation | Databento `GLBX.MDP3`, `ZT.FUT` 1m, same window | $8.81 | Pull with `ZN`; captures 2Y-rate sensitivity. |
+| Treasury/rates confirmation | Databento `GLBX.MDP3`, `ZF.FUT` 1m, same window | $10.21 | Pull if building curve-slope features. |
+| Treasury/rates confirmation | Databento `GLBX.MDP3`, `ZB.FUT` 1m, same window | $9.82 | Optional; long-bond proxy. |
+| Short-rate futures | Databento `GLBX.MDP3`, `SR3.FUT` 1m, same window | $108.98 | Defer unless SR3-specific mechanism is registered. |
+| Intraday VX | Databento `XCBF.PITCH`, `VX.FUT` 1m, 2019-05-06 to 2026-04-30 | $1,849.93 | Too expensive for a first pass; use daily VIX or pull a narrow event window only. |
+| Intraday VX trades | Databento `XCBF.PITCH`, `VX.FUT` trades, same window | $10,456.88 | Reject for now. |
+| Intraday VX top-of-book | Databento `XCBF.PITCH`, `VX.FUT` `mbp-1`, same window | $30,077.70 | Reject for now. |
+| SPX options gamma | Databento `OPRA.PILLAR`, `SPX.OPT`, 2020-2024 definitions | $13.61 | Pull with `statistics` and `cbbo-1m` if gamma work is approved. |
+| SPX options gamma | Databento `OPRA.PILLAR`, `SPX.OPT`, 2020-2024 statistics | $39.09 | Likely needed for OI/stat fields; verify schema before download. |
+| SPX options gamma | Databento `OPRA.PILLAR`, `SPX.OPT`, 2020-2024 `cbbo-1m` | $486.71 | Feasible for serious gamma-surface research. |
+| SPX options gamma | Databento `OPRA.PILLAR`, `SPX.OPT`, 2023-2025 `cbbo-1m` | $243.28 | Better first gamma pull if limiting spend. |
+| SPY options gamma | Databento `OPRA.PILLAR`, `SPY.OPT`, 2020-2024 `cbbo-1m` | $684.95 | More expensive than SPX but still feasible. |
+| SPY options OHLCV | Databento `OPRA.PILLAR`, `SPY.OPT`, 2020-2024 `ohlcv-1m` | $5,132.89 | Reject; use `cbbo-1m`/definitions/statistics instead. |
+| Sector ETF breadth proxy | Databento `DBEQ.BASIC`, 11 sector ETFs, 2024 `ohlcv-1m` | $2.98 | Cheap but short history; useful for pilot only. |
+| Sector ETF breadth proxy | Databento `EQUS.MINI`, 11 sector ETFs, 2024 `ohlcv-1m` | $0.66 | Cheapest 2024-only breadth proxy. |
+
+Acquisition order if continuing MES intraday research:
+
+1. Pull `ZN.FUT` and `ZT.FUT` 1m from Databento; implement rates-confirmed event continuation/fade features.
+2. If willing to spend ~$250-$550, pull SPX OPRA definitions/statistics/`cbbo-1m` for 2023-2025 first, then 2020-2024 only if the feature pipeline looks sound.
+3. Use equity breadth proxies only as a pilot; they do not solve the 2019-2026 walk-forward window unless a longer equities source is admitted.
+4. Do not buy full-history VX yet. If VX is needed, cost-check a narrow CPI/FOMC-only window or a recent 1-year pilot first.
+
 ## Gate Discipline
 
 The same anti-overfitting gates apply unless a hypothesis YAML explicitly tightens them before first test:
