@@ -170,6 +170,16 @@ Evidence from Sierra documentation checked 2026-05-10:
 | How should continuous VX be exported? | `Export and Edit Intraday Data` exports the underlying current symbol file only for continuous futures charts. `Export Bar Data to Text File` exports the loaded chart bars, and Sierra's docs explicitly direct enabling Continuous Futures Contract for larger futures history exports. | Use chart-level bar export, not raw intraday-file export, for continuous VX research data. |
 | Is this admitted data yet? | No. We have documentation evidence only; no VX file has been exported and ingested. | Do not create VX features/specs until the exported file passes coverage, timestamp, and no-duplicate checks. |
 
+Automation findings:
+
+| Path | Scriptability | Decision |
+|---|---|---|
+| Manual chart-bar export | Low automation, high confidence. `Edit >> Export Bar Data to Text File` exports exactly the loaded continuous chart bars. | Use first. This validates VX coverage before spending engineering time. |
+| `Write Bar Data to File` / `Write Bar and Study Data To File` Sierra studies | Semi-automated. Once attached to a configured continuous chart, Sierra continuously writes the loaded chart data to a text file. `Write Bar Data to File` explicitly writes one output file for continuous futures charts. | Best follow-up if manual export validates coverage. Need one sample file because study headers may differ from manual export headers. |
+| DTC historical data server | Programmatic socket API. Sierra documents a historical data port and one historical request per connection, but its Restrictions section says real-time or historical data from CME Group, EUREX, NASDAQ, CBOE, and US equities cannot be accessed through the DTC server. VX is CFE/Cboe-family data, so assume rejection until tested locally. | Do not build a DTC integration as the first VX path. Test only after manual/chart-file export succeeds. |
+| Direct `.scid` parsing | Scriptable because Sierra documents the binary intraday file header and 40-byte records. | Not preferred for continuous VX. Sierra stores individual contract files and builds continuous contracts dynamically, so a parser would also need robust rollover stitching. |
+| GUI automation | Technically possible but brittle. | Reject unless no supported export/file-writing path works. |
+
 Validation workflow before source admission:
 
 1. Activate or confirm Sierra Chart CFE access, update symbol settings, and open the current VX futures contract from `File >> Find Symbol`.
@@ -177,7 +187,8 @@ Validation workflow before source admission:
 3. Set the load range to 2019-05-06 through 2026-04-30, then force `Edit >> Delete All Data And Download` and select all needed contract months.
 4. Enable rollover-date display and inspect the Message Log for missing contract months, bad transitions, or download-limit errors.
 5. Export with `Edit >> Export Bar Data to Text File`, not `Export and Edit Intraday Data`.
-6. Ingest the exported CSV through `ingest_sierra_csv(..., input_tz="UTC")` into a new `vix_1m_ohlcv` or `vx_1m_ohlcv` data source only after the file proves full-window coverage.
+6. Ingest the exported CSV through `ingest_sierra_csv(..., input_tz="UTC")` into a new `vx_1m_ohlcv` data source only after the file proves full-window coverage.
+7. If manual export passes, test Sierra's `Write Bar Data to File` or `Write Bar and Study Data To File` on the same chart and compare row counts/timestamps against the manual export before making acquisition repeatable.
 
 Decision: pursue Sierra Chart VX as the low-cost pilot if intraday VX confirmation becomes the binding blocker. Do not purchase full-history Databento VX before this Sierra validation fails.
 
