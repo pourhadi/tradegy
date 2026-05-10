@@ -1,0 +1,70 @@
+id: hyp_mes_vix_falling_gap_fade_20260510
+title: MES overnight gaps fade when VIX is low and compressing
+status: killed
+source: human
+created_date: 2026-05-10
+last_modified_date: 2026-05-10
+author: gpt-5.5
+observation: >
+  MES gaps away from the prior RTH close should mean-revert more reliably when
+  VIX is in the lower half of its trailing distribution and falling over the
+  prior week.
+mechanism: >
+  Low and compressing VIX suggests overnight index moves are less likely to be
+  persistent macro repricing. When the RTH session opens without a high-impact
+  event nearby, liquidity normalizes and overnight imbalance can unwind toward
+  the prior cash-session close.
+falsification: >
+  Refuted if at least 30 qualifying trades fail the sanity gate, or if
+  walk-forward average OOS Sharpe is less than 50% of average IS Sharpe after
+  positive IS evidence. Also refuted if the VIX compression gate fails to
+  improve performance in a separately pre-registered ablation.
+counterparty: >
+  Overnight momentum traders and hedgers whose temporary imbalance is absorbed
+  after cash-market liquidity returns.
+instrument_scope:
+  - MES
+feature_dependencies:
+  - mes_prior_rth_close
+  - mes_xnys_session_position
+  - vix_daily_pctile_252
+  - vix_daily_5d_change
+  - mes_econ_event_quiet_window_flag
+  - mes_atr_14m
+parameter_envelope:
+  - name: gap_threshold_pct
+    min: 0.002
+    max: 0.006
+    step: 0.001
+  - name: vix_pctile_max
+    min: 0.3
+    max: 0.6
+    step: 0.1
+  - name: vix_5d_change_max
+    min: -3.0
+    max: 0.0
+    step: 1.0
+variant_budget: 4
+gate_thresholds:
+  sanity_min_trades: 30
+  sanity_min_in_sample_sharpe: 0.0
+  walk_forward_oos_in_sample_ratio: 0.5
+  walk_forward_min_in_sample_sharpe: 0.0
+  cpcv_median_sharpe_threshold: 0.8
+  cpcv_max_pct_paths_negative: 0.2
+  holdout_sharpe_ratio_to_walk_forward: 0.5
+five_test_scores:
+  mechanism: 4
+  falsifiability: 5
+  novelty: 3
+  economic_plausibility: 4
+  data_feasibility: 5
+parent_hypothesis_id: null
+notes: >
+  First executable spec was mes_vix_falling_gap_fade. This intentionally did
+  not use a high-vol gap-fade premise; prior evidence showed selectivity, not
+  wider stops, was the binding issue. Full-sample sanity backtest on 2026-05-10
+  produced 366 trades, -$482.11 PnL, and -0.318 per-trade Sharpe.
+kill_reason: >
+  Failed sanity gate: trade count exceeded 30 but per-trade Sharpe was negative
+  (-0.318). No walk-forward run; do not tune parameters post-hoc.

@@ -1,6 +1,6 @@
-# Futures Trading Platform — Design Documents
+# Tradegy Trading Platform — Design Documents
 
-A document set defining the architecture, components, and processes for an ES-only automated futures trading platform built around LLM-supervised strategy selection and a deliberate, human-gated strategy development pipeline.
+A document set defining the architecture, components, and processes for a futures and options research/trading platform built around deliberate, human-gated strategy development, deterministic backtesting, execution controls, and live monitoring.
 
 ## Reading order
 
@@ -18,12 +18,15 @@ A document set defining the architecture, components, and processes for an ES-on
 12. [`11_execution_layer_spec.md`](11_execution_layer_spec.md) — order lifecycle, broker reconciliation, and deterministic replay contract.
 13. [`12_live_monitoring_spec.md`](12_live_monitoring_spec.md) — health checks, SLOs, alert severity matrix, and auto-halt policies.
 14. [`13_governance_process.md`](13_governance_process.md) — RACI, evidence packages, checklist templates, audit trail.
+15. [`14_options_volatility_selling.md`](14_options_volatility_selling.md) — options vol-selling workstream, validations, and killed variants.
+16. [`15_5k_options_capital_plan.md`](15_5k_options_capital_plan.md) — retail-capital deployment plan and MES 0DTE options path.
+17. [`15_live_options_runbook.md`](15_live_options_runbook.md) — live options operating notes.
+18. [`16_mes_intraday_research_plan.md`](16_mes_intraday_research_plan.md) — active MES intraday directional research plan.
 
 ## Status
 
-All documents are drafts. Each doc has an "Open design decisions" section at the bottom listing questions still needing resolution before v1.0 freeze.
+The numbered docs are the project ledger. Older docs may retain draft-era language, but later dated status tables and appended updates are authoritative for shipped work.
 
 ## Not yet documented
 
 - Infrastructure/ops spec
-- Example library entries (4–6 fully filled-in starter strategies)

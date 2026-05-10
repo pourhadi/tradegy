@@ -1,0 +1,70 @@
+id: hyp_mes_mnq_divergence_fade_20260510
+title: MES-MNQ intraday divergence mean reverts after extreme relative z-score
+status: killed
+source: human
+created_date: 2026-05-10
+last_modified_date: 2026-05-10
+author: gpt-5.5
+observation: >
+  Extreme 60-minute MES/MNQ ratio z-scores should mean-revert intraday because
+  S&P and Nasdaq futures are linked by index-arb, portfolio hedging, and shared
+  macro risk factors.
+mechanism: >
+  When MES is unusually rich or cheap versus MNQ over the prior hour, the move
+  is often a temporary index-composition imbalance rather than a durable change
+  in macro beta. Arbitrage and portfolio rebalancing flows should pressure the
+  spread back toward its recent mean unless a scheduled macro event is active.
+falsification: >
+  Refuted if either long or short side fails sanity with at least 30 qualifying
+  trades, or if combined walk-forward OOS evidence fails the 50% IS/OOS ratio
+  gate after positive IS evidence.
+counterparty: >
+  Short-horizon traders overextending one index future relative to another,
+  plus hedgers temporarily favoring one beta sleeve before cross-index arb
+  closes the relative-value gap.
+instrument_scope:
+  - MES
+feature_dependencies:
+  - mes_mnq_ratio_zscore_60m
+  - mes_xnys_session_position
+  - mes_econ_event_quiet_window_flag
+parameter_envelope:
+  - name: z_entry_abs
+    min: 1.5
+    max: 3.0
+    step: 0.5
+  - name: z_exit_abs
+    min: 0.25
+    max: 1.0
+    step: 0.25
+  - name: max_holding_bars
+    min: 15
+    max: 60
+    step: 15
+variant_budget: 4
+gate_thresholds:
+  sanity_min_trades: 30
+  sanity_min_in_sample_sharpe: 0.0
+  walk_forward_oos_in_sample_ratio: 0.5
+  walk_forward_min_in_sample_sharpe: 0.0
+  cpcv_median_sharpe_threshold: 0.8
+  cpcv_max_pct_paths_negative: 0.2
+  holdout_sharpe_ratio_to_walk_forward: 0.5
+five_test_scores:
+  mechanism: 4
+  falsifiability: 5
+  novelty: 4
+  economic_plausibility: 4
+  data_feasibility: 5
+parent_hypothesis_id: null
+notes: >
+  First executable specs were mes_mnq_divergence_fade_long and
+  mes_mnq_divergence_fade_short. SPY, M2K, and YM variants were not included in
+  this first batch to avoid expanding the trial count. Full-sample sanity
+  backtests on 2026-05-10 produced 4,934 long-side trades at -$7,943.62 PnL and
+  -0.215 Sharpe, plus 4,961 short-side trades at -$7,981.62 PnL and -0.206
+  Sharpe.
+kill_reason: >
+  Failed sanity gate on both sides: trade counts exceeded 30 but per-trade
+  Sharpe was negative for long (-0.215) and short (-0.206). No walk-forward
+  run; do not tune parameters post-hoc.

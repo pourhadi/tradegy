@@ -1,0 +1,78 @@
+id: hyp_mes_vix_confirmed_or30_breakout_20260510
+title: MES OR30 breakouts continue when VIX is elevated and expanding
+status: killed
+source: human
+created_date: 2026-05-10
+last_modified_date: 2026-05-10
+author: gpt-5.5
+observation: >
+  Opening-range breakouts in MES should have better follow-through when the
+  broader volatility regime is elevated and rising, because the break is more
+  likely to reflect repricing by institutional risk managers than isolated
+  local order-book noise.
+mechanism: >
+  In high or rising VIX regimes, index futures moves are more likely to be
+  tied to real cross-asset risk repricing. If the OR30 boundary breaks with
+  volume confirmation and no scheduled high-impact event is imminent, late
+  liquidity providers and stopped-out mean-reversion traders can chase the
+  move, creating continuation.
+falsification: >
+  Refuted if at least 30 qualifying trades fail the sanity gate, or if
+  walk-forward average OOS Sharpe is less than 50% of average IS Sharpe after
+  positive IS evidence. Also refuted if removing either VIX gate does not
+  degrade performance in a separately pre-registered ablation.
+counterparty: >
+  Intraday mean-reversion traders fading real repricing and short-horizon
+  liquidity providers forced to adjust inventory after confirmed range breaks.
+instrument_scope:
+  - MES
+feature_dependencies:
+  - mes_or30_high
+  - mes_or30_low
+  - mes_volume_zscore_20m
+  - mes_xnys_session_position
+  - vix_daily_pctile_252
+  - vix_daily_5d_change
+  - mes_econ_event_quiet_window_flag
+  - mes_atr_14m
+parameter_envelope:
+  - name: vix_pctile_min
+    min: 0.5
+    max: 0.8
+    step: 0.1
+  - name: vix_5d_change_min
+    min: 0.0
+    max: 3.0
+    step: 1.0
+  - name: volume_zscore_min
+    min: 0.5
+    max: 2.0
+    step: 0.5
+  - name: confirmation_buffer_ticks
+    min: 1
+    max: 4
+    step: 1
+variant_budget: 4
+gate_thresholds:
+  sanity_min_trades: 30
+  sanity_min_in_sample_sharpe: 0.0
+  walk_forward_oos_in_sample_ratio: 0.5
+  walk_forward_min_in_sample_sharpe: 0.0
+  cpcv_median_sharpe_threshold: 0.8
+  cpcv_max_pct_paths_negative: 0.2
+  holdout_sharpe_ratio_to_walk_forward: 0.5
+five_test_scores:
+  mechanism: 4
+  falsifiability: 5
+  novelty: 3
+  economic_plausibility: 4
+  data_feasibility: 5
+parent_hypothesis_id: null
+notes: >
+  First executable spec was mes_vix_confirmed_or30_breakout. It used only
+  existing features and the existing range_break_continuation class. Full-sample
+  sanity backtest on 2026-05-10 produced 401 trades, -$960.02 PnL, and -0.261
+  per-trade Sharpe.
+kill_reason: >
+  Failed sanity gate: trade count exceeded 30 but per-trade Sharpe was negative
+  (-0.261). No walk-forward run; do not tune parameters post-hoc.

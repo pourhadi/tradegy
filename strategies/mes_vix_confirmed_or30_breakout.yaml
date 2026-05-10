@@ -1,0 +1,110 @@
+# MES VIX-confirmed OR30 breakout continuation.
+#
+# Pre-registered 2026-05-10 for doc 16. Uses existing range_break_continuation
+# class and existing daily VIX/event features. No intraday VIX substitute is
+# invented here; if daily VIX is insufficient, the strategy should fail.
+
+metadata:
+  id: mes_vix_confirmed_or30_breakout
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES VIX-confirmed OR30 breakout continuation
+  status: retired
+  created_date: 2026-05-10
+  last_modified_date: 2026-05-10
+  author: gpt-5.5
+  reviewers: []
+  parent_strategy_id: mes_mvp_range_break_continuation
+  description: >
+    KILLED 2026-05-10. Continue confirmed OR30 breaks only when VIX is elevated and rising,
+    scheduled-event quiet window is clear, and the break occurs in the early
+    to mid RTH session. Tier proposal_only.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: range_break_continuation
+  parameters:
+    upper_level_feature_id: mes_or30_high
+    lower_level_feature_id: mes_or30_low
+    volume_zscore_feature_id: mes_volume_zscore_20m
+    confirmation_buffer_ticks: 1
+    volume_zscore_min: 1.0
+    tick_size: 0.25
+    max_attempts_per_session: 1
+    direction_mode: both
+  direction: both
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    - condition: time_of_session
+      parameters:
+        session_position_feature_id: mes_xnys_session_position
+        lo: 0.10
+        hi: 0.40
+    - condition: feature_threshold
+      parameters:
+        feature_id: vix_daily_pctile_252
+        operator: gt
+        threshold: 0.50
+    - condition: feature_threshold
+      parameters:
+        feature_id: vix_daily_5d_change
+        operator: gt
+        threshold: 0.0
+    - condition: feature_threshold
+      parameters:
+        feature_id: mes_econ_event_quiet_window_flag
+        operator: lte
+        threshold: 0.0
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: atr_multiple
+    atr_feature_id: mes_atr_14m
+    atr_mult: 1.0
+    tick_size: 0.25
+    max_distance_ticks: 400
+  adjustment_rules:
+    - action: trailing_atr
+      atr_feature_id: mes_atr_14m
+      multiplier: 3.0
+      activation_R: 1.0
+      tick_size: 0.25
+  hard_max_distance_ticks: 400
+  time_stop:
+    enabled: true
+    max_holding_bars: 60
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: false
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only
