@@ -1,0 +1,30 @@
+# Signed MES return during the first 30 minutes after FOMC statements.
+
+id: mes_fomc_30m_reaction_return
+version: v1
+description: >
+  Signed MES close-to-close return from the FOMC statement timestamp to 30
+  minutes after the statement, broadcast only to MES bars after that 30-minute
+  reaction window has completed and capped at 6 hours after the event.
+type: derived
+inputs:
+  - source_id: econ_events
+  - feature_id: mes_1m_bars
+computation:
+  type: registered_transform
+  transform_id: event_reaction_return
+  parameters:
+    event_type_filter:
+      - fomc_statement
+    reaction_minutes: 30
+    max_lookback_hours: 6.0
+    price_column: close
+cadence: 1m
+availability_latency_seconds: 0
+derivation: transform
+revisable: false
+expected_range:
+  min: -0.20
+  max: 0.20
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

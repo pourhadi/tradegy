@@ -1,0 +1,75 @@
+id: hyp_mes_post_event_first_move_fade_20260510
+title: MES first move after CPI/FOMC overreacts and partially mean-reverts
+status: killed
+source: human
+created_date: 2026-05-10
+last_modified_date: 2026-05-10
+author: gpt-5.5
+observation: >
+  After major scheduled macro events, the first 30-minute MES move can
+  overshoot as stop orders, hedging flows, and headline-reactive traders all
+  transact in the same direction. Once the first reaction window completes,
+  some of that move may mean-revert over the next 1-2 hours.
+mechanism: >
+  Scheduled events such as CPI and FOMC concentrate order flow into a short
+  release window. Liquidity providers widen or step back, directional hedgers
+  transact urgently, and systematic traders can amplify the initial move. If
+  the first 30-minute move is large enough, the next phase can be dominated by
+  profit-taking and liquidity normalization rather than fresh information.
+falsification: >
+  Refuted if the pre-registered CPI and FOMC long/short first-move fade specs
+  fail sanity with at least 30 qualifying trades, or if any survivor fails the
+  standard walk-forward IS/OOS gate. Do not change reaction_minutes or return
+  thresholds after observing results.
+counterparty: >
+  Headline-reactive traders, forced stop-outs, and hedgers transacting at poor
+  liquidity during the first post-release window.
+instrument_scope:
+  - MES
+feature_dependencies:
+  - mes_hours_since_last_cpi
+  - mes_hours_since_last_fomc
+  - mes_cpi_30m_reaction_return
+  - mes_fomc_30m_reaction_return
+parameter_envelope:
+  - name: reaction_minutes
+    min: 30
+    max: 30
+    step: null
+  - name: reaction_return_abs_min
+    min: 0.002
+    max: 0.002
+    step: null
+  - name: max_holding_bars
+    min: 90
+    max: 90
+    step: null
+variant_budget: 4
+gate_thresholds:
+  sanity_min_trades: 30
+  sanity_min_in_sample_sharpe: 0.0
+  walk_forward_oos_in_sample_ratio: 0.5
+  walk_forward_min_in_sample_sharpe: 0.0
+  cpcv_median_sharpe_threshold: 0.8
+  cpcv_max_pct_paths_negative: 0.2
+  holdout_sharpe_ratio_to_walk_forward: 0.5
+five_test_scores:
+  mechanism: 4
+  falsifiability: 5
+  novelty: 4
+  economic_plausibility: 4
+  data_feasibility: 5
+parent_hypothesis_id: null
+notes: >
+  First executable specs: mes_post_cpi_first_move_fade_long,
+  mes_post_cpi_first_move_fade_short, mes_post_fomc_first_move_fade_long,
+  mes_post_fomc_first_move_fade_short. The event reaction features emit only
+  after the first 30-minute window completes. Full-sample sanity backtests on
+  2026-05-10 produced: CPI long 21 trades / +$97.75 / +0.205 Sharpe; CPI short
+  26 trades / -$78.88 / -0.159 Sharpe; FOMC long 3 trades / +$26.88 / +0.287
+  Sharpe; FOMC short 6 trades / +$140.88 / +0.362 Sharpe.
+kill_reason: >
+  Failed sanity gate: no pre-registered spec reached the minimum 30-trade bar.
+  CPI short also had negative Sharpe. Positive CPI-long and FOMC results are
+  underpowered and not promotable without a separately pre-registered broader
+  sample.

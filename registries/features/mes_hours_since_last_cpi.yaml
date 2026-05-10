@@ -1,0 +1,28 @@
+# Hours since the last CPI release on the MES 1m timeline.
+
+id: mes_hours_since_last_cpi
+version: v1
+description: >
+  Hours from current MES bar timestamp to the last CPI release scheduled in
+  econ_events. Used by post-CPI event-reaction strategies. Output capped at
+  6 hours; rows further from a CPI release are dropped.
+type: derived
+inputs:
+  - source_id: econ_events
+  - feature_id: mes_1m_bars
+computation:
+  type: registered_transform
+  transform_id: time_since_last_event
+  parameters:
+    event_type_filter:
+      - cpi
+    max_lookback_hours: 6.0
+cadence: 1m
+availability_latency_seconds: 0
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 6.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

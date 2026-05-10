@@ -97,6 +97,7 @@ def _resolve_inputs(
         "rolling_percentile_rank": ["series"],
         "rolling_change": ["series"],
         "event_window_flag": ["events", "timeline"],
+        "event_reaction_return": ["events", "timeline"],
         "time_to_next_event": ["events", "timeline"],
         "time_since_last_event": ["events", "timeline"],
         "two_series_ratio": ["a", "b"],

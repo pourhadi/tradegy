@@ -39,10 +39,17 @@ Not yet available and therefore not used in the executable first batch:
 | Needed input | Why it matters | Required before testing |
 |---|---|---|
 | Intraday VIX/VX | True intraday vol confirmation and VIX divergence. | Admit an intraday VX/VIX source or explicitly decide daily VIX is sufficient for the research question. |
-| Event first-move feature | Post-CPI/FOMC first-move fade needs the sign and magnitude of the immediate reaction. | Feature or strategy class that records event-time reference price and first reaction window. |
 | Breadth / ADD / TICK / sector breadth | EOD continuation needs market-wide participation, not just index price. | Admit a breadth source with live/historical parity. |
 | SPX/SPY gamma surface | 0DTE gamma pin / flip-zone research. | Build point-in-time chain-derived gamma exposure features. |
 | Rates / DXY | Macro continuation confirmation. | Admit TY/ZN/2Y proxy and DXY or liquid futures proxy. |
+
+Newly added from existing data on 2026-05-10:
+
+| Feature | Raw data needed? | Notes |
+|---|---|---|
+| `mes_hours_since_last_cpi` | No | Built from `econ_events` + `mes_1m_bars`; no-lookahead/reproducibility passed 50/50. |
+| `mes_cpi_30m_reaction_return` | No | First 30m signed MES return after CPI; emits only after the 30m reaction window completes. |
+| `mes_fomc_30m_reaction_return` | No | First 30m signed MES return after FOMC statements; emits only after the 30m reaction window completes. |
 
 ## First Executable Batch
 
@@ -54,6 +61,39 @@ The first batch intentionally uses only existing registered features and strateg
 | `mes_vix_falling_gap_fade` | Overnight gap mean reversion when vol is compressing and no macro catalyst is active. | Gap threshold, VIX percentile < 0.50, VIX 5d change < 0, event quiet, early RTH window. | Killed at sanity. |
 | `mes_mnq_divergence_fade_long` | MES cheap vs MNQ mean reverts as index-arb pressure closes the spread. | MES/MNQ z < -2, RTH time gate, event quiet. | Killed at sanity. |
 | `mes_mnq_divergence_fade_short` | MES rich vs MNQ mean reverts as index-arb pressure closes the spread. | MES/MNQ z > +2, RTH time gate, event quiet. | Killed at sanity. |
+
+## Second Executable Batch
+
+The second batch targets post-event first-move overreaction using the new point-in-time reaction features. It still uses no new vendor data.
+
+| Spec | Mechanism | Independent gates | Status |
+|---|---|---|---|
+| `mes_post_cpi_first_move_fade_long` | Fade sharp downside CPI first move after the 30m reaction window completes. | Hours since CPI 0.5-2.0, CPI 30m reaction <= -0.20%. | Killed at sanity: positive but underpowered. |
+| `mes_post_cpi_first_move_fade_short` | Fade sharp upside CPI first move after the 30m reaction window completes. | Hours since CPI 0.5-2.0, CPI 30m reaction >= +0.20%. | Killed at sanity. |
+| `mes_post_fomc_first_move_fade_long` | Fade sharp downside FOMC first move after the 30m reaction window completes. | Hours since FOMC 0.5-2.0, FOMC 30m reaction <= -0.20%. | Killed at sanity: positive but underpowered. |
+| `mes_post_fomc_first_move_fade_short` | Fade sharp upside FOMC first move after the 30m reaction window completes. | Hours since FOMC 0.5-2.0, FOMC 30m reaction >= +0.20%. | Killed at sanity: positive but underpowered. |
+
+## Second Batch Results
+
+Single-window sanity backtests were run immediately after pre-registration on 2026-05-10 with the standard futures cost model.
+
+| Spec | Trades | PnL | Per-trade Sharpe | Result |
+|---|---:|---:|---:|---|
+| `mes_post_cpi_first_move_fade_long` | 21 | +$97.75 | +0.205 | Fails sanity: fewer than 30 trades. |
+| `mes_post_cpi_first_move_fade_short` | 26 | -$78.88 | -0.159 | Fails sanity: fewer than 30 trades and negative Sharpe. |
+| `mes_post_fomc_first_move_fade_long` | 3 | +$26.88 | +0.287 | Fails sanity: far fewer than 30 trades. |
+| `mes_post_fomc_first_move_fade_short` | 6 | +$140.88 | +0.362 | Fails sanity: far fewer than 30 trades. |
+
+Evidence packets:
+
+| Spec | Evidence packet |
+|---|---|
+| `mes_post_cpi_first_move_fade_long` | `data/evidence/mes_post_cpi_first_move_fade_long__backtest__20260510T063158.json` |
+| `mes_post_cpi_first_move_fade_short` | `data/evidence/mes_post_cpi_first_move_fade_short__backtest__20260510T063158.json` |
+| `mes_post_fomc_first_move_fade_long` | `data/evidence/mes_post_fomc_first_move_fade_long__backtest__20260510T063159.json` |
+| `mes_post_fomc_first_move_fade_short` | `data/evidence/mes_post_fomc_first_move_fade_short__backtest__20260510T063158.json` |
+
+Interpretation: first-move fade may be directionally interesting for downside CPI and FOMC, but the pre-registered gates do not produce enough trades over the available 2019-2026 MES sample to clear the system's minimum-evidence bar. Expanding event types or loosening thresholds after seeing these results would be post-hoc. Future work should either add more historical MES coverage, test a separately pre-registered broader high-importance-event pool, or move to options/gamma features where event frequency is not the bottleneck.
 
 Existing specs remain part of the broader evidence map, especially `mes_pre_fomc_drift`, `mes_pre_high_event_drift_combined`, `mes_mvp_vwap_reversion`, `mes_mvp_range_break_continuation`, `mes_mvp_gap_fill_fade`, and `mes_eod_long`. The four specs above are the new cross-domain core for this research round.
 
@@ -85,7 +125,7 @@ These ideas are not being implemented as dummy substitutes. They require the mis
 
 | Idea | Blocker | Next concrete task |
 |---|---|---|
-| `post_cpi_first_move_fade` | No event first-move sign/magnitude feature. | Add event-reaction feature or class, then pre-register long/short reversal specs. |
+| `post_cpi_first_move_fade` | Unblocked 2026-05-10. | First executable CPI/FOMC specs pre-registered in the second batch. |
 | `rates_confirmed_macro_continuation` | No rates/DXY source admitted. | Admit rates/DXY inputs with parity and backfill. |
 | `breadth_confirmed_vwap_reversion` | No breadth source admitted. | Admit breadth source, then gate VWAP reversion on participation divergence. |
 | `gamma_strike_pin_fade` | No gamma exposure feature. | Build SPX/SPY chain-derived gamma features from point-in-time chains. |
