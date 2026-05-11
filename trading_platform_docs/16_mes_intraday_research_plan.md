@@ -1,6 +1,6 @@
 # MES Intraday Directional Research Plan
 
-**Status:** Third executable VX/rates batch killed at sanity, 2026-05-11  
+**Status:** Fourth executable batch (broader high-importance event pool) killed at walk-forward, 2026-05-11.  
 **Purpose:** Define the next disciplined attempt to find profitable MES intraday trades without repeating the killed MES-only, price-only search.
 
 ## Thesis
@@ -59,6 +59,13 @@ Newly added from existing data on 2026-05-10:
 | `zn_5m_log_returns` | No | Built from admitted ZN source; no-lookahead/reproducibility passed 25/25. |
 | `zt_5m_log_returns` | No | Built from admitted ZT source; no-lookahead/reproducibility passed 25/25. |
 | `zn_zt_curve_5m_change` | No | Built from admitted ZN/ZT sources; no-lookahead/reproducibility passed 25/25. |
+
+Newly added from existing data on 2026-05-11:
+
+| Feature | Raw data needed? | Notes |
+|---|---|---|
+| `mes_hours_since_last_high_event` | No | Combined-event variant: hours since the last high-importance event (fomc_statement, fomc_sep, cpi, employment_situation, gdp). Built from `econ_events` + `mes_1m_bars`; no-lookahead/reproducibility passed 200/200. |
+| `mes_high_event_30m_reaction_return` | No | Combined-event variant: signed MES return 30m after a high-importance event. 294 distinct reaction-return values materialized 2019-2026 (58 with reaction <= -0.20%, 77 with reaction >= +0.20%). No-lookahead/reproducibility passed 200/200. |
 
 ## First Executable Batch
 
@@ -163,6 +170,79 @@ uv run tradegy backtest mes_fomc_vx_rates_downside_continuation_short
 uv run tradegy backtest mes_cpi_unconfirmed_downside_fade_long
 uv run tradegy backtest mes_fomc_unconfirmed_downside_fade_long
 ```
+
+## Fourth Executable Batch
+
+The fourth batch is the doc-16-sanctioned response to the batch-2 underpowered-but-directionally-positive finding. The event pool is broadened from {cpi, fomc_statement} to the canonical high-importance set as classified by the admitted `econ_events` source as of 2026-05-11: `fomc_statement`, `fomc_sep`, `cpi`, `employment_situation` (NFP), `gdp`. The high-importance pool contains 303 events between 2019-05 and 2026-04.
+
+Every numeric parameter (reaction_minutes, reaction_return_abs_min, hours_since_window, max_holding_bars, stop_ticks) is locked identically to the batch-2 CPI/FOMC specs. This is a pure event-set generalization test, not a parameter re-search. Pre-registration locks no parameter expansion after observing results.
+
+Pre-registered specs:
+
+| Spec | Mechanism | Independent gates | Status |
+|---|---|---|---|
+| `mes_post_high_event_first_move_fade_long` | Fade sharp downside first move after any high-importance event after the 30m reaction window completes. | Hours since high-importance event 0.5-2.0, high-event 30m reaction <= -0.20%. | Sanity PASS, walk-forward FAIL. Killed. |
+| `mes_post_high_event_first_move_fade_short` | Fade sharp upside first move after any high-importance event after the 30m reaction window completes. | Hours since high-importance event 0.5-2.0, high-event 30m reaction >= +0.20%. | Sanity PASS, walk-forward FAIL. Killed. |
+
+Projected qualifying events from the materialized 2019-2026 feature distribution (pre-sanity): 58 events with reaction <= -0.20% (long-fade), 77 events with reaction >= +0.20% (short-fade). Both comfortably above the 30-trade sanity bar before any session/holding-time filtering.
+
+Hypothesis: `hyp_mes_post_high_event_first_move_fade_20260511`. Parent: `hyp_mes_post_event_first_move_fade_20260510`.
+
+Run order:
+
+```bash
+uv run tradegy backtest mes_post_high_event_first_move_fade_long
+uv run tradegy backtest mes_post_high_event_first_move_fade_short
+uv run tradegy walk-forward mes_post_high_event_first_move_fade_long --holdout-months 6
+uv run tradegy walk-forward mes_post_high_event_first_move_fade_short --holdout-months 6
+```
+
+## Fourth Batch Results
+
+Single-window sanity and rolling walk-forward backtests were run on 2026-05-11 with the standard futures cost model.
+
+Single-window sanity:
+
+| Spec | Trades | PnL | Per-trade Sharpe | Result |
+|---|---:|---:|---:|---|
+| `mes_post_high_event_first_move_fade_long` | 58 | +$40.12 | +0.030 | Passes sanity. |
+| `mes_post_high_event_first_move_fade_short` | 83 | +$168.38 | +0.070 | Passes sanity. |
+
+Rolling walk-forward (3.0y train / 1.0y test / 1.0y step, 3 windows):
+
+| Spec | Avg IS Sharpe | Avg OOS Sharpe | Worst OOS | Avg IS Trades | Avg OOS Trades | Gate |
+|---|---:|---:|---:|---:|---:|---|
+| `mes_post_high_event_first_move_fade_long` | +0.063 | -0.052 | -0.167 | 27.3 | 12.7 | FAIL — OOS/IS ratio -0.82, far below 0.5 |
+| `mes_post_high_event_first_move_fade_short` | -0.028 | +0.052 | -0.413 | 39.0 | 12.0 | FAIL — IS Sharpe not positive |
+
+Per-window detail (long fade):
+
+| Train | Test | IS Sharpe | OOS Sharpe | IS Trades | OOS Trades |
+|---|---|---:|---:|---:|---:|
+| 2019-05 → 2022-05 | 2022-05 → 2023-05 | +0.141 | -0.052 | 16 | 17 |
+| 2020-05 → 2023-05 | 2023-05 → 2024-05 | +0.047 | +0.064 | 29 | 12 |
+| 2021-05 → 2024-05 | 2024-05 → 2025-05 | +0.001 | -0.167 | 37 | 9 |
+
+Per-window detail (short fade):
+
+| Train | Test | IS Sharpe | OOS Sharpe | IS Trades | OOS Trades |
+|---|---|---:|---:|---:|---:|
+| 2019-05 → 2022-05 | 2022-05 → 2023-05 | -0.007 | +0.154 | 38 | 12 |
+| 2020-05 → 2023-05 | 2023-05 → 2024-05 | +0.026 | -0.413 | 42 | 12 |
+| 2021-05 → 2024-05 | 2024-05 → 2025-05 | -0.102 | +0.416 | 37 | 12 |
+
+Evidence packets:
+
+| Spec | Backtest | Walk-forward |
+|---|---|---|
+| `mes_post_high_event_first_move_fade_long` | `data/evidence/mes_post_high_event_first_move_fade_long__backtest__20260511T054606.json` | `data/evidence/mes_post_high_event_first_move_fade_long__walk_forward__20260511T054633.json` |
+| `mes_post_high_event_first_move_fade_short` | `data/evidence/mes_post_high_event_first_move_fade_short__backtest__20260511T054606.json` | `data/evidence/mes_post_high_event_first_move_fade_short__walk_forward__20260511T054634.json` |
+
+Interpretation: the broader high-importance event pool produced enough trades to clear the sanity bar (58 long, 83 short) and the full-sample per-trade Sharpe was positive in both directions, but rolling walk-forward refuses both specs cleanly. For the long-fade, IS Sharpe was positive in all 3 rolling 3y training windows but OOS reverted in 2 of 3 — the mechanism degrades out-of-sample. For the short-fade, NONE of the 3 rolling IS windows produced positive Sharpe; the full-sample positive came entirely from a single OOS window (2019-2022 OOS +0.154), making it a regime artifact rather than a stable edge.
+
+The disciplined conclusion: post-event first-move fade does NOT generalize from CPI/FOMC to the canonical high-importance pool. The batch-2 directional positives on CPI/FOMC were either regime-specific or sample-size noise that broader pooling exposes. No parameter expansion is justified — sample dilution (long-fade IS trade count 27.3, OOS 12.7) is not a parameter problem but an event-frequency problem, and tuning thresholds to recover trade count would be post-hoc on a now-known-failed mechanism.
+
+This batch closes the "broader event pool" line. The next concrete cross-domain inputs to attempt, in priority order, are gamma exposure (SPX/SPY chain-derived; zero data spend for an EOD pilot) and breadth (no admitted source yet; ~$3 for a short-history pilot). Looser stops, looser thresholds, or per-event-type pool subselection are all forbidden.
 
 ## First Batch Results
 

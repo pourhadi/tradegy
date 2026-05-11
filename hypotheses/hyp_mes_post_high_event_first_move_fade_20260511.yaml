@@ -1,0 +1,126 @@
+id: hyp_mes_post_high_event_first_move_fade_20260511
+title: MES first move after high-importance scheduled events overreacts and partially mean-reverts
+status: killed
+source: human
+created_date: 2026-05-11
+last_modified_date: 2026-05-11
+author: claude-opus-4-7
+observation: >
+  Batch 2 (2026-05-10) tested the post-event first-move fade mechanism on
+  CPI/FOMC only and produced directionally positive per-trade Sharpe on three
+  of four specs (CPI-long +0.205, FOMC-long +0.287, FOMC-short +0.362) but all
+  four failed the 30-trade sanity bar because CPI and FOMC are individually too
+  sparse. The doc 16 interpretation explicitly nominated a "separately
+  pre-registered broader high-importance-event pool" as the disciplined way to
+  recover trade count without parameter tuning.
+mechanism: >
+  Scheduled high-importance macro events (FOMC statements/SEP, CPI,
+  Employment Situation/NFP, GDP) concentrate order flow into a short release
+  window. Liquidity providers widen or step back, directional hedgers transact
+  urgently against headlines, and systematic traders amplify the initial
+  move. If the first 30-minute move is large enough (|return| >= 0.20%, the
+  same threshold used in batch 2), the next 0.5-2.0 hours can be dominated by
+  profit-taking and liquidity normalization rather than fresh information,
+  producing partial mean reversion. The hypothesis under test is that this
+  mechanism is GENERIC to the canonical high-importance event pool rather than
+  CPI/FOMC-specific.
+falsification: >
+  Refuted if the pre-registered long-fade or short-fade spec fails sanity with
+  the full high-importance pool. Specifically: sanity requires >= 30 trades and
+  in-sample per-trade Sharpe > 0 on each spec, with the standard futures cost
+  model. No parameter expansion (reaction_minutes, reaction_return_abs_min,
+  hours_since_window, max_holding_bars) is permitted after observing results.
+  If sanity passes, walk-forward (avg OOS Sharpe >= 0.5 * avg IS Sharpe and
+  avg IS Sharpe > 0) and CPCV (median Sharpe > 0.8, neg paths < 20%) gates
+  apply unchanged. Per-event-type result decomposition is permitted as a
+  follow-up robustness check only — it cannot be used to construct a
+  subselected event pool, which would be post-hoc cherry-picking on the same
+  sample.
+counterparty: >
+  Headline-reactive traders, forced stop-outs after the first 30m move, and
+  hedgers who transacted at degraded liquidity inside the release window and
+  who now unwind into a normalizing book.
+instrument_scope:
+  - MES
+feature_dependencies:
+  - mes_hours_since_last_high_event
+  - mes_high_event_30m_reaction_return
+parameter_envelope:
+  - name: reaction_minutes
+    min: 30
+    max: 30
+    step: null
+  - name: reaction_return_abs_min
+    min: 0.002
+    max: 0.002
+    step: null
+  - name: hours_since_window_lo
+    min: 0.5
+    max: 0.5
+    step: null
+  - name: hours_since_window_hi
+    min: 2.0
+    max: 2.0
+    step: null
+  - name: max_holding_bars
+    min: 90
+    max: 90
+    step: null
+  - name: stop_ticks
+    min: 100
+    max: 100
+    step: null
+variant_budget: 2
+gate_thresholds:
+  sanity_min_trades: 30
+  sanity_min_in_sample_sharpe: 0.0
+  walk_forward_oos_in_sample_ratio: 0.5
+  walk_forward_min_in_sample_sharpe: 0.0
+  cpcv_median_sharpe_threshold: 0.8
+  cpcv_max_pct_paths_negative: 0.2
+  holdout_sharpe_ratio_to_walk_forward: 0.5
+five_test_scores:
+  mechanism: 4
+  falsifiability: 5
+  novelty: 3
+  economic_plausibility: 4
+  data_feasibility: 5
+parent_hypothesis_id: hyp_mes_post_event_first_move_fade_20260510
+notes: >
+  Event pool locked to the canonical high-importance set as classified by the
+  econ_events ingest as of 2026-05-11: fomc_statement, fomc_sep, cpi,
+  employment_situation, gdp (303 events 2019-05 through 2026-04). Distribution
+  of mes_high_event_30m_reaction_return materialized 2026-05-11: 58 events
+  with reaction <= -0.20% (long-fade qualifying), 77 events with
+  reaction >= +0.20% (short-fade qualifying). Both projected counts comfortably
+  above the 30-trade sanity bar before any session/holding-time filtering.
+  Pre-registered specs: mes_post_high_event_first_move_fade_long,
+  mes_post_high_event_first_move_fade_short. All numeric parameters are
+  identical to batch-2 (CPI/FOMC) specs by design — this is a pure event-set
+  generalization test, not a parameter re-search.
+
+  RESULT 2026-05-11:
+    Single-window sanity (both specs PASS):
+      - long fade:  58 trades, +$40.12 PnL, per-trade Sharpe +0.030
+      - short fade: 83 trades, +$168.38 PnL, per-trade Sharpe +0.070
+    Rolling walk-forward 3.0y/1.0y/1.0y (both specs FAIL the gate):
+      - long fade:  avg IS +0.063 / avg OOS -0.052 / worst OOS -0.167.
+                    OOS/IS ratio -0.82. IS positive 3/3 windows; OOS positive
+                    only 1/3.
+      - short fade: avg IS -0.028 / avg OOS +0.052 / worst OOS -0.413.
+                    No IS edge in any of 3 windows; full-sample positive
+                    came entirely from 2022-2023 OOS window (+0.154).
+kill_reason: >
+  Both specs cleared the sanity gate but failed the rolling walk-forward gate
+  cleanly. The full-sample positive per-trade Sharpe in both directions was
+  regime-specific, not a stable edge: the long-fade mechanism degrades
+  out-of-sample (IS positive all 3 windows, OOS positive only 1 of 3, avg OOS
+  Sharpe negative); the short-fade has no in-sample edge at all (avg IS Sharpe
+  negative, full-sample positive came entirely from a single 2022-2023 OOS
+  window). Falsifies the hypothesis that the post-event first-move fade
+  mechanism generalizes from CPI/FOMC to the canonical high-importance
+  scheduled-event pool. No parameter expansion is justified: the OOS trade-
+  count drop (long fade 27.3 IS -> 12.7 OOS) reflects event-frequency in
+  recent years, not a fixable parameter setting. Closes the "broader event
+  pool" line. Next deferred-batch line to attempt is gamma exposure (zero
+  data spend for an EOD pilot via the already-admitted ORATS SPX chains).

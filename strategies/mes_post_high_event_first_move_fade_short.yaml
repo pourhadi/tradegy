@@ -1,0 +1,95 @@
+# MES post-high-event first-move fade, short after upside overshoot.
+#
+# Pre-registered for hyp_mes_post_high_event_first_move_fade_20260511.
+# All parameters locked identically to mes_post_cpi_first_move_fade_short
+# and mes_post_fomc_first_move_fade_short (both batch-2 specs from
+# 2026-05-10) — this is the broader-event-pool generalization test,
+# NOT a parameter re-search. The only change vs batch 2 is the event
+# pool: cpi/fomc -> {fomc_statement, fomc_sep, cpi, employment_situation,
+# gdp}.
+
+metadata:
+  id: mes_post_high_event_first_move_fade_short
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES post-high-event first-move fade short
+  status: retired
+  created_date: 2026-05-11
+  last_modified_date: 2026-05-11
+  author: claude-opus-4-7
+  reviewers: []
+  parent_strategy_id: mes_post_cpi_first_move_fade_short
+  description: >
+    KILLED 2026-05-11 at walk-forward. Short MES after the first 30 minutes
+    following a high-importance scheduled event are up at least 0.20%,
+    testing partial reversion after upside macro-release overreaction.
+    High-importance pool locked at fomc_statement, fomc_sep, cpi,
+    employment_situation, gdp. Sanity passed (83 trades, +0.070 per-trade
+    Sharpe) but rolling 3y walk-forward gate failed (avg IS -0.028 /
+    avg OOS +0.052 / worst OOS -0.413; no IS edge in any of 3 windows).
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: gated_entry
+  parameters:
+    direction: short
+    max_attempts_per_session: 1
+  direction: short
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    - condition: feature_range
+      parameters:
+        feature_id: mes_hours_since_last_high_event
+        lo: 0.5
+        hi: 2.0
+    - condition: feature_threshold
+      parameters:
+        feature_id: mes_high_event_30m_reaction_return
+        operator: gte
+        threshold: 0.002
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: fixed_ticks
+    stop_ticks: 100
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 1000
+  time_stop:
+    enabled: true
+    max_holding_bars: 90
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: false
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only

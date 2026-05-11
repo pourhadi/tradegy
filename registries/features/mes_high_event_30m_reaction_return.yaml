@@ -1,0 +1,54 @@
+# Signed MES return during the first 30 minutes after a HIGH-importance
+# scheduled event.
+#
+# Combined-event variant of mes_cpi_30m_reaction_return and
+# mes_fomc_30m_reaction_return. The 30m reaction window is computed
+# for events among:
+#   fomc_statement, fomc_sep, cpi, employment_situation (NFP), gdp
+# These are all event_types tagged `importance: high` in econ_events.
+#
+# Pre-registered for the third executable MES intraday batch
+# (post-high-event first-move fade, doc 16). Pooling events into a
+# single feature avoids per-event-type cherry-picking: testing only
+# the events that came out directionally positive on the same sample
+# (CPI/FOMC from batch 2) would be a textbook post-hoc selection bias.
+# This feature commits to the full canonical high-importance set
+# regardless of which sub-events drove the prior directional signal.
+#
+# Reaction window held identical to batch 2 (reaction_minutes=30) so
+# the broader-pool test is a pure event-set generalization, not a
+# parameter re-search.
+
+id: mes_high_event_30m_reaction_return
+version: v1
+description: >
+  Signed MES close-to-close return from a high-importance event
+  release timestamp to 30 minutes after the release, broadcast only
+  to MES bars after that 30-minute reaction window has completed and
+  capped at 6 hours after the event.
+type: derived
+inputs:
+  - source_id: econ_events
+  - feature_id: mes_1m_bars
+computation:
+  type: registered_transform
+  transform_id: event_reaction_return
+  parameters:
+    event_type_filter:
+      - fomc_statement
+      - fomc_sep
+      - cpi
+      - employment_situation
+      - gdp
+    reaction_minutes: 30
+    max_lookback_hours: 6.0
+    price_column: close
+cadence: 1m
+availability_latency_seconds: 0
+derivation: transform
+revisable: false
+expected_range:
+  min: -0.20
+  max: 0.20
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

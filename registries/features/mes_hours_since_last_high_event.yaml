@@ -1,0 +1,47 @@
+# Hours since the last HIGH-importance scheduled event of any type.
+#
+# Combined-event variant of mes_hours_since_last_cpi and
+# mes_hours_since_last_fomc. Captures hours-since the most recent
+# event among:
+#   fomc_statement, fomc_sep, cpi, employment_situation (NFP), gdp
+# These are all event_types tagged `importance: high` in econ_events.
+#
+# Pre-registered for the third executable MES intraday batch
+# (post-high-event first-move fade, doc 16). Pooling events into a
+# single feature avoids per-event-type cherry-picking: testing only
+# the events that came out directionally positive on the same sample
+# (CPI/FOMC from batch 2) would be a textbook post-hoc selection bias.
+# This feature commits to the full canonical high-importance set
+# regardless of which sub-events drove the prior directional signal.
+
+id: mes_hours_since_last_high_event
+version: v1
+description: >
+  Hours from current MES 1m bar timestamp to the last high-importance
+  scheduled event in econ_events (FOMC statements/SEP, CPI,
+  NFP/Employment Situation, GDP). Output capped at 6 hours; rows
+  further from a high-importance release are dropped.
+type: derived
+inputs:
+  - source_id: econ_events
+  - feature_id: mes_1m_bars
+computation:
+  type: registered_transform
+  transform_id: time_since_last_event
+  parameters:
+    event_type_filter:
+      - fomc_statement
+      - fomc_sep
+      - cpi
+      - employment_situation
+      - gdp
+    max_lookback_hours: 6.0
+cadence: 1m
+availability_latency_seconds: 0
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 6.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development
