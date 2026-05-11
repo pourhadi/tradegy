@@ -115,9 +115,20 @@ def ingest_databento_csv(
         .alias("ts_utc")
     ).drop("ts_event")
 
+    # Parent futures requests can include exchange-listed calendar spreads
+    # (e.g. ZNM9-ZNU9). Those are valid instruments but not outright futures
+    # prices and must never be eligible for a front-month continuous series.
+    outrights = parsed.filter(~pl.col("symbol").str.contains("-", literal=True))
+    rows_spread_dropped = parsed.height - outrights.height
+    if outrights.height == 0:
+        raise ValueError(
+            f"databento_ohlcv_csv: input {csv_path} contains no outright futures "
+            "symbols after excluding calendar spreads"
+        )
+
     # Drop exact (ts_utc, symbol) duplicates — databento occasionally emits
     # cancel/correct rebroadcasts that match the canonical row.
-    parsed = parsed.sort(["ts_utc", "symbol"]).unique(
+    parsed = outrights.sort(["ts_utc", "symbol"]).unique(
         subset=["ts_utc", "symbol"], maintain_order=True
     )
 
@@ -165,6 +176,7 @@ def ingest_databento_csv(
             "rows_in": rows_in,
             "rows_out": rows_out,
             "duplicates_dropped": duplicates_dropped,
+            "rows_spread_dropped": rows_spread_dropped,
             "coverage_start": coverage_start.isoformat(),
             "coverage_end": coverage_end.isoformat(),
             "partitions": [str(p) for p in partitions_written],

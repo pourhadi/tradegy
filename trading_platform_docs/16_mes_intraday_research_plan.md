@@ -1,6 +1,6 @@
 # MES Intraday Directional Research Plan
 
-**Status:** First executable batches killed at sanity; Sierra Chart VX ingest shipped, 2026-05-10  
+**Status:** First executable batches killed at sanity; VX and rates inputs admitted, 2026-05-10  
 **Purpose:** Define the next disciplined attempt to find profitable MES intraday trades without repeating the killed MES-only, price-only search.
 
 ## Thesis
@@ -32,6 +32,7 @@ Already available in this repo:
 | MNQ/M2K/YM 1m bars | `mnq_1m_ohlcv`, `m2k_1m_ohlcv`, `ym_1m_ohlcv` | Cross-index divergence inputs. |
 | VIX daily | `vix_daily_close`, `vix_daily_pctile_252`, `vix_daily_5d_change` | Regime level and vol-compression/expansion direction. |
 | VX 1m futures | `vx_1m_ohlcv` | Intraday CFE VIX futures confirmation from Sierra Chart SCID files. Non-back-adjusted front-month continuous series. |
+| Rates 1m futures | `zn_1m_ohlcv`, `zt_1m_ohlcv` | 10Y and 2Y Treasury futures confirmation from Databento. Non-back-adjusted front-month continuous series. |
 | Macro events | `econ_events`, hours-to-next-event features | Supports pre-event drift and quiet-window gates. |
 | OR30 / VWAP / prior close | `mes_or30_high`, `mes_or30_low`, `mes_vwap`, `mes_prior_rth_close` | Existing intraday anchors. |
 
@@ -42,7 +43,7 @@ Not yet available and therefore not used in the executable first batch:
 | Intraday VIX/VX | True intraday vol confirmation and VIX divergence. | Unblocked for VX futures via `vx_1m_ohlcv`; cash VIX intraday remains separate. |
 | Breadth / ADD / TICK / sector breadth | EOD continuation needs market-wide participation, not just index price. | Admit a breadth source with live/historical parity. |
 | SPX/SPY gamma surface | 0DTE gamma pin / flip-zone research. | Build point-in-time chain-derived gamma exposure features. |
-| Rates / DXY | Macro continuation confirmation. | Admit TY/ZN/2Y proxy and DXY or liquid futures proxy. |
+| DXY | Macro continuation confirmation. | Admit DXY or a liquid futures proxy if dollar confirmation becomes necessary. |
 
 Newly added from existing data on 2026-05-10:
 
@@ -52,6 +53,8 @@ Newly added from existing data on 2026-05-10:
 | `mes_cpi_30m_reaction_return` | No | First 30m signed MES return after CPI; emits only after the 30m reaction window completes. |
 | `mes_fomc_30m_reaction_return` | No | First 30m signed MES return after FOMC statements; emits only after the 30m reaction window completes. |
 | `vx_1m_ohlcv` | Sierra Chart SCID | Ingested 2026-05-10 from CFE VX contract files; audit passed with no findings. |
+| `zn_1m_ohlcv` | Databento | Downloaded/ingested 2026-05-10 from `GLBX.MDP3`; audit passed with no findings after excluding calendar-spread rows. |
+| `zt_1m_ohlcv` | Databento | Downloaded/ingested 2026-05-10 from `GLBX.MDP3`; audit passed with no findings after excluding calendar-spread rows. |
 
 ## First Executable Batch
 
@@ -128,19 +131,19 @@ These ideas are not being implemented as dummy substitutes. They require the mis
 | Idea | Blocker | Next concrete task |
 |---|---|---|
 | `post_cpi_first_move_fade` | Unblocked 2026-05-10. | First executable CPI/FOMC specs pre-registered in the second batch. |
-| `rates_confirmed_macro_continuation` | No rates/DXY source admitted. | Admit rates/DXY inputs with parity and backfill. |
+| `rates_confirmed_macro_continuation` | Unblocked 2026-05-10. | Use admitted `zn_1m_ohlcv` and `zt_1m_ohlcv`; DXY remains optional. |
 | `breadth_confirmed_vwap_reversion` | No breadth source admitted. | Admit breadth source, then gate VWAP reversion on participation divergence. |
 | `gamma_strike_pin_fade` | No gamma exposure feature. | Build SPX/SPY chain-derived gamma features from point-in-time chains. |
 | `eod_breadth_continuation` | No breadth/day-trend gate. | Add day-trend and breadth features before testing. |
 
 ## Data Acquisition Matrix
 
-Metadata/cost probes run 2026-05-10 against the current Databento key. No downloads were performed.
+Metadata/cost probes run 2026-05-10 against the current Databento key. ZN and ZT were subsequently downloaded with explicit confirmation.
 
 | Need | Source | Probe result | Recommendation |
 |---|---|---:|---|
-| Treasury/rates confirmation | Databento `GLBX.MDP3`, `ZN.FUT` 1m, 2019-05-06 to 2026-04-30 | $11.11 | Pull when ready; cheap and directly useful. |
-| Treasury/rates confirmation | Databento `GLBX.MDP3`, `ZT.FUT` 1m, same window | $8.81 | Pull with `ZN`; captures 2Y-rate sensitivity. |
+| Treasury/rates confirmation | Databento `GLBX.MDP3`, `ZN.FUT` 1m, 2019-05-06 to 2026-04-30 | $11.11 | Downloaded, ingested as `zn_1m_ohlcv`, audit passed. |
+| Treasury/rates confirmation | Databento `GLBX.MDP3`, `ZT.FUT` 1m, same window | $8.81 | Downloaded, ingested as `zt_1m_ohlcv`, audit passed. |
 | Treasury/rates confirmation | Databento `GLBX.MDP3`, `ZF.FUT` 1m, same window | $10.21 | Pull if building curve-slope features. |
 | Treasury/rates confirmation | Databento `GLBX.MDP3`, `ZB.FUT` 1m, same window | $9.82 | Optional; long-bond proxy. |
 | Short-rate futures | Databento `GLBX.MDP3`, `SR3.FUT` 1m, same window | $108.98 | Defer unless SR3-specific mechanism is registered. |
@@ -204,13 +207,23 @@ Actual 2026-05-10 ingest result:
 
 Decision: use Sierra Chart SCID as the low-cost VX backfill path. Do not purchase full-history Databento VX unless the direct SCID source audit reveals unfixable quality defects and a VX-specific hypothesis still justifies the spend.
 
+### Rates Acquisition Result
+
+ZN and ZT are admitted as the first rates-confirmation inputs.
+
+| Source | Download cost | Download rows | Ingested continuous rows | Batch id | Audit |
+|---|---:|---:|---:|---|---|
+| `zn_1m_ohlcv` | $11.11 | 3,042,443 | 2,336,096 | `bda6c900fa5bebb4` | Pass: no findings |
+| `zt_1m_ohlcv` | $8.81 | 2,413,897 | 1,957,772 | `c67aea1d74c3b664` | Pass: no findings |
+
+Databento emitted reduced-quality warnings for some historical dates, including 2020-02-27, 2020-02-28, and 2020-06-30. The first ingest attempt also exposed a root data-shape issue: parent-symbol pulls include exchange-listed calendar spreads (`ZNM9-ZNU9`, `ZTM9-ZTU9`, etc.) whose negative spread prices are valid spread data but invalid for an outright front-month futures series. The Databento OHLCV ingest now excludes symbols containing `-` before front-month selection; after reingest, both ZN and ZT audits passed.
+
 Acquisition order if continuing MES intraday research:
 
-1. Pull `ZN.FUT` and `ZT.FUT` 1m from Databento; implement rates-confirmed event continuation/fade features.
-2. Ingest and audit `vx_1m_ohlcv`; implement VX-confirmed event continuation/fade features if the audit passes.
-3. If willing to spend ~$250-$550, pull SPX OPRA definitions/statistics/`cbbo-1m` for 2023-2025 first, then 2020-2024 only if the feature pipeline looks sound.
-4. Use equity breadth proxies only as a pilot; they do not solve the 2019-2026 walk-forward window unless a longer equities source is admitted.
-5. Do not buy full-history VX from Databento unless Sierra cannot provide a complete VX window and a VX-specific hypothesis still justifies the spend.
+1. Implement VX + rates-confirmed event continuation/fade features using `vx_1m_ohlcv`, `zn_1m_ohlcv`, and `zt_1m_ohlcv`.
+2. If willing to spend ~$250-$550, pull SPX OPRA definitions/statistics/`cbbo-1m` for 2023-2025 first, then 2020-2024 only if the feature pipeline looks sound.
+3. Use equity breadth proxies only as a pilot; they do not solve the 2019-2026 walk-forward window unless a longer equities source is admitted.
+4. Do not buy full-history VX from Databento unless Sierra cannot provide a complete VX window and a VX-specific hypothesis still justifies the spend.
 
 ## Gate Discipline
 

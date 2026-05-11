@@ -1,0 +1,61 @@
+# Data source registry entry for CBOT 10-Year Treasury Note (ZN) 1-minute
+# OHLCV bars from Databento, ingested with no-lookahead front-month rolling.
+
+id: zn_1m_ohlcv
+version: v1
+description: >
+  CBOT 10-Year Treasury Note (ZN) front-month 1-minute OHLCV bars from
+  Databento. Front-month chosen by previous-day total volume per contract
+  (no-lookahead). Price levels are NOT back-adjusted; at quarterly roll
+  boundaries the absolute close-to-close can step by the calendar spread.
+type: market_data
+provider: databento
+revisable: false
+revision_policy: never_revised
+admission_rationale: >
+  Databento OHLCV-1m bars are venue-canonical and provide the rates-side
+  macro confirmation input needed for MES intraday research. The ingest
+  path's roll method is deterministic and no-lookahead: at date D the
+  front month is selected from date D-1 total volume by contract, with the
+  first available date falling back to same-day volume because no prior
+  exists.
+coverage:
+  start_date: 2019-05-06
+  end_date: 2026-04-29
+  gaps: []
+cadence: 1m
+fields:
+  - {name: ts_utc, type: timestamp}
+  - {name: open, type: float}
+  - {name: high, type: float}
+  - {name: low, type: float}
+  - {name: close, type: float}
+  - {name: volume, type: int}
+  - {name: symbol, type: string}
+  - {name: instrument_id, type: int}
+ingest:
+  format: databento_ohlcv_csv
+  timestamp_columns: [ts_event]
+session_calendar: CBOT
+max_inactivity_seconds: 604800
+availability_latency:
+  median_seconds: 0.0
+  p99_seconds: 60.0
+  notes: >
+    Historical CSV has zero replay latency. There is no live adapter paired
+    with this source yet; live use would require a rates futures feed that
+    matches this schema.
+licensing:
+  live_use: false
+  backtest_use: true
+  redistribution: false
+known_issues:
+  - >
+    Front-month roll discontinuity: the series is not back-adjusted, so
+    absolute levels can step at quarterly rolls. Returns, slope/relative
+    changes, and intraday-relative features are the intended uses.
+  - >
+    Databento emitted reduced-quality warnings during download for some
+    historical dates, including 2020-02-27, 2020-02-28, and 2020-06-30.
+    Treat any strategy localized to those dates with caution.
+audit_history: []
