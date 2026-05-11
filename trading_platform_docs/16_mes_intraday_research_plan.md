@@ -1,6 +1,6 @@
 # MES Intraday Directional Research Plan
 
-**Status:** First executable batches killed at sanity; VX and rates inputs admitted, 2026-05-10  
+**Status:** Third executable VX/rates batch killed at sanity, 2026-05-11  
 **Purpose:** Define the next disciplined attempt to find profitable MES intraday trades without repeating the killed MES-only, price-only search.
 
 ## Thesis
@@ -55,6 +55,10 @@ Newly added from existing data on 2026-05-10:
 | `vx_1m_ohlcv` | Sierra Chart SCID | Ingested 2026-05-10 from CFE VX contract files; audit passed with no findings. |
 | `zn_1m_ohlcv` | Databento | Downloaded/ingested 2026-05-10 from `GLBX.MDP3`; audit passed with no findings after excluding calendar-spread rows. |
 | `zt_1m_ohlcv` | Databento | Downloaded/ingested 2026-05-10 from `GLBX.MDP3`; audit passed with no findings after excluding calendar-spread rows. |
+| `vx_5m_log_returns` | No | Built from admitted VX SCID source; no-lookahead/reproducibility passed 25/25. |
+| `zn_5m_log_returns` | No | Built from admitted ZN source; no-lookahead/reproducibility passed 25/25. |
+| `zt_5m_log_returns` | No | Built from admitted ZT source; no-lookahead/reproducibility passed 25/25. |
+| `zn_zt_curve_5m_change` | No | Built from admitted ZN/ZT sources; no-lookahead/reproducibility passed 25/25. |
 
 ## First Executable Batch
 
@@ -101,6 +105,64 @@ Evidence packets:
 Interpretation: first-move fade may be directionally interesting for downside CPI and FOMC, but the pre-registered gates do not produce enough trades over the available 2019-2026 MES sample to clear the system's minimum-evidence bar. Expanding event types or loosening thresholds after seeing these results would be post-hoc. Future work should either add more historical MES coverage, test a separately pre-registered broader high-importance-event pool, or move to options/gamma features where event frequency is not the bottleneck.
 
 Existing specs remain part of the broader evidence map, especially `mes_pre_fomc_drift`, `mes_pre_high_event_drift_combined`, `mes_mvp_vwap_reversion`, `mes_mvp_range_break_continuation`, `mes_mvp_gap_fill_fade`, and `mes_eod_long`. The four specs above are the new cross-domain core for this research round.
+
+## Third Executable Batch
+
+The third batch is the first one to use admitted intraday VX and rates futures. Thresholds were selected from unconditional feature quantiles before any strategy backtest, not from PnL:
+
+| Feature | Approx gate | Rationale |
+|---|---:|---|
+| `vx_5m_log_returns` | +/-0.006 | About the 10th/90th percentile of all materialized 5m VX returns. |
+| `zn_5m_log_returns` | +/-0.00025 | About the 10th/90th percentile of all materialized 5m ZN returns. |
+| `zt_5m_log_returns` | +/-0.00007 | About the 10th/90th percentile of all materialized 5m ZT returns. |
+
+Pre-registered specs:
+
+| Spec | Mechanism | Independent gates | Status |
+|---|---|---|---|
+| `mes_vx_rates_or30_breakout_short` | OR30 downside continuation when vol and Treasuries confirm risk-off. | Lower OR30 break with volume, VX 5m > 0.006, ZN 5m > 0.00025, ZT 5m > 0.00007, early/mid RTH. | Killed at sanity. |
+| `mes_vx_rates_or30_breakout_long` | OR30 upside continuation when vol and Treasuries confirm risk-on. | Upper OR30 break with volume, VX 5m < -0.006, ZN 5m < -0.00025, ZT 5m < -0.00007, early/mid RTH. | Killed at sanity. |
+| `mes_cpi_vx_rates_downside_continuation_short` | Continue a negative CPI first move only when VX/rates confirm risk-off. | Hours since CPI 0.5-2.0, CPI reaction <= -0.20%, VX 5m > 0.006, ZN 5m > 0.00025. | Killed at sanity. |
+| `mes_fomc_vx_rates_downside_continuation_short` | Continue a negative FOMC first move only when VX/rates confirm risk-off. | Hours since FOMC 0.5-2.0, FOMC reaction <= -0.20%, VX 5m > 0.006, ZN 5m > 0.00025. | Killed at sanity. |
+| `mes_cpi_unconfirmed_downside_fade_long` | Fade a negative CPI first move only when VX/rates do not confirm risk-off. | Hours since CPI 0.5-2.0, CPI reaction <= -0.20%, VX 5m < 0.006, ZN 5m < 0.00025. | Killed at sanity: positive but underpowered. |
+| `mes_fomc_unconfirmed_downside_fade_long` | Fade a negative FOMC first move only when VX/rates do not confirm risk-off. | Hours since FOMC 0.5-2.0, FOMC reaction <= -0.20%, VX 5m < 0.006, ZN 5m < 0.00025. | Killed at sanity: positive but underpowered. |
+
+## Third Batch Results
+
+Single-window sanity backtests were run immediately after pre-registration on 2026-05-11 with the standard futures cost model.
+
+| Spec | Trades | PnL | Per-trade Sharpe | Result |
+|---|---:|---:|---:|---|
+| `mes_vx_rates_or30_breakout_short` | 185 | -$268.57 | -0.172 | Fails sanity: negative Sharpe. |
+| `mes_vx_rates_or30_breakout_long` | 93 | -$285.25 | -0.422 | Fails sanity: negative Sharpe. |
+| `mes_cpi_vx_rates_downside_continuation_short` | 11 | -$53.00 | -0.227 | Fails sanity: fewer than 30 trades and negative Sharpe. |
+| `mes_fomc_vx_rates_downside_continuation_short` | 1 | -$26.62 | 0.000 | Fails sanity: far fewer than 30 trades. |
+| `mes_cpi_unconfirmed_downside_fade_long` | 21 | +$98.00 | +0.208 | Fails sanity: fewer than 30 trades. |
+| `mes_fomc_unconfirmed_downside_fade_long` | 3 | +$26.88 | +0.287 | Fails sanity: far fewer than 30 trades. |
+
+Evidence packets:
+
+| Spec | Evidence packet |
+|---|---|
+| `mes_vx_rates_or30_breakout_short` | `data/evidence/mes_vx_rates_or30_breakout_short__backtest__20260511T045118.json` |
+| `mes_vx_rates_or30_breakout_long` | `data/evidence/mes_vx_rates_or30_breakout_long__backtest__20260511T045118.json` |
+| `mes_cpi_vx_rates_downside_continuation_short` | `data/evidence/mes_cpi_vx_rates_downside_continuation_short__backtest__20260511T045116.json` |
+| `mes_fomc_vx_rates_downside_continuation_short` | `data/evidence/mes_fomc_vx_rates_downside_continuation_short__backtest__20260511T045116.json` |
+| `mes_cpi_unconfirmed_downside_fade_long` | `data/evidence/mes_cpi_unconfirmed_downside_fade_long__backtest__20260511T045116.json` |
+| `mes_fomc_unconfirmed_downside_fade_long` | `data/evidence/mes_fomc_unconfirmed_downside_fade_long__backtest__20260511T045116.json` |
+
+Interpretation: simple intraday VX/rates confirmation did not rescue MES OR30 continuation; both directions had adequate sample and negative Sharpe. Event-continuation variants were too sparse and negative. The CPI/FOMC unconfirmed downside fade remains directionally positive, but still under the 30-trade minimum and cannot be promoted without a separately pre-registered broader event pool or more history.
+
+Run order:
+
+```bash
+uv run tradegy backtest mes_vx_rates_or30_breakout_short
+uv run tradegy backtest mes_vx_rates_or30_breakout_long
+uv run tradegy backtest mes_cpi_vx_rates_downside_continuation_short
+uv run tradegy backtest mes_fomc_vx_rates_downside_continuation_short
+uv run tradegy backtest mes_cpi_unconfirmed_downside_fade_long
+uv run tradegy backtest mes_fomc_unconfirmed_downside_fade_long
+```
 
 ## First Batch Results
 

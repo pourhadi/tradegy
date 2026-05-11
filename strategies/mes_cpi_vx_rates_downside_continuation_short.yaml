@@ -1,0 +1,93 @@
+# MES post-CPI downside continuation with VX/rates risk-off confirmation.
+
+metadata:
+  id: mes_cpi_vx_rates_downside_continuation_short
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES post-CPI downside continuation with VX/rates confirmation
+  status: retired
+  created_date: 2026-05-10
+  last_modified_date: 2026-05-11
+  author: gpt-5.5
+  reviewers: []
+  parent_strategy_id: null
+  description: >
+    KILLED 2026-05-11. Short MES after a negative CPI first move only when VX and Treasuries also
+    confirm risk-off pressure, testing event continuation rather than fading
+    every sharp first move.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: gated_entry
+  parameters:
+    direction: short
+    max_attempts_per_session: 1
+  direction: short
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    - condition: feature_range
+      parameters:
+        feature_id: mes_hours_since_last_cpi
+        lo: 0.5
+        hi: 2.0
+    - condition: feature_threshold
+      parameters:
+        feature_id: mes_cpi_30m_reaction_return
+        operator: lte
+        threshold: -0.002
+    - condition: feature_threshold
+      parameters:
+        feature_id: vx_5m_log_returns
+        operator: gt
+        threshold: 0.006
+    - condition: feature_threshold
+      parameters:
+        feature_id: zn_5m_log_returns
+        operator: gt
+        threshold: 0.00025
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: fixed_ticks
+    stop_ticks: 100
+    tick_size: 0.25
+  adjustment_rules: []
+  hard_max_distance_ticks: 1000
+  time_stop:
+    enabled: true
+    max_holding_bars: 90
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: false
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only

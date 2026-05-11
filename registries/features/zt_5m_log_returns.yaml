@@ -1,0 +1,24 @@
+# 5-minute log returns over front-month ZT futures.
+
+id: zt_5m_log_returns
+version: v1
+description: >
+  log(close_t / close_{t-1}) on zt_5m_bars. Positive values generally
+  indicate front-end Treasury price strength and falling 2-year yields.
+type: derived
+inputs:
+  - feature_id: zt_5m_bars
+computation:
+  type: registered_transform
+  transform_id: log_return
+  parameters:
+    price_column: close
+cadence: 5m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: -1.0
+  max: 1.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

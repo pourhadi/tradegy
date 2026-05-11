@@ -1,0 +1,26 @@
+# 5-minute OHLCV bars for front-month ZT futures.
+
+id: zt_5m_bars
+version: v1
+description: >
+  5-minute OHLCV bars for CBOT 2-Year Treasury Note futures, aggregated
+  from zt_1m_ohlcv. Used for front-end rates confirmation.
+type: derived
+inputs:
+  - source_id: zt_1m_ohlcv
+computation:
+  type: registered_transform
+  transform_id: resample_ohlcv_bars
+  parameters:
+    cadence: 5m
+    bar_close_label: right
+    closed: left
+cadence: 5m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 300.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

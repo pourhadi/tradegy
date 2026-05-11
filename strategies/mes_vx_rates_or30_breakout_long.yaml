@@ -1,0 +1,109 @@
+# MES OR30 upside continuation with VX/rates risk-on confirmation.
+#
+# Pre-registered 2026-05-10 before sanity backtest. Thresholds were chosen
+# from unconditional feature quantiles, not strategy PnL.
+
+metadata:
+  id: mes_vx_rates_or30_breakout_long
+  version: 0.1.0
+  schema_version: "1.0"
+  name: MES OR30 upside breakout with VX/rates confirmation
+  status: retired
+  created_date: 2026-05-10
+  last_modified_date: 2026-05-11
+  author: gpt-5.5
+  reviewers: []
+  parent_strategy_id: mes_mvp_range_break_continuation
+  description: >
+    KILLED 2026-05-11. Long MES only on upper OR30 breaks when intraday VX and Treasuries are
+    simultaneously soft, testing whether equity upside follows confirmed
+    risk-on repricing across vol and rates.
+
+market_scope:
+  market: ES
+  instrument: MES
+  session: globex
+  time_windows: []
+  blackout_dates: []
+  day_of_week_filter: []
+
+entry:
+  strategy_class: range_break_continuation
+  parameters:
+    upper_level_feature_id: mes_or30_high
+    lower_level_feature_id: mes_or30_low
+    volume_zscore_feature_id: mes_volume_zscore_20m
+    confirmation_buffer_ticks: 1
+    volume_zscore_min: 1.0
+    tick_size: 0.25
+    max_attempts_per_session: 1
+    direction_mode: long
+  direction: long
+  entry_order_type: market
+  limit_offset_ticks: 0
+  gating_conditions:
+    - condition: time_of_session
+      parameters:
+        session_position_feature_id: mes_xnys_session_position
+        lo: 0.10
+        hi: 0.45
+    - condition: feature_threshold
+      parameters:
+        feature_id: vx_5m_log_returns
+        operator: lt
+        threshold: -0.006
+    - condition: feature_threshold
+      parameters:
+        feature_id: zn_5m_log_returns
+        operator: lt
+        threshold: -0.00025
+    - condition: feature_threshold
+      parameters:
+        feature_id: zt_5m_log_returns
+        operator: lt
+        threshold: -0.00007
+
+sizing:
+  method: fixed_contracts
+  parameters:
+    contracts: 1
+
+stops:
+  initial_stop:
+    method: atr_multiple
+    atr_feature_id: mes_atr_14m
+    atr_mult: 1.0
+    tick_size: 0.25
+    max_distance_ticks: 400
+  adjustment_rules:
+    - action: trailing_atr
+      atr_feature_id: mes_atr_14m
+      multiplier: 3.0
+      activation_R: 1.0
+      tick_size: 0.25
+  hard_max_distance_ticks: 400
+  time_stop:
+    enabled: true
+    max_holding_bars: 60
+    action_at_time_stop: exit_market
+
+exits:
+  profit_targets: []
+  invalidation_conditions: []
+  end_of_session: null
+
+retirement_criteria:
+  quantitative_triggers:
+    - {metric: rolling_20_trade_sharpe, threshold: -1.0, action: auto_disable}
+  qualitative_triggers: []
+  minimum_trades_before_retirement_eligible: 20
+
+operational:
+  enabled: false
+  live_since: null
+  risk_envelope:
+    max_concurrent_instances: 1
+    max_daily_loss_pct: 1.5
+    max_weekly_loss_pct: 3.0
+  incompatible_with: []
+  tier: proposal_only

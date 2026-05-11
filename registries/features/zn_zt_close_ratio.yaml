@@ -1,0 +1,27 @@
+# ZN/ZT closing-price ratio at common 1-minute timestamps.
+
+id: zn_zt_close_ratio
+version: v1
+description: >
+  Element-wise ratio zn_1m_bars.close / zt_1m_bars.close at common 1-minute
+  timestamps. This is not a yield curve level; it is a stable price-ratio
+  building block for short-horizon curve movement features.
+type: derived
+inputs:
+  - feature_id: zn_1m_bars
+  - feature_id: zt_1m_bars
+computation:
+  type: registered_transform
+  transform_id: two_series_ratio
+  parameters:
+    column: close
+    join_strategy: inner
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 10.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development
