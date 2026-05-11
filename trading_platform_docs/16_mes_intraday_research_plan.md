@@ -1,6 +1,6 @@
 # MES Intraday Directional Research Plan
 
-**Status:** First executable batches killed at sanity; Sierra Chart VX path scoped, 2026-05-10  
+**Status:** First executable batches killed at sanity; Sierra Chart VX ingest shipped, 2026-05-10  
 **Purpose:** Define the next disciplined attempt to find profitable MES intraday trades without repeating the killed MES-only, price-only search.
 
 ## Thesis
@@ -31,6 +31,7 @@ Already available in this repo:
 | SPY 1m bars | `spy_1m_ohlcv`, `spy_1m_bars` | Cash-market proxy and cross-check. |
 | MNQ/M2K/YM 1m bars | `mnq_1m_ohlcv`, `m2k_1m_ohlcv`, `ym_1m_ohlcv` | Cross-index divergence inputs. |
 | VIX daily | `vix_daily_close`, `vix_daily_pctile_252`, `vix_daily_5d_change` | Regime level and vol-compression/expansion direction. |
+| VX 1m futures | `vx_1m_ohlcv` | Intraday CFE VIX futures confirmation from Sierra Chart SCID files. Non-back-adjusted front-month continuous series. |
 | Macro events | `econ_events`, hours-to-next-event features | Supports pre-event drift and quiet-window gates. |
 | OR30 / VWAP / prior close | `mes_or30_high`, `mes_or30_low`, `mes_vwap`, `mes_prior_rth_close` | Existing intraday anchors. |
 
@@ -38,7 +39,7 @@ Not yet available and therefore not used in the executable first batch:
 
 | Needed input | Why it matters | Required before testing |
 |---|---|---|
-| Intraday VIX/VX | True intraday vol confirmation and VIX divergence. | Admit an intraday VX/VIX source or explicitly decide daily VIX is sufficient for the research question. |
+| Intraday VIX/VX | True intraday vol confirmation and VIX divergence. | Unblocked for VX futures via `vx_1m_ohlcv`; cash VIX intraday remains separate. |
 | Breadth / ADD / TICK / sector breadth | EOD continuation needs market-wide participation, not just index price. | Admit a breadth source with live/historical parity. |
 | SPX/SPY gamma surface | 0DTE gamma pin / flip-zone research. | Build point-in-time chain-derived gamma exposure features. |
 | Rates / DXY | Macro continuation confirmation. | Admit TY/ZN/2Y proxy and DXY or liquid futures proxy. |
@@ -50,6 +51,7 @@ Newly added from existing data on 2026-05-10:
 | `mes_hours_since_last_cpi` | No | Built from `econ_events` + `mes_1m_bars`; no-lookahead/reproducibility passed 50/50. |
 | `mes_cpi_30m_reaction_return` | No | First 30m signed MES return after CPI; emits only after the 30m reaction window completes. |
 | `mes_fomc_30m_reaction_return` | No | First 30m signed MES return after FOMC statements; emits only after the 30m reaction window completes. |
+| `vx_1m_ohlcv` | Sierra Chart SCID | Ingested 2026-05-10 from CFE VX contract files; audit passed with no findings. |
 
 ## First Executable Batch
 
@@ -145,7 +147,7 @@ Metadata/cost probes run 2026-05-10 against the current Databento key. No downlo
 | Intraday VX | Databento `XCBF.PITCH`, `VX.FUT` 1m, 2019-05-06 to 2026-04-30 | $1,849.93 | Too expensive for a first pass; use daily VIX or pull a narrow event window only. |
 | Intraday VX trades | Databento `XCBF.PITCH`, `VX.FUT` trades, same window | $10,456.88 | Reject for now. |
 | Intraday VX top-of-book | Databento `XCBF.PITCH`, `VX.FUT` `mbp-1`, same window | $30,077.70 | Reject for now. |
-| Intraday VX pilot | Sierra Chart Denali / Historical Data Service, CFE VX chart export | Existing Sierra package plus CFE exchange fee: $10/month top-of-book or $12/month depth if real-time is needed | Preferred low-cost VX pilot path; validate one exported VX continuous 1m file before admitting as a registry source. |
+| Intraday VX pilot | Sierra Chart Denali / Historical Data Service, CFE VX SCID files | Existing Sierra package plus CFE exchange fee: $10/month top-of-book or $12/month depth if real-time is needed | Shipped as `vx_1m_ohlcv`; SCID files are parsed directly, aggregated to 1m, and stitched to front-month. |
 | SPX options gamma | Databento `OPRA.PILLAR`, `SPX.OPT`, 2020-2024 definitions | $13.61 | Pull with `statistics` and `cbbo-1m` if gamma work is approved. |
 | SPX options gamma | Databento `OPRA.PILLAR`, `SPX.OPT`, 2020-2024 statistics | $39.09 | Likely needed for OI/stat fields; verify schema before download. |
 | SPX options gamma | Databento `OPRA.PILLAR`, `SPX.OPT`, 2020-2024 `cbbo-1m` | $486.71 | Feasible for serious gamma-surface research. |
@@ -157,7 +159,7 @@ Metadata/cost probes run 2026-05-10 against the current Databento key. No downlo
 
 ### Sierra Chart VX Decision
 
-Sierra Chart is the preferred next VX path over full-history Databento VX for this research lane.
+Sierra Chart is the admitted VX path over full-history Databento VX for this research lane.
 
 Evidence from Sierra documentation checked 2026-05-10:
 
@@ -168,34 +170,44 @@ Evidence from Sierra documentation checked 2026-05-10:
 | What is the expected marginal cost? | CFE Top Of Book is documented at $10/month; CFE Market Depth is $12/month. Historical-only access may be available through the included Historical Data Service, but real-time/non-delayed CFE needs the exchange activation. | Cost is low enough for a pilot and far below the Databento full-history VX estimate. |
 | Can it export data usable by this repo? | `Edit >> Export Bar Data to Text File` exports loaded chart bars with `Date, Time, Open, High, Low, Last, Volume, NumberOfTrades, BidVolume, AskVolume`; this matches `src/tradegy/ingest/csv_sierra.py`. | Existing Sierra CSV ingest can be reused; pass `input_tz="UTC"` if the export is from `Export and Edit Intraday Data`, or set the chart timezone to UTC before `Export Bar Data to Text File`. |
 | How should continuous VX be exported? | `Export and Edit Intraday Data` exports the underlying current symbol file only for continuous futures charts. `Export Bar Data to Text File` exports the loaded chart bars, and Sierra's docs explicitly direct enabling Continuous Futures Contract for larger futures history exports. | Use chart-level bar export, not raw intraday-file export, for continuous VX research data. |
-| Is this admitted data yet? | No. We have documentation evidence only; no VX file has been exported and ingested. | Do not create VX features/specs until the exported file passes coverage, timestamp, and no-duplicate checks. |
+| Is this admitted data yet? | Yes. Sierra downloaded all monthly VX contracts needed for 2019-05 through 2026-04, the repo now has `sierra_chart_scid_vx` ingest plus `vx_1m_ohlcv`, and the full source audit passed. | VX-derived features can now be pre-registered for the next batch. |
 
 Automation findings:
 
 | Path | Scriptability | Decision |
 |---|---|---|
-| Manual chart-bar export | Low automation, high confidence. `Edit >> Export Bar Data to Text File` exports exactly the loaded continuous chart bars. | Use first. This validates VX coverage before spending engineering time. |
-| `Write Bar Data to File` / `Write Bar and Study Data To File` Sierra studies | Semi-automated. Once attached to a configured continuous chart, Sierra continuously writes the loaded chart data to a text file. `Write Bar Data to File` explicitly writes one output file for continuous futures charts. | Best follow-up if manual export validates coverage. Need one sample file because study headers may differ from manual export headers. |
+| Direct `.scid` parsing | Scriptable because Sierra documents the binary intraday file header and 40-byte records. | Chosen path. `src/tradegy/ingest/sierra_scid.py` parses VX contract files directly, aggregates tick/bar records to 1m, and performs deterministic front-month stitching. |
+| Manual chart-bar export | Low automation, high confidence. `Edit >> Export Bar Data to Text File` exports exactly the loaded continuous chart bars. | No longer required for first ingest; keep as an external cross-check if SCID stitch quality is questioned. |
+| `Write Bar Data to File` / `Write Bar and Study Data To File` Sierra studies | Semi-automated. Once attached to a configured continuous chart, Sierra continuously writes the loaded chart data to a text file. `Write Bar Data to File` explicitly writes one output file for continuous futures charts. | Optional live/update path later; not needed for historical backfill. |
 | DTC historical data server | Programmatic socket API. Sierra documents a historical data port and one historical request per connection, but its Restrictions section says real-time or historical data from CME Group, EUREX, NASDAQ, CBOE, and US equities cannot be accessed through the DTC server. VX is CFE/Cboe-family data, so assume rejection until tested locally. | Do not build a DTC integration as the first VX path. Test only after manual/chart-file export succeeds. |
-| Direct `.scid` parsing | Scriptable because Sierra documents the binary intraday file header and 40-byte records. | Not preferred for continuous VX. Sierra stores individual contract files and builds continuous contracts dynamically, so a parser would also need robust rollover stitching. |
 | GUI automation | Technically possible but brittle. | Reject unless no supported export/file-writing path works. |
 
-Validation workflow before source admission:
+Validation workflow before research use:
 
-1. Activate or confirm Sierra Chart CFE access, update symbol settings, and open the current VX futures contract from `File >> Find Symbol`.
-2. Set the chart to a 1-minute intraday bar period, UTC timezone, and non-back-adjusted continuous contract mode unless the research explicitly needs adjusted prices.
-3. Set the load range to 2019-05-06 through 2026-04-30, then force `Edit >> Delete All Data And Download` and select all needed contract months.
-4. Enable rollover-date display and inspect the Message Log for missing contract months, bad transitions, or download-limit errors.
-5. Export with `Edit >> Export Bar Data to Text File`, not `Export and Edit Intraday Data`.
-6. Ingest the exported CSV through `ingest_sierra_csv(..., input_tz="UTC")` into a new `vx_1m_ohlcv` data source only after the file proves full-window coverage.
-7. If manual export passes, test Sierra's `Write Bar Data to File` or `Write Bar and Study Data To File` on the same chart and compare row counts/timestamps against the manual export before making acquisition repeatable.
+1. Confirm Sierra Chart has the needed monthly VX files under its Data folder. The 2026-05-10 check found all 84 monthly contracts from 2019-05 through 2026-04 present.
+2. Ingest with `uv run tradegy ingest <SierraChart Data folder> --source-id vx_1m_ohlcv`.
+3. Run `uv run tradegy audit vx_1m_ohlcv` and inspect gap findings before feature work.
+4. Build VX features only after the source audit is clean enough for the specific signal cadence.
 
-Decision: pursue Sierra Chart VX as the low-cost pilot if intraday VX confirmation becomes the binding blocker. Do not purchase full-history Databento VX before this Sierra validation fails.
+Actual 2026-05-10 ingest result:
+
+| Metric | Value |
+|---|---:|
+| Raw SCID records parsed inside coverage window | 86,257,359 |
+| Continuous 1m rows | 1,674,211 |
+| Overlapping contract-minutes dropped | 921,153 |
+| Partitions written | 2,175 |
+| Coverage start | 2019-05-06 00:00:00 UTC |
+| Coverage end | 2026-04-30 23:59:00 UTC |
+| Batch id | `1c37c5474c17178f` |
+| Audit | Pass: no findings |
+
+Decision: use Sierra Chart SCID as the low-cost VX backfill path. Do not purchase full-history Databento VX unless the direct SCID source audit reveals unfixable quality defects and a VX-specific hypothesis still justifies the spend.
 
 Acquisition order if continuing MES intraday research:
 
 1. Pull `ZN.FUT` and `ZT.FUT` 1m from Databento; implement rates-confirmed event continuation/fade features.
-2. If VX is required before gamma work, validate Sierra Chart VX export/ingest with one continuous 1m file before any Databento VX spend.
+2. Ingest and audit `vx_1m_ohlcv`; implement VX-confirmed event continuation/fade features if the audit passes.
 3. If willing to spend ~$250-$550, pull SPX OPRA definitions/statistics/`cbbo-1m` for 2023-2025 first, then 2020-2024 only if the feature pipeline looks sound.
 4. Use equity breadth proxies only as a pilot; they do not solve the 2019-2026 walk-forward window unless a longer equities source is admitted.
 5. Do not buy full-history VX from Databento unless Sierra cannot provide a complete VX window and a VX-specific hypothesis still justifies the spend.

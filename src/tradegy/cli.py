@@ -56,6 +56,7 @@ from tradegy.ingest.csv_databento import ingest_databento_csv
 from tradegy.ingest.csv_es import ingest_csv
 from tradegy.ingest.csv_orats import ingest_orats_strikes_csv
 from tradegy.ingest.csv_sierra import ingest_sierra_csv
+from tradegy.ingest.sierra_scid import ingest_vx_scid_directory
 from tradegy.registry.api import find_features, get_feature, value_at
 from tradegy.registry.loader import load_data_source, load_feature
 from tradegy.specs import load_spec
@@ -74,7 +75,7 @@ console = Console()
 
 @app.command()
 def ingest(
-    csv_path: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    csv_path: Annotated[Path, typer.Argument(exists=True)],
     source_id: Annotated[str, typer.Option(help="data source id")],
     input_tz: Annotated[str, typer.Option(help="IANA tz of CSV timestamps")] = "UTC",
 ) -> None:
@@ -82,6 +83,7 @@ def ingest(
 
     Dispatches on `source.ingest.format`:
       * sierra_chart_csv → ingest_sierra_csv (multi-column timestamp, OHLCV).
+      * sierra_chart_scid_vx → ingest_vx_scid_directory (Sierra SCID directory).
       * databento_ohlcv_csv → ingest_databento_csv (per-contract OHLCV with
         no-lookahead front-month roll).
       * orats_strikes_csv → ingest_orats_strikes_csv (per-(date, expiry,
@@ -92,6 +94,8 @@ def ingest(
     fmt = source.ingest.format if source.ingest is not None else "generic_csv"
     if fmt == "sierra_chart_csv":
         result = ingest_sierra_csv(csv_path, source, input_tz=input_tz)
+    elif fmt == "sierra_chart_scid_vx":
+        result = ingest_vx_scid_directory(csv_path, source)
     elif fmt == "databento_ohlcv_csv":
         result = ingest_databento_csv(csv_path, source)
     elif fmt == "orats_strikes_csv":

@@ -56,6 +56,7 @@ class AuditEntry(_Strict):
 IngestFormat = Literal[
     "generic_csv",
     "sierra_chart_csv",
+    "sierra_chart_scid_vx",
     "databento_ohlcv_csv",
     "databento_options_csv",
     "orats_strikes_csv",

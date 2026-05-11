@@ -1,0 +1,70 @@
+# CFE VX futures continuous 1-minute OHLCV from Sierra Chart SCID files.
+#
+# The raw Sierra files are per monthly contract (VX*_FUT_CFE.scid). Ingest
+# parses those binary files, aggregates records to 1-minute bars, and builds a
+# non-back-adjusted front-month continuous series by selecting the earliest
+# listed contract that has a bar at each minute.
+
+id: vx_1m_ohlcv
+version: v1
+description: >
+  CFE VIX futures (VX) non-back-adjusted front-month 1-minute OHLCV bars
+  from Sierra Chart SCID files. Per-contract SCID records are aggregated to
+  1-minute bars and collapsed to the earliest listed available contract at
+  each timestamp.
+type: market_data
+provider: sierra_chart
+revisable: false
+revision_policy: never_revised
+admission_rationale: >
+  Sierra Chart Denali / Historical Data Service provides CFE VX intraday
+  history at retail-accessible cost. The ingest is deterministic and uses a
+  fixed roll rule based on contract month ordering, not future volume or
+  returns. The resulting series is suitable as an intraday volatility-market
+  confirmation input for MES research after the standard source audit passes.
+coverage:
+  start_date: 2019-05-06
+  end_date: 2026-04-30
+  gaps: []
+cadence: 1m
+fields:
+  - {name: ts_utc, type: timestamp}
+  - {name: open, type: float}
+  - {name: high, type: float}
+  - {name: low, type: float}
+  - {name: close, type: float}
+  - {name: volume, type: int}
+  - {name: num_trades, type: int}
+  - {name: bid_volume, type: int}
+  - {name: ask_volume, type: int}
+  - {name: symbol, type: string}
+  - {name: contract_year, type: int}
+  - {name: contract_month, type: int}
+timestamp_column: ts_utc
+ingest:
+  format: sierra_chart_scid_vx
+session_calendar: CFE
+max_inactivity_seconds: 604800
+availability_latency:
+  median_seconds: 0.0
+  p99_seconds: 60.0
+  notes: >
+    Historical SCID files have zero replay latency once downloaded by Sierra
+    Chart. Live use would require either Sierra file-writing parity or a
+    separate CFE live adapter registered against this source schema.
+licensing:
+  live_use: false
+  backtest_use: true
+  redistribution: false
+known_issues:
+  - >
+    The continuous series is not back-adjusted. Price levels can step at
+    contract transitions by the VX calendar spread. Use returns, changes,
+    percentile ranks, or intraday-relative features rather than absolute
+    multi-month price levels unless the roll discontinuity is explicitly
+    modeled.
+  - >
+    Sierra SCID tick-style records encode bid/ask in the High/Low fields and
+    the last trade in Close. Ingest uses Close as the trade price for those
+    records before 1-minute aggregation.
+audit_history: []
