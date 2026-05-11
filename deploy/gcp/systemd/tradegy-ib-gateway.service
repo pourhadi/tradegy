@@ -1,0 +1,20 @@
+[Unit]
+Description=Tradegy unattended IB Gateway paper session
+Documentation=file:/opt/tradegy/trading_platform_docs/17_gcp_mes_0dte_deployment.md
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/tradegy/ib-gateway.env
+ExecStartPre=/usr/local/lib/tradegy/materialize-ib-gateway-secrets.sh /etc/tradegy/ib-gateway.env
+ExecStartPre=-/usr/bin/docker rm -f tradegy-ib-gateway
+ExecStart=/usr/bin/docker run --name tradegy-ib-gateway --env-file /etc/tradegy/ib-gateway.env --env-file /run/tradegy/ib-gateway-secrets.env --volume /run/tradegy/secrets:/run/secrets:ro --volume /var/lib/tradegy/ib-gateway/settings:/home/ibgateway/tws_settings --publish 127.0.0.1:4002:4004 --publish 127.0.0.1:5900:5900 ${IB_GATEWAY_IMAGE}
+ExecStop=/usr/bin/docker stop -t 60 tradegy-ib-gateway
+Restart=always
+RestartSec=30
+TimeoutStartSec=180
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target

@@ -1,8 +1,9 @@
 [Unit]
 Description=Tradegy MES 0DTE paper entry
 Documentation=file:/opt/tradegy/trading_platform_docs/17_gcp_mes_0dte_deployment.md
-After=network-online.target docker.service
-Wants=network-online.target docker.service
+After=network-online.target docker.service tradegy-ib-gateway.service
+Wants=network-online.target docker.service tradegy-ib-gateway.service
+Requires=tradegy-ib-gateway.service
 
 [Service]
 Type=oneshot

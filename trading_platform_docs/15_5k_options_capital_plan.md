@@ -306,11 +306,14 @@ efficiency at the same risk level.
       - launchd entry plist: 09:55 ET (5 min head start)
       - launchd manage plist: 10:15-15:45 ET (was 10:45-15:45 ET)
     - **GCP packaging shipped 2026-05-10** — first paper-deployment
-      package targets a single Compute Engine VM running IB Gateway
-      plus systemd timers.  The app image uses locked `uv`
-      dependencies, persistent state under `/var/lib/tradegy`,
-      explicit `America/New_York` market time, and host-network access
-      to IB Gateway on port 4002.  See
+      package targets a single Compute Engine VM running unattended
+      IB Gateway + IBC plus systemd timers.  The app image uses locked
+      `uv` dependencies, persistent state under `/var/lib/tradegy`,
+      explicit `America/New_York` market time, and host-local access
+      to IB Gateway on port 4002.  IBKR credentials are pulled from
+      Secret Manager into `/run/tradegy` at Gateway service start; 2FA
+      remains a broker-enforced boundary that may require operator
+      action through VNC-over-IAP.  See
       `17_gcp_mes_0dte_deployment.md` and `deploy/gcp/README.md`.
    - **What's STILL not explored**:
      - mbp-1 quotes (~$1.5K for 5yr) — would replace ohlcv-1m

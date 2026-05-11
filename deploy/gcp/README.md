@@ -15,6 +15,9 @@ and management runs, and operator kill-switch control.
 | `Dockerfile` | Locked Python 3.12/uv runtime for `scripts/live_mes_0dte.py` |
 | `deploy/gcp/cloudbuild.yaml` | Builds and pushes the app image to Artifact Registry |
 | `deploy/gcp/env/mes-0dte.env.example` | Environment template for `/etc/tradegy/mes-0dte.env` |
+| `deploy/gcp/env/ib-gateway.env.example` | Environment template for unattended IB Gateway + IBC |
+| `deploy/gcp/bin/materialize-ib-gateway-secrets.sh` | Pulls IBKR credentials from Secret Manager into `/run/tradegy` |
+| `deploy/gcp/systemd/tradegy-ib-gateway.service` | Persistent IB Gateway paper session |
 | `deploy/gcp/systemd/*.service` | One-shot Docker services for entry and management |
 | `deploy/gcp/systemd/*.timer` | America/New_York market-session schedules |
 
@@ -41,7 +44,11 @@ gcloud builds submit \
 The VM should be private except for IAP SSH. Required host paths:
 
 ```bash
-sudo mkdir -p /etc/tradegy /var/lib/tradegy/data/live_options /opt/tradegy
+sudo mkdir -p /etc/tradegy \
+    /var/lib/tradegy/data/live_options \
+    /var/lib/tradegy/ib-gateway/settings \
+    /opt/tradegy \
+    /usr/local/lib/tradegy
 ```
 
 Install Docker and authenticate Artifact Registry on the VM:
@@ -50,38 +57,100 @@ Install Docker and authenticate Artifact Registry on the VM:
 gcloud auth configure-docker us-central1-docker.pkg.dev
 ```
 
-Copy the environment template to `/etc/tradegy/mes-0dte.env`, fill the image
-and IBKR account values from Secret Manager, and keep the file mode restricted:
+Copy the environment templates and helper:
 
 ```bash
 sudo cp deploy/gcp/env/mes-0dte.env.example /etc/tradegy/mes-0dte.env
+sudo cp deploy/gcp/env/ib-gateway.env.example /etc/tradegy/ib-gateway.env
+sudo cp deploy/gcp/bin/materialize-ib-gateway-secrets.sh \
+    /usr/local/lib/tradegy/materialize-ib-gateway-secrets.sh
 sudo chmod 0600 /etc/tradegy/mes-0dte.env
+sudo chmod 0600 /etc/tradegy/ib-gateway.env
+sudo chmod 0755 /usr/local/lib/tradegy/materialize-ib-gateway-secrets.sh
+```
+
+Edit `/etc/tradegy/mes-0dte.env` to set the pushed `TRADEGY_IMAGE`, and edit
+`/etc/tradegy/ib-gateway.env` only if the default Secret Manager names or IB
+Gateway image need changing.
+
+## Secret Manager
+
+Create the required secrets once:
+
+```bash
+gcloud secrets create tradegy-ibkr-username --replication-policy=automatic
+gcloud secrets create tradegy-ibkr-password --replication-policy=automatic
+gcloud secrets create tradegy-ib-gateway-vnc-password --replication-policy=automatic
+```
+
+Add secret values locally. These commands prompt via stdin and keep the values
+out of shell history if you paste after the command starts:
+
+```bash
+gcloud secrets versions add tradegy-ibkr-username --data-file=-
+gcloud secrets versions add tradegy-ibkr-password --data-file=-
+gcloud secrets versions add tradegy-ib-gateway-vnc-password --data-file=-
+```
+
+Grant the VM service account read access to those secrets:
+
+```bash
+gcloud secrets add-iam-policy-binding tradegy-ibkr-username \
+    --member="serviceAccount:VM_SERVICE_ACCOUNT" \
+    --role="roles/secretmanager.secretAccessor"
+gcloud secrets add-iam-policy-binding tradegy-ibkr-password \
+    --member="serviceAccount:VM_SERVICE_ACCOUNT" \
+    --role="roles/secretmanager.secretAccessor"
+gcloud secrets add-iam-policy-binding tradegy-ib-gateway-vnc-password \
+    --member="serviceAccount:VM_SERVICE_ACCOUNT" \
+    --role="roles/secretmanager.secretAccessor"
 ```
 
 Copy systemd units:
 
 ```bash
-sudo cp deploy/gcp/systemd/tradegy-mes-* /etc/systemd/system/
+sudo cp deploy/gcp/systemd/tradegy-* /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
-## IB Gateway requirement
+## Unattended IB Gateway
 
-IB Gateway must be logged into the paper account before the timers run.
+The Gateway service uses `ghcr.io/gnzsnz/ib-gateway:stable`, which runs IB
+Gateway under IBC in a headless container. Credentials are pulled from Secret
+Manager at service start, written to `/run/tradegy`, and mounted read-only into
+the container.
 
-Required API settings:
+Start Gateway:
+
+```bash
+sudo systemctl enable --now tradegy-ib-gateway.service
+sudo journalctl -u tradegy-ib-gateway.service -f
+```
+
+Required API behavior:
 
 | Setting | Value |
 |---|---|
 | Account | paper account, e.g. `DU7535411` |
 | API socket clients | enabled |
 | Read-only API | off |
-| Socket port | `4002` |
+| Host-mapped socket port | `127.0.0.1:4002` |
 | Trusted IP | `127.0.0.1` |
 | Order precautions | bypass API prompts |
 
-The app container runs with `--network host`, so `IBKR_HOST=127.0.0.1` means the
-Gateway process on the VM host.
+The Gateway container maps paper API traffic from host `127.0.0.1:4002` to the
+container's paper socket. The app container runs with `--network host`, so
+`IBKR_HOST=127.0.0.1` remains correct.
+
+IBKR may still require 2FA on first login or after a trust/session reset. Access
+the Gateway UI through an IAP SSH tunnel to localhost VNC if needed:
+
+```bash
+gcloud compute ssh VM_NAME --zone ZONE -- -L 5900:127.0.0.1:5900
+```
+
+Then connect a VNC client to `127.0.0.1:5900` using the VNC password stored in
+`tradegy-ib-gateway-vnc-password`. Do not expose VNC publicly.
 
 ## Smoke tests
 
@@ -90,6 +159,12 @@ Pull the configured image:
 ```bash
 source /etc/tradegy/mes-0dte.env
 sudo docker pull "$TRADEGY_IMAGE"
+```
+
+Verify Gateway is listening on the host paper port:
+
+```bash
+sudo systemctl status tradegy-ib-gateway.service --no-pager
 ```
 
 Verify the app boots without submitting an order:
@@ -151,6 +226,7 @@ Inspect state:
 sudo ls -la /var/lib/tradegy/data/live_options/mes_0dte_entries
 sudo journalctl -u tradegy-mes-entry.service -n 200 --no-pager
 sudo journalctl -u tradegy-mes-manage.service -n 200 --no-pager
+sudo journalctl -u tradegy-ib-gateway.service -n 200 --no-pager
 ```
 
 ## Roll forward / rollback
