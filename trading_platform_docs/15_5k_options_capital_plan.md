@@ -301,10 +301,17 @@ efficiency at the same risk level.
      - Volatility-index gate: NONE (fire every Mon-Thu)
      - Profit-take: 75% of credit
      - Entry: 10:00 ET (was 10:30 ET)
-     - Management cadence: every 15 min from 10:15-15:45 ET
-     - Force-close: 15:55 ET (unchanged)
-     - launchd entry plist: 09:55 ET (5 min head start)
-     - launchd manage plist: 10:15-15:45 ET (was 10:45-15:45 ET)
+      - Management cadence: every 15 min from 10:15-15:45 ET
+      - Force-close: 15:30 ET
+      - launchd entry plist: 09:55 ET (5 min head start)
+      - launchd manage plist: 10:15-15:45 ET (was 10:45-15:45 ET)
+    - **GCP packaging shipped 2026-05-10** — first paper-deployment
+      package targets a single Compute Engine VM running IB Gateway
+      plus systemd timers.  The app image uses locked `uv`
+      dependencies, persistent state under `/var/lib/tradegy`,
+      explicit `America/New_York` market time, and host-network access
+      to IB Gateway on port 4002.  See
+      `17_gcp_mes_0dte_deployment.md` and `deploy/gcp/README.md`.
    - **What's STILL not explored**:
      - mbp-1 quotes (~$1.5K for 5yr) — would replace ohlcv-1m
        trade prices with real bid/ask, eliminating stale-price

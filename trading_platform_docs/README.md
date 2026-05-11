@@ -22,11 +22,12 @@ A document set defining the architecture, components, and processes for a future
 16. [`15_5k_options_capital_plan.md`](15_5k_options_capital_plan.md) — retail-capital deployment plan and MES 0DTE options path.
 17. [`15_live_options_runbook.md`](15_live_options_runbook.md) — live options operating notes.
 18. [`16_mes_intraday_research_plan.md`](16_mes_intraday_research_plan.md) — active MES intraday directional research plan.
+19. [`17_gcp_mes_0dte_deployment.md`](17_gcp_mes_0dte_deployment.md) — GCP VM packaging and deployment runbook for the MES 0DTE paper daemon.
 
 ## Status
 
 The numbered docs are the project ledger. Older docs may retain draft-era language, but later dated status tables and appended updates are authoritative for shipped work.
 
-## Not yet documented
+## Infrastructure/Ops
 
-- Infrastructure/ops spec
+The first infrastructure package is documented in [`17_gcp_mes_0dte_deployment.md`](17_gcp_mes_0dte_deployment.md). It covers the GCP VM deployment for the MES 0DTE paper daemon.

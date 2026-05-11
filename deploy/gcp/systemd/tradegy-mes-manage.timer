@@ -1,0 +1,14 @@
+[Unit]
+Description=Run Tradegy MES 0DTE paper management sweeps
+
+[Timer]
+OnCalendar=Mon..Thu *-*-* 10:15,30,45:00 America/New_York
+OnCalendar=Mon..Thu *-*-* 11..14:00/15:00 America/New_York
+OnCalendar=Mon..Thu *-*-* 15:00,15,30,45:00 America/New_York
+Persistent=false
+RandomizedDelaySec=0
+AccuracySec=1s
+Unit=tradegy-mes-manage.service
+
+[Install]
+WantedBy=timers.target

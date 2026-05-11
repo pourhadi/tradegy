@@ -49,6 +49,11 @@ follow the section that matches what you need to do.
 | macOS notifications | osascript banner on success/fail | ✅ |
 | Health probe | `tradegy live-options-health` | ✅ |
 
+MES 0DTE paper deployment is now packaged separately for GCP. See
+[`17_gcp_mes_0dte_deployment.md`](17_gcp_mes_0dte_deployment.md) for the
+Compute Engine + IB Gateway + systemd timer runbook. The macOS launchd notes in
+this file remain the SPY EOD options workflow runbook.
+
 ---
 
 ## Day-zero install (do this once)

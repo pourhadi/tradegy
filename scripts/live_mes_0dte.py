@@ -3,18 +3,19 @@
 
 Runs the validated config from `15_5k_options_capital_plan.md`:
 
-    Strategy : Mes0dteIronCondor(po=25, co=25, ww=25)
-    Gate     : prior-session VIX close > 18
-    Mgmt     : profit_take_pct = 0.50 (intraday, no loss-stop)
+    Strategy : Mes0dteIronCondor(po=10, co=10, ww=10)
+    Gate     : none (daily-fire, Mon-Thu)
+    Mgmt     : profit_take_pct = 0.75 + 15:30 ET force-close
     Capital  : $5K notional, 1 contract per entry
     Account  : IBKR paper account DU7535411 (port 4002)
 
 Lifecycle (single-shot per invocation; designed to be called once at
-~10:25 ET each weekday):
+~10:00 ET each Mon-Thu session):
 
     1. Connect to IB Gateway on the paper port.
-    2. Pull prior-session VIX close from the on-disk vix_daily source.
-    3. If VIX ≤ 18: log "gate not passing", exit cleanly.
+    2. Apply the configured volatility-index gate.  The deployed
+       daily-fire spec sets this to "none".
+    3. If the gate does not pass: log and exit cleanly.
     4. Pull current MES front-month price (via reqMktData snapshot).
     5. Build a same-day-expiry MultiLegOrder using Mes0dteIronCondor
        with target_strikes anchored to the live underlying.
@@ -30,24 +31,26 @@ Lifecycle (single-shot per invocation; designed to be called once at
        intraday-management process can pick it up.
     9. Exit.
 
-A separate intraday-management process (run every 15 min from 10:30
-to 15:55 ET) reads the entry record and:
+A separate intraday-management process (run every 15 min from 10:15
+to 15:45 ET) reads the entry record and:
     - Computes current MTM via reqMktData on each leg
-    - If MTM ≥ 50% × entry_credit: places closing combo
-
-This first version of the daemon implements steps 1-5 + the entry
-record write.  The intraday management hook is wired but the
-profit-take loop runs as a separate scheduled invocation.
+    - If MTM ≥ 75% × entry_credit: places closing combo
+    - If still open at/after 15:30 ET: force-closes before expiry
 
 Usage:
     uv run python scripts/live_mes_0dte.py             # entry mode
     uv run python scripts/live_mes_0dte.py --manage    # mgmt sweep
     uv run python scripts/live_mes_0dte.py --dry-run   # no submission
 
-Required env (read from ~/.zprofile):
+Required env:
     IBKR_PAPER_ACCOUNT  — e.g. DU7535411
     IBKR_HOST           — defaults to 127.0.0.1
     IBKR_PORT           — defaults to 4002 (IB Gateway paper)
+
+Optional env:
+    TRADEGY_DATA_DIR          — defaults to <repo>/data
+    TRADEGY_LIVE_OPTIONS_DIR  — defaults to $TRADEGY_DATA_DIR/live_options
+    TRADEGY_MARKET_TZ         — defaults to America/New_York
 """
 from __future__ import annotations
 
@@ -57,9 +60,9 @@ import json
 import logging
 import os
 import sys
-from dataclasses import asdict
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import polars as pl
 
@@ -74,10 +77,16 @@ log = logging.getLogger("mes_0dte_live")
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-ENTRY_RECORDS_DIR = REPO_ROOT / "data" / "live_options" / "mes_0dte_entries"
-LOG_DIR = REPO_ROOT / "data" / "live_options" / "mes_0dte_logs"
+DATA_ROOT = Path(os.environ.get("TRADEGY_DATA_DIR", REPO_ROOT / "data")).expanduser()
+LIVE_OPTIONS_STATE_DIR = Path(
+    os.environ.get("TRADEGY_LIVE_OPTIONS_DIR", DATA_ROOT / "live_options")
+).expanduser()
+ENTRY_RECORDS_DIR = LIVE_OPTIONS_STATE_DIR / "mes_0dte_entries"
+LOG_DIR = LIVE_OPTIONS_STATE_DIR / "mes_0dte_logs"
 ENTRY_RECORDS_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+MARKET_TZ = ZoneInfo(os.environ.get("TRADEGY_MARKET_TZ", "America/New_York"))
 
 # ─────────────────────────────────────────────────────────────────
 # Strategy spec — daily-fire IC $10/$10 + 75% profit-take.
@@ -112,22 +121,16 @@ CONTRACTS = 1
 VIX_GATE_SOURCE = "none"
 VIX_GATE_MIN = 18.0  # only consulted when SOURCE != "none"
 
-# Force-close trigger: at-or-after this UTC clock time, any still-
-# open position is closed.  19:30 UTC = 15:30 ET — 30 min before
-# regular cash close (16:00 ET).  This MUST land on or before a
-# management-tick boundary so the trigger actually fires before
-# expiry.  Management runs every 15 min from 10:15 ET (14:15 UTC),
-# so :30/:45/:00/:15 are the available ticks.  19:30 is the
-# earliest tick that gives PT a fair shake but still leaves time
-# to close on real quotes (post-19:45 the chain is at expiry-edge
-# illiquidity; at 20:00 quotes go to 0 and the daemon CAN'T mark
-# meaningfully).
-FORCE_CLOSE_UTC: time = time(19, 30)
+# Force-close trigger: at-or-after this market-local clock time, any
+# still-open position is closed.  15:30 ET is 30 min before regular
+# cash close (16:00 ET).  This MUST land on or before a management-
+# tick boundary so the trigger actually fires before expiry.
+FORCE_CLOSE_MARKET_TIME: time = time(15, 30)
 
 # Kill-switch file path.  If present (regardless of contents), the
 # entry job blocks new entries AND the management job force-closes
 # any open position at next run.  Operator-friendly halt control.
-KILL_SWITCH_FILE = REPO_ROOT / "data" / "live_options" / "MES_0DTE_KILL"
+KILL_SWITCH_FILE = LIVE_OPTIONS_STATE_DIR / "MES_0DTE_KILL"
 
 # Connection.
 IBKR_HOST = os.environ.get("IBKR_HOST", "127.0.0.1")
@@ -204,7 +207,7 @@ def prior_session_vix_close(today: date) -> tuple[float, date] | None:
     """Return (close, prior_trade_date) of the most recent vix_daily
     close strictly BEFORE `today`, or None if no prior data.
     """
-    vix_root = REPO_ROOT / "data" / "raw" / "source=vix_daily"
+    vix_root = DATA_ROOT / "raw" / "source=vix_daily"
     if not vix_root.exists():
         log.error("vix_daily source not found at %s", vix_root)
         return None
@@ -234,7 +237,7 @@ async def fetch_mes_front_price(ib) -> tuple[float, str] | None:
     """
     from ib_async import Future
 
-    today = date.today()
+    today = datetime.now(MARKET_TZ).date()
     next_q = _next_quarterly_third_friday(today)
     yyyymm = next_q.strftime("%Y%m")
     fut = Future(symbol="MES", lastTradeDateOrContractMonth=yyyymm,
@@ -310,7 +313,7 @@ def build_entry_order(underlying_price: float, today: date):
         LegOrder(expiry=today, strike=long_call_K, side=OptionSide.CALL, quantity=+1),
     )
     order = MultiLegOrder(
-        tag="mes_0dte_ic_25x25",
+        tag="mes_0dte_ic_10x10",
         contracts=CONTRACTS,
         legs=legs,
     )
@@ -435,7 +438,7 @@ def kill_switch_active() -> bool:
 
 
 async def run_entry(dry_run: bool = False, bypass_gate: bool = False) -> int:
-    today = date.today()
+    today = datetime.now(MARKET_TZ).date()
     log.info("=== live_mes_0dte ENTRY %s ===", today)
     if bypass_gate and not dry_run:
         log.error("--bypass-gate REQUIRES --dry-run.  Bypassing the VIX gate "
@@ -804,9 +807,15 @@ async def _submit_closing_combo(
 
 
 async def run_management() -> int:
-    today = date.today()
+    now_market = datetime.now(MARKET_TZ)
+    today = now_market.date()
     now_utc = datetime.now(tz=timezone.utc)
-    log.info("=== live_mes_0dte MGMT %s @ %s ===", today, now_utc.time())
+    log.info(
+        "=== live_mes_0dte MGMT %s @ %s %s ===",
+        today,
+        now_market.time(),
+        MARKET_TZ.key if hasattr(MARKET_TZ, "key") else MARKET_TZ,
+    )
 
     record = load_entry_record(today)
     if record is None:
@@ -819,8 +828,6 @@ async def run_management() -> int:
 
     # Connect once for the management run.
     from ib_async import IB
-    from tradegy.options.chain import OptionSide
-
     ib = IB()
     try:
         await ib.connectAsync(IBKR_HOST, IBKR_PORT,
@@ -872,10 +879,7 @@ async def run_management() -> int:
                  entry_credit, close_cost, pnl_per_share, pnl_frac * 100)
 
         # Decide close trigger.
-        force_close_due = now_utc.timetz() >= time(
-            FORCE_CLOSE_UTC.hour, FORCE_CLOSE_UTC.minute,
-            tzinfo=timezone.utc,
-        )
+        force_close_due = now_market.time() >= FORCE_CLOSE_MARKET_TIME
         kill_switch = kill_switch_active()
         close_reason: str | None = None
         if kill_switch:
@@ -888,12 +892,13 @@ async def run_management() -> int:
                      pnl_frac * 100, PROFIT_TAKE_PCT * 100)
         elif force_close_due:
             close_reason = "force_close_eod"
-            log.info("FORCE-CLOSE TRIGGERED — past %s UTC, closing before "
-                     "expiry-bell mechanics", FORCE_CLOSE_UTC)
+            log.info("FORCE-CLOSE TRIGGERED — past %s market time, closing "
+                     "before expiry-bell mechanics", FORCE_CLOSE_MARKET_TIME)
         else:
             log.info("hold — no trigger fired (PT=%.1f%% < %.1f%%, "
                      "force-close cutoff %s not reached)",
-                     pnl_frac * 100, PROFIT_TAKE_PCT * 100, FORCE_CLOSE_UTC)
+                     pnl_frac * 100, PROFIT_TAKE_PCT * 100,
+                     FORCE_CLOSE_MARKET_TIME)
             return 0
 
         # Submit closing combo.

@@ -205,7 +205,7 @@ def test_prior_session_vix_close_signature(daemon, tmp_path, monkeypatch) -> Non
         })
         df.write_parquet(part / "data.parquet")
 
-    monkeypatch.setattr(daemon, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(daemon, "DATA_ROOT", tmp_path / "data")
     result = daemon.prior_session_vix_close(_date(2026, 5, 6))
     assert result is not None
     close, prior_date = result

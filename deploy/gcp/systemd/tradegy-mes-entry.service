@@ -1,0 +1,12 @@
+[Unit]
+Description=Tradegy MES 0DTE paper entry
+Documentation=file:/opt/tradegy/trading_platform_docs/17_gcp_mes_0dte_deployment.md
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/tradegy/mes-0dte.env
+ExecStartPre=-/usr/bin/docker rm -f tradegy-mes-entry
+ExecStart=/usr/bin/docker run --rm --name tradegy-mes-entry --network host --env-file /etc/tradegy/mes-0dte.env --volume /var/lib/tradegy:/var/lib/tradegy ${TRADEGY_IMAGE}
+TimeoutStartSec=180
