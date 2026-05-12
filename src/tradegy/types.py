@@ -79,7 +79,7 @@ class IngestSpec(_Strict):
     column_remap: dict[str, str] = Field(default_factory=dict)
     symbol_root: str | None = None
     exchange: str | None = None
-    contract_months: Literal["monthly", "quarterly"] | None = None
+    contract_months: Literal["monthly", "quarterly", "gold_active"] | None = None
     filename_pattern: Literal["sierra_dash", "sierra_vx"] | None = None
 
 

@@ -343,13 +343,17 @@ def _expected_contracts(
         month_set = {3, 6, 9, 12}
         start_month = _first_contract_month_on_or_after(start_date.month, month_set)
         end_month = _first_contract_month_on_or_after(end_date.month, month_set)
+    elif contract_months == "gold_active":
+        month_set = {2, 4, 6, 8, 12}
+        start_month = _first_contract_month_on_or_after(start_date.month, month_set)
+        end_month = _first_contract_month_on_or_after(end_date.month, month_set)
     else:
         raise ValueError(f"unsupported contract_months {contract_months!r}")
 
     year = start_date.year
     month = start_month
     end_year = end_date.year
-    if contract_months == "quarterly" and end_month < end_date.month:
+    if contract_months in {"quarterly", "gold_active"} and end_month < end_date.month:
         end_year += 1
     while (year, month) <= (end_year, end_month):
         if month in month_set:

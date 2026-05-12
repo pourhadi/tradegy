@@ -34,6 +34,7 @@ Already available in this repo:
 | VX 1m futures | `vx_1m_ohlcv` | Intraday CFE VIX futures confirmation from Sierra Chart SCID files. Non-back-adjusted front-month continuous series. |
 | Rates 1m futures | `zt_1m_ohlcv`, `zf_1m_ohlcv`, `zn_1m_ohlcv`, `zb_1m_ohlcv` | 2Y, 5Y, 10Y, and 30Y Treasury futures confirmation. ZF/ZB include Sierra bid/ask volume; ZT/ZN currently use Databento OHLCV. |
 | CL 1m futures | `cl_1m_ohlcv`, `cl_1m_bars` | WTI crude oil macro-shock input from Sierra Chart SCID. Valid through 2026-04-21 with April 2020 negative prices explicitly admitted via source-level audit floor. |
+| GC 1m futures | `gc_1m_ohlcv`, `gc_1m_bars` | COMEX gold safe-haven/real-rate shock input from Sierra Chart SCID. Valid through 2026-04-30. |
 | Macro events | `econ_events`, hours-to-next-event features | Supports pre-event drift and quiet-window gates. |
 | OR30 / VWAP / prior close | `mes_or30_high`, `mes_or30_low`, `mes_vwap`, `mes_prior_rth_close` | Existing intraday anchors. |
 
@@ -81,6 +82,8 @@ Newly added from existing data on 2026-05-11:
 | `zb_1m_bars` | No | Built from admitted `zb_1m_ohlcv`; no-lookahead/reproducibility passed 50/50. |
 | `cl_1m_ohlcv` | Sierra Chart SCID | Ingested from Sierra monthly CL files; audit passed after declaring `minimum_price: -100.0` for the April 2020 WTI negative-price episode. Observed coverage is 2019-05-06 → 2026-04-21 because `CLM26-NYMEX.scid` is not present locally. |
 | `cl_1m_bars` | No | Built from admitted `cl_1m_ohlcv`; no-lookahead/reproducibility passed 50/50. |
+| `gc_1m_ohlcv` | Sierra Chart SCID | Ingested from Sierra COMEX GC active-month files (`G`, `J`, `M`, `Q`, `Z`); audit passed with no findings over 2019-05-06 → 2026-04-30. |
+| `gc_1m_bars` | No | Built from admitted `gc_1m_ohlcv`; no-lookahead/reproducibility passed 50/50. |
 
 ## Advanced Next Steps
 
@@ -267,6 +270,30 @@ Audit note: the first CL audit flagged 358 non-positive price rows from `CLK20-N
 Coverage note: local Sierra files currently stop at `CLK26-NYMEX.scid`. `CLM26-NYMEX.scid` is not present, so CL does not currently cover 2026-04-22 through 2026-04-30. Do not align CL-dependent models against the full April 2026 endpoint until the missing June 2026 contract file is added and the source is reingested/audited.
 
 Decision: use `cl_1m_ohlcv` and `cl_1m_bars` as the admitted energy/geopolitical shock input for regime classification and MES candidate-trade meta-labeling, with the shorter coverage window explicitly respected.
+
+### Sierra GC SCID Admission
+
+Status on 2026-05-12: admitted from local Sierra COMEX GC active-month files.
+
+| Metric | Value |
+|---|---:|
+| Raw SCID records parsed inside coverage window | 296,421,529 |
+| Continuous 1m rows | 2,474,711 |
+| Overlapping contract-minutes dropped | 479,492 |
+| Coverage start | 2019-05-06 00:00:00 UTC |
+| Coverage end | 2026-04-30 23:59:00 UTC |
+| Batch id | `79205735f2f39dd4` |
+| Audit | Pass: no findings |
+
+Feature validation:
+
+| Feature | Rows | Validation |
+|---|---:|---|
+| `gc_1m_bars` | 2,474,711 | no-lookahead PASS 50/50; reproducibility PASS |
+
+Parser note: GC required a third SCID contract-cycle option, `gold_active`, covering the COMEX active months February, April, June, August, and December. Local files cover `GCG18` through `GCM26`; the admitted research window uses the files needed for 2019-05-06 through 2026-04-30.
+
+Decision: use `gc_1m_ohlcv` and `gc_1m_bars` as the admitted gold/safe-haven and real-rate-sensitive input for regime classification and MES candidate-trade meta-labeling.
 
 ### Sierra NQ Bar Export Attempt
 

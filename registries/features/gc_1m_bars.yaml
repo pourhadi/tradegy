@@ -1,0 +1,28 @@
+# 1-minute OHLCV bars for GC from the admitted Sierra Chart SCID source.
+
+id: gc_1m_bars
+version: v1
+description: >
+  1-minute OHLCV bars for COMEX Gold futures (GC), sourced from the admitted
+  `gc_1m_ohlcv` Sierra Chart SCID source. The resample transform normalizes
+  timestamps to the repo's right-labeled bar-close convention while preserving
+  summed trade count, bid volume, and ask volume for participation features.
+type: derived
+inputs:
+  - source_id: gc_1m_ohlcv
+computation:
+  type: registered_transform
+  transform_id: resample_ohlcv_bars
+  parameters:
+    cadence: 1m
+    bar_close_label: right
+    closed: left
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 10000.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

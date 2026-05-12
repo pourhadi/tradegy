@@ -1,0 +1,75 @@
+# COMEX Gold (GC) continuous 1-minute OHLCV from Sierra Chart SCID.
+#
+# The raw Sierra files are per active contract month (GC*-COMEX.scid with
+# Sierra's dash naming, e.g. GCM24-COMEX.scid). Ingest parses the binary files,
+# aggregates records to 1-minute bars, and builds a non-back-adjusted front-month
+# continuous series by selecting the earliest listed available contract at each
+# timestamp.
+
+id: gc_1m_ohlcv
+version: v1
+description: >
+  COMEX Gold (GC) non-back-adjusted front-month 1-minute OHLCV bars from Sierra
+  Chart SCID files. Per-contract SCID records are aggregated to 1-minute bars
+  and collapsed to the earliest listed available active contract at each
+  timestamp.
+type: market_data
+provider: sierra_chart
+revisable: false
+revision_policy: never_revised
+admission_rationale: >
+  Sierra Chart historical SCID files provide a low-cost local source of GC
+  intraday bars with trade count and bid/ask volume fields. GC adds a gold,
+  safe-haven, real-rate, and dollar-sensitive shock channel to the admitted
+  equity, volatility, rates, and energy inputs for MES candidate-trade
+  meta-labeling. The deterministic roll rule uses only contract month ordering
+  and timestamp availability, not future volume or returns.
+coverage:
+  start_date: 2019-05-06
+  end_date: 2026-04-30
+  gaps: []
+cadence: 1m
+fields:
+  - {name: ts_utc, type: timestamp}
+  - {name: open, type: float}
+  - {name: high, type: float}
+  - {name: low, type: float}
+  - {name: close, type: float}
+  - {name: volume, type: int}
+  - {name: num_trades, type: int}
+  - {name: bid_volume, type: int}
+  - {name: ask_volume, type: int}
+  - {name: symbol, type: string}
+  - {name: contract_year, type: int}
+  - {name: contract_month, type: int}
+timestamp_column: ts_utc
+ingest:
+  format: sierra_chart_scid_futures
+  symbol_root: GC
+  exchange: COMEX
+  contract_months: gold_active
+  filename_pattern: sierra_dash
+session_calendar: COMEX
+max_inactivity_seconds: 604800
+availability_latency:
+  median_seconds: 0.0
+  p99_seconds: 60.0
+  notes: >
+    Historical SCID files have zero replay latency once downloaded by Sierra
+    Chart. Live use would require Sierra file-writing parity or a live GC
+    adapter registered against this source schema.
+licensing:
+  live_use: false
+  backtest_use: true
+  redistribution: false
+known_issues:
+  - >
+    The continuous series is not back-adjusted. Price levels can step at active
+    contract transitions by the GC calendar spread. Use returns,
+    intraday-relative features, or explicitly modeled roll-aware features for
+    cross-contract research.
+  - >
+    The roll rule selects the earliest listed contract that has a bar at each
+    timestamp. This avoids lookahead but may differ from volume-based front
+    month selection near rollover windows.
+audit_history: []

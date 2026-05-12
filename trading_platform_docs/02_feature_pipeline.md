@@ -536,6 +536,11 @@ Notes:
 - `ingest.format` is a discriminator the CLI dispatches on. `generic_csv`
   retains the legacy single-`timestamp_column` path; `sierra_chart_csv`
   uses the multi-column timestamp parsing and column remap shown above.
+- `sierra_chart_scid_futures` parses Sierra binary intraday files directly.
+  It requires `symbol_root`, `exchange`, `contract_months`, and
+  `filename_pattern`; supported `contract_months` values are `monthly`,
+  `quarterly`, and `gold_active` (COMEX GC active months: February, April,
+  June, August, December).
 - `live.adapter` must name a `LiveAdapter` registered via
   `register_live_adapter(...)`. Adapter parameters that vary per source
   (contract specifier, useRTH, exchange) live in `live.params`; connection
