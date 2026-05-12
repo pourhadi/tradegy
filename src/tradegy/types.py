@@ -57,6 +57,7 @@ IngestFormat = Literal[
     "generic_csv",
     "sierra_chart_csv",
     "sierra_chart_scid_vx",
+    "sierra_chart_scid_futures",
     "databento_ohlcv_csv",
     "databento_options_csv",
     "orats_strikes_csv",
@@ -76,6 +77,10 @@ class IngestSpec(_Strict):
     timestamp_columns: list[str] | None = None
     timestamp_format: str | None = None
     column_remap: dict[str, str] = Field(default_factory=dict)
+    symbol_root: str | None = None
+    exchange: str | None = None
+    contract_months: Literal["monthly", "quarterly"] | None = None
+    filename_pattern: Literal["sierra_dash", "sierra_vx"] | None = None
 
 
 class LiveSpec(_Strict):
@@ -112,6 +117,7 @@ class DataSource(_Strict):
     live: LiveSpec | None = None
     session_calendar: str | None = None
     max_inactivity_seconds: float | None = None
+    minimum_price: float | None = None
 
     @model_validator(mode="after")
     def _check_timestamp_declaration(self) -> "DataSource":

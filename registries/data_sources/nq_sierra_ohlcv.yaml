@@ -1,0 +1,73 @@
+# CME E-mini Nasdaq-100 (NQ) Sierra Chart exported OHLCV/trade bars.
+#
+# This source is the chart/export text file `NQ-CME.scid_BarData.txt`, not the
+# per-contract SCID directory. Rows are irregular sub-minute OHLCV/trade bars
+# with Sierra-provided bid/ask volume fields. Derived features should resample
+# this source before using it as a 1-minute stream.
+
+id: nq_sierra_ohlcv
+version: v1
+description: >
+  CME E-mini Nasdaq-100 (NQ) continuous Sierra Chart bar-data export with
+  irregular sub-minute OHLCV rows, trade count, bid volume, and ask volume.
+  Intended as the research source for NQ participation and MES/NQ cross-market
+  features after resampling to a fixed cadence.
+type: market_data
+provider: sierra_chart
+revisable: false
+revision_policy: not_admitted
+admission_rationale: >
+  NOT ADMITTED YET. The direct per-contract NQ SCID directory was incomplete
+  locally, so this chart bar-data export was tested as an alternate path with
+  bid/ask volume fields unavailable in Databento OHLCV-1m. The file ingested
+  cleanly, but source audit failed due large unexpected gaps and missing years.
+  Admit only after Sierra exports continuous NQ history and audit passes.
+coverage:
+  start_date: 2011-02-25
+  end_date: 2026-05-11
+  gaps:
+    - {start: 2018-02-15, end: 2020-04-14, reason: local_sierra_export_incomplete}
+    - {start: 2020-10-05, end: 2026-03-16, reason: local_sierra_export_incomplete}
+cadence: irregular
+fields:
+  - {name: ts_utc, type: timestamp}
+  - {name: open, type: float}
+  - {name: high, type: float}
+  - {name: low, type: float}
+  - {name: close, type: float}
+  - {name: volume, type: int}
+  - {name: num_trades, type: int}
+  - {name: bid_volume, type: int}
+  - {name: ask_volume, type: int}
+ingest:
+  format: sierra_chart_csv
+  timestamp_columns: [Date, Time]
+session_calendar: CME
+max_inactivity_seconds: 604800
+availability_latency:
+  median_seconds: 0.0
+  p99_seconds: 60.0
+  notes: >
+    Historical export has zero replay latency once written by Sierra Chart.
+    Live use would require a live NQ adapter or Sierra file-writing path with
+    the same canonical schema.
+licensing:
+  live_use: false
+  backtest_use: true
+  redistribution: false
+known_issues:
+  - >
+    Source audit failed on 2026-05-11. The export contained 43,619,910 rows but
+    only years 2011-2018, 2020, and 2026 had any rows; 2019 and 2021-2025 were
+    absent, with a largest unexpected gap of roughly 1,985 days. Do not use this
+    source for research until the chart/export is backfilled and audit passes.
+  - >
+    Rows are irregular sub-minute Sierra bar/export rows, not normalized
+    1-minute bars. Use derived resampled features such as `nq_1m_bars` for
+    strategy and model inputs.
+  - >
+    Timestamp timezone depends on the chart/export setting. This ingest assumes
+    the exported file is UTC, matching the project convention for Sierra chart
+    exports. If Sierra was set to exchange/local time during export, re-export
+    or re-ingest with the correct `--input-tz` before research use.
+audit_history: []

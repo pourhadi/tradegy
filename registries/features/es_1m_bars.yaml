@@ -1,14 +1,14 @@
-# 1-minute OHLCV bars for ES, aggregated from the 1-second source bars.
+# 1-minute OHLCV bars for ES from the admitted Sierra Chart SCID source.
 
 id: es_1m_bars
 version: v1
 description: >
-  1-minute OHLCV bars for ES front-month continuous, aggregated from the
-  es_1s_ohlcv source via resample_ohlcv_bars. Right-labeled close,
-  left-closed window so each bar's ts_utc is the bar-close instant.
+  1-minute OHLCV bars for ES front-month continuous, sourced from the admitted
+  es_1m_ohlcv Sierra Chart SCID source via resample_ohlcv_bars. Right-labeled
+  close, left-closed window so each bar's ts_utc is the bar-close instant.
 type: derived
 inputs:
-  - source_id: es_1s_ohlcv
+  - source_id: es_1m_ohlcv
 computation:
   type: registered_transform
   transform_id: resample_ohlcv_bars

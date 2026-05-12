@@ -11,7 +11,8 @@ Implemented checks for a non-revisable tick or bar source:
   * intra-row-gap distribution, with **session-aware exclusion** when the
     source declares a session_calendar — overnight maintenance halts,
     weekends, and holidays are not flagged.
-  * value sanity (price/OHLC > 0, no NaN/Inf in declared float fields)
+  * value sanity (price/OHLC > 0 unless source declares a minimum_price,
+    no NaN/Inf in declared float fields)
   * coverage start/end vs declared cadence
   * coverage-by-hour distribution, calendar-aware. Catches the round-2
     failure mode where intraday partial-day coverage is silently masked
@@ -313,18 +314,41 @@ def audit_source(
                 )
             )
 
+    price_floor = source.minimum_price
     for col_name in _POSITIVE_FIELDS:
         if col_name in df.columns:
-            n_nonpos = int(
-                df.select((pl.col(col_name) <= 0).sum()).item() or 0
+            if price_floor is None:
+                n_bad = int(
+                    df.select((pl.col(col_name) <= 0).sum()).item() or 0
+                )
+                if n_bad:
+                    findings.append(
+                        AuditFinding(
+                            severity="HIGH",
+                            code="non_positive_value",
+                            message=f"{n_bad} rows with non-positive {col_name}",
+                            detail={"field": col_name, "count": n_bad},
+                        )
+                    )
+                continue
+
+            n_below_floor = int(
+                df.select((pl.col(col_name) < price_floor).sum()).item() or 0
             )
-            if n_nonpos:
+            if n_below_floor:
                 findings.append(
                     AuditFinding(
                         severity="HIGH",
-                        code="non_positive_value",
-                        message=f"{n_nonpos} rows with non-positive {col_name}",
-                        detail={"field": col_name, "count": n_nonpos},
+                        code="price_below_minimum",
+                        message=(
+                            f"{n_below_floor} rows with {col_name} below "
+                            f"minimum_price {price_floor}"
+                        ),
+                        detail={
+                            "field": col_name,
+                            "count": n_below_floor,
+                            "minimum_price": price_floor,
+                        },
                     )
                 )
 

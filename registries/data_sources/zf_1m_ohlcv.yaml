@@ -1,28 +1,28 @@
-# CBOT E-mini Dow ($5) (YM) continuous 1-minute OHLCV from Sierra Chart SCID.
+# CBOT 5-Year Treasury Note (ZF) continuous 1-minute OHLCV from Sierra Chart SCID.
 #
-# The raw Sierra files are per quarterly contract (YM*_CBOT.scid with Sierra's
-# dash naming, e.g. YMM24-CBOT.scid). Ingest parses the binary files, aggregates
+# The raw Sierra files are per quarterly contract (ZF*_CBOT.scid with Sierra's
+# dash naming, e.g. ZFM24-CBOT.scid). Ingest parses the binary files, aggregates
 # records to 1-minute bars, and builds a non-back-adjusted front-month
 # continuous series by selecting the earliest listed available contract at each
 # timestamp.
 
-id: ym_1m_ohlcv
+id: zf_1m_ohlcv
 version: v1
 description: >
-  CBOT E-mini Dow ($5) (YM) non-back-adjusted front-month 1-minute OHLCV bars
-  from Sierra Chart SCID files. Per-contract SCID records are aggregated to
-  1-minute bars and collapsed to the earliest listed available quarterly
+  CBOT 5-Year Treasury Note (ZF) non-back-adjusted front-month 1-minute OHLCV
+  bars from Sierra Chart SCID files. Per-contract SCID records are aggregated
+  to 1-minute bars and collapsed to the earliest listed available quarterly
   contract at each timestamp.
 type: market_data
 provider: sierra_chart
 revisable: false
 revision_policy: never_revised
 admission_rationale: >
-  Sierra Chart historical SCID files provide a low-cost local source of YM
-  intraday bars with trade count and bid/ask volume fields. YM adds a Dow/value
-  and industrials dimension to the admitted ES/NQ/RTY parent-market flow data
-  and is intended for MES candidate-trade meta-labeling and cross-index regime
-  classification. The deterministic roll rule uses only contract month ordering
+  Sierra Chart historical SCID files provide a low-cost local source of ZF
+  intraday bars with trade count and bid/ask volume fields. ZF fills the 5-year
+  belly of the Treasury curve between admitted ZT and ZN, enabling policy vs
+  growth/inflation curve-shock classification for MES candidate-trade
+  meta-labeling. The deterministic roll rule uses only contract month ordering
   and timestamp availability, not future volume or returns.
 coverage:
   start_date: 2019-05-06
@@ -45,7 +45,7 @@ fields:
 timestamp_column: ts_utc
 ingest:
   format: sierra_chart_scid_futures
-  symbol_root: YM
+  symbol_root: ZF
   exchange: CBOT
   contract_months: quarterly
   filename_pattern: sierra_dash
@@ -56,7 +56,7 @@ availability_latency:
   p99_seconds: 60.0
   notes: >
     Historical SCID files have zero replay latency once downloaded by Sierra
-    Chart. Live use would require Sierra file-writing parity or a live YM
+    Chart. Live use would require Sierra file-writing parity or a live ZF
     adapter registered against this source schema.
 licensing:
   live_use: false
@@ -65,7 +65,7 @@ licensing:
 known_issues:
   - >
     The continuous series is not back-adjusted. Price levels can step at
-    quarterly contract transitions by the YM calendar spread. Use returns,
+    quarterly contract transitions by the ZF calendar spread. Use returns,
     intraday-relative features, or explicitly modeled roll-aware features for
     cross-contract research.
   - >

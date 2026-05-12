@@ -50,6 +50,13 @@ def _bar_source(session_calendar: str | None) -> DataSource:
     )
 
 
+def _negative_price_source(minimum_price: float | None = None) -> DataSource:
+    src = _bar_source(session_calendar=None)
+    return src.model_copy(
+        update={"id": "negative_price_test", "minimum_price": minimum_price}
+    )
+
+
 def _two_session_bars() -> pl.DataFrame:
     """Three bars in one session, then a 22h+ gap to the next session.
 
@@ -75,6 +82,30 @@ def _two_session_bars() -> pl.DataFrame:
             "low": [r[3] for r in rows],
             "close": [r[4] for r in rows],
             "volume": [r[5] for r in rows],
+        },
+        schema={
+            "ts_utc": pl.Datetime("ns", "UTC"),
+            "open": pl.Float64,
+            "high": pl.Float64,
+            "low": pl.Float64,
+            "close": pl.Float64,
+            "volume": pl.Int64,
+        },
+    )
+
+
+def _negative_price_bars() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "ts_utc": [
+                datetime(2020, 4, 20, 18, 8, tzinfo=timezone.utc),
+                datetime(2020, 4, 20, 18, 9, tzinfo=timezone.utc),
+            ],
+            "open": [-37.0, -38.0],
+            "high": [-36.0, -37.5],
+            "low": [-40.0, -39.0],
+            "close": [-39.0, -38.5],
+            "volume": [100, 120],
         },
         schema={
             "ts_utc": pl.Datetime("ns", "UTC"),
@@ -147,3 +178,50 @@ def test_audit_with_cmes_calendar_suppresses_session_gap(tmp_path: Path) -> None
     assert not excessive, (
         f"calendar should suppress maintenance gap; got: {excessive}"
     )
+
+
+def test_audit_flags_negative_prices_by_default(tmp_path: Path) -> None:
+    src = _negative_price_source()
+    out_root = tmp_path / "raw" / f"source={src.id}"
+    write_date_partitions(_negative_price_bars(), out_root)
+
+    report = audit_source(
+        src,
+        max_gap_seconds=60.0,
+        raw_root=tmp_path / "raw",
+        out_dir=tmp_path / "audits",
+    )
+
+    assert [f.code for f in report.findings].count("non_positive_value") == 4
+
+
+def test_audit_allows_negative_prices_above_declared_floor(tmp_path: Path) -> None:
+    src = _negative_price_source(minimum_price=-100.0)
+    out_root = tmp_path / "raw" / f"source={src.id}"
+    write_date_partitions(_negative_price_bars(), out_root)
+
+    report = audit_source(
+        src,
+        max_gap_seconds=60.0,
+        raw_root=tmp_path / "raw",
+        out_dir=tmp_path / "audits",
+    )
+
+    assert not [f for f in report.findings if f.code == "non_positive_value"]
+    assert not [f for f in report.findings if f.code == "price_below_minimum"]
+
+
+def test_audit_flags_prices_below_declared_floor(tmp_path: Path) -> None:
+    src = _negative_price_source(minimum_price=-38.0)
+    out_root = tmp_path / "raw" / f"source={src.id}"
+    write_date_partitions(_negative_price_bars(), out_root)
+
+    report = audit_source(
+        src,
+        max_gap_seconds=60.0,
+        raw_root=tmp_path / "raw",
+        out_dir=tmp_path / "audits",
+    )
+
+    below_floor = [f for f in report.findings if f.code == "price_below_minimum"]
+    assert {f.detail["field"] for f in below_floor} == {"low", "close"}

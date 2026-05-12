@@ -517,6 +517,7 @@ data_source:
       currency: USD
       useRTH: false
   session_calendar: CMES             # exchange_calendars name; gates excessive_gap audit
+  minimum_price: null                # optional hard floor for products that can trade <= 0
   availability_latency:
     median_seconds: 0.0
     p99_seconds: 0.5
@@ -543,6 +544,10 @@ Notes:
 - `session_calendar` opts the source into session-aware audit gating —
   `excessive_gap` will not fire on overnight maintenance halts, weekends,
   or holidays for the named calendar (`CMES` for CME futures).
+- Price-like fields (`price`, `open`, `high`, `low`, `close`) are strictly
+  positive by default. `minimum_price` may be declared for products with valid
+  non-positive exchange history, such as April 2020 WTI crude oil; the audit
+  then flags only values below that source-specific floor.
 
 ## Feature registry schema
 

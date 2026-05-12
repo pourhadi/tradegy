@@ -29,10 +29,11 @@ Already available in this repo:
 |---|---|---|
 | MES 1m bars | `mes_1m_ohlcv`, `mes_1m_bars` | Core tradable stream. |
 | SPY 1m bars | `spy_1m_ohlcv`, `spy_1m_bars` | Cash-market proxy and cross-check. |
-| MNQ/M2K/YM 1m bars | `mnq_1m_ohlcv`, `m2k_1m_ohlcv`, `ym_1m_ohlcv` | Cross-index divergence inputs. |
+| ES/NQ/RTY/YM/MNQ/M2K 1m bars | `es_1m_ohlcv`, `nq_1m_ohlcv`, `rty_1m_ohlcv`, `ym_1m_ohlcv`, `mnq_1m_ohlcv`, `m2k_1m_ohlcv` | Cross-index divergence and participation inputs. ES/NQ/RTY/YM include Sierra bid/ask volume. |
 | VIX daily | `vix_daily_close`, `vix_daily_pctile_252`, `vix_daily_5d_change` | Regime level and vol-compression/expansion direction. |
 | VX 1m futures | `vx_1m_ohlcv` | Intraday CFE VIX futures confirmation from Sierra Chart SCID files. Non-back-adjusted front-month continuous series. |
-| Rates 1m futures | `zn_1m_ohlcv`, `zt_1m_ohlcv` | 10Y and 2Y Treasury futures confirmation from Databento. Non-back-adjusted front-month continuous series. |
+| Rates 1m futures | `zt_1m_ohlcv`, `zf_1m_ohlcv`, `zn_1m_ohlcv`, `zb_1m_ohlcv` | 2Y, 5Y, 10Y, and 30Y Treasury futures confirmation. ZF/ZB include Sierra bid/ask volume; ZT/ZN currently use Databento OHLCV. |
+| CL 1m futures | `cl_1m_ohlcv`, `cl_1m_bars` | WTI crude oil macro-shock input from Sierra Chart SCID. Valid through 2026-04-21 with April 2020 negative prices explicitly admitted via source-level audit floor. |
 | Macro events | `econ_events`, hours-to-next-event features | Supports pre-event drift and quiet-window gates. |
 | OR30 / VWAP / prior close | `mes_or30_high`, `mes_or30_low`, `mes_vwap`, `mes_prior_rth_close` | Existing intraday anchors. |
 
@@ -66,6 +67,242 @@ Newly added from existing data on 2026-05-11:
 |---|---|---|
 | `mes_hours_since_last_high_event` | No | Combined-event variant: hours since the last high-importance event (fomc_statement, fomc_sep, cpi, employment_situation, gdp). Built from `econ_events` + `mes_1m_bars`; no-lookahead/reproducibility passed 200/200. |
 | `mes_high_event_30m_reaction_return` | No | Combined-event variant: signed MES return 30m after a high-importance event. 294 distinct reaction-return values materialized 2019-2026 (58 with reaction <= -0.20%, 77 with reaction >= +0.20%). No-lookahead/reproducibility passed 200/200. |
+| `nq_1m_ohlcv` | Sierra Chart SCID | Ingested after Sierra backfill; audit passed with no findings over 2019-05-06 → 2026-04-30. |
+| `nq_1m_bars` | No | Built from admitted `nq_1m_ohlcv`; no-lookahead/reproducibility passed 50/50. |
+| `es_1m_ohlcv` | Sierra Chart SCID | Ingested after Sierra backfill; audit passed with no findings over 2019-05-06 → 2026-04-30. |
+| `es_1m_bars` | No | Switched to admitted `es_1m_ohlcv`; no-lookahead/reproducibility passed 50/50. |
+| `rty_1m_ohlcv` | Sierra Chart SCID | Ingested from Sierra quarterly RTY files; audit passed with no findings over 2019-05-06 → 2026-04-30. |
+| `rty_1m_bars` | No | Built from admitted `rty_1m_ohlcv`; no-lookahead/reproducibility passed 50/50. |
+| `ym_1m_ohlcv` | Sierra Chart SCID | Switched from Databento OHLCV to Sierra quarterly YM files; audit passed with no findings over 2019-05-06 → 2026-04-30. |
+| `ym_1m_bars` | No | Rebuilt from admitted Sierra `ym_1m_ohlcv`; no-lookahead/reproducibility passed 50/50. |
+| `zf_1m_ohlcv` | Sierra Chart SCID | Ingested from Sierra quarterly ZF files; audit passed with no findings over 2019-05-06 → 2026-04-30. |
+| `zf_1m_bars` | No | Built from admitted `zf_1m_ohlcv`; no-lookahead/reproducibility passed 50/50. |
+| `zb_1m_ohlcv` | Sierra Chart SCID | Ingested from Sierra quarterly ZB files; audit passed with no findings over 2019-05-06 → 2026-04-30. |
+| `zb_1m_bars` | No | Built from admitted `zb_1m_ohlcv`; no-lookahead/reproducibility passed 50/50. |
+| `cl_1m_ohlcv` | Sierra Chart SCID | Ingested from Sierra monthly CL files; audit passed after declaring `minimum_price: -100.0` for the April 2020 WTI negative-price episode. Observed coverage is 2019-05-06 → 2026-04-21 because `CLM26-NYMEX.scid` is not present locally. |
+| `cl_1m_bars` | No | Built from admitted `cl_1m_ohlcv`; no-lookahead/reproducibility passed 50/50. |
+
+## Advanced Next Steps
+
+The simple threshold-confirmation path is exhausted for now. The failed batches say that `VX up + rates up` and related hand-written gates are not enough; they do not prove that VX, rates, NQ, breadth, or other futures contain no MES-selection information.
+
+The next research lane should move from direct entry rules to selection and state modeling:
+
+| Lane | Core question | Concrete next work | Discipline gate |
+|---|---|---|---|
+| Meta-labeling | Given a pre-existing MES setup, should this candidate trade be taken? | Build an event table for OR30 breaks, VWAP deviations, prior-close gaps, and post-event first moves; label each candidate by whether it reaches +1R before -1R or has positive fixed-horizon R. | Purged walk-forward only; model must beat always-take and never-take baselines. |
+| Cross-market regime classifier | Which market state makes each setup viable? | Cluster or classify regimes from MES/NQ/MNQ/RTY/YM, VX, ZN/ZT/ZF/ZB, and optional CL/GC/FX features: returns, vol, correlation, curve slope, dispersion, and time-of-day. | Regime must be stable across walk-forward windows and cannot be selected post-hoc per failed strategy. |
+| Lead/lag forecasting | Do other futures lead MES at specific horizons? | Model forward MES 5m/15m/30m/60m returns from lagged cross-market returns, vol, correlation, and interaction terms. Start with ridge/logistic before tree models. | No random splits; use embargoed/purged CV because labels overlap. |
+| Term-structure features | Is the signal in curve shape rather than single-contract movement? | Add VX M1/M2 curve movement and ZT/ZF/ZN/ZB curve slope/twist features. Use relative changes, not non-back-adjusted absolute levels. | Feature validation first; no strategy backtest until term-structure features are pre-registered. |
+| Microstructure / participation | Does signed flow identify false breaks or real participation? | Use Sierra SCID `num_trades`, `bid_volume`, and `ask_volume` for NQ and other futures to build cumulative delta, bid/ask imbalance, and cross-market flow-divergence features. | Must pass no-lookahead and be evaluated as candidate-trade filters, not as free-running every-minute predictors. |
+| Event surprise modeling | Are CPI/FOMC/NFP reactions explainable by the actual surprise? | Add actual-vs-consensus surprise fields for CPI, payrolls, unemployment/wages, and Fed decisions/dots; pair with ZT/ZN/VX reaction features. | Event taxonomy and surprise fields must be fixed before testing. |
+
+Recommended implementation order:
+
+1. Admit Sierra NQ SCID first because it is now locally available and adds full E-mini Nasdaq price plus bid/ask volume fields.
+2. Generalize the Sierra SCID ingest path for quarterly CME futures so NQ, ES, RTY/YM, ZF/ZN/ZB, CL, GC, and FX futures can share one ingestion contract.
+3. Build a candidate-trade table for existing MES setups before building ML models.
+4. Train only selection models over candidate trades: logistic/ridge first, then LightGBM/XGBoost only if linear baselines show signal.
+5. Evaluate with purged walk-forward and a locked holdout; kill models that cannot beat simple baselines after costs.
+
+### Sierra NQ SCID Admission
+
+Status on 2026-05-11: admitted after Sierra backfilled the local quarterly SCID files.
+
+What shipped:
+
+| Artifact | Status | Notes |
+|---|---|---|
+| Generic Sierra futures SCID parser | Implemented | Supports quarterly dash-named contracts such as `NQM24-CME.scid` in addition to legacy VX monthly files. |
+| `nq_1m_ohlcv` registry entry | Admitted | Marked `revision_policy: never_revised` after audit passed. |
+| Local NQ ingest | Passed | Batch `944c8e5b8d9b616a`; coverage observed `2019-05-06 00:00:00 UTC` to `2026-04-30 23:59:00 UTC`. |
+| `nq_1m_bars` feature | Passed validation | 2,466,721 rows; no-lookahead/reproducibility passed 50/50. |
+
+Audit result:
+
+| Check | Result |
+|---|---|
+| Unique 1-minute timestamps | 2,466,721 |
+| Years with rows | 2019-2026 research window |
+| Largest unexpected gap | None reported by source audit |
+| Non-positive open issue | Fixed in parser by treating Sierra unset-open sentinel as missing and using close for open while preserving valid high/low. |
+| Admission | PASS: `uv run tradegy audit nq_1m_ohlcv` returned no findings. |
+
+Decision: use `nq_1m_ohlcv` as the admitted NQ source for cross-market regime, dispersion, and participation features. The generic parser can be reused for other Sierra futures, but every new source still needs its own audit before admission.
+
+### Sierra ES SCID Admission
+
+Status on 2026-05-11: admitted after Sierra backfilled the 2026 ES quarterly files.
+
+| Metric | Value |
+|---|---:|
+| Raw SCID records parsed inside coverage window | 1,803,876,952 |
+| Continuous 1m rows | 2,466,841 |
+| Overlapping contract-minutes dropped | 345,381 |
+| Coverage start | 2019-05-06 00:00:00 UTC |
+| Coverage end | 2026-04-30 23:59:00 UTC |
+| Batch id | `dc0dd0e244165527` |
+| Audit | Pass: no findings |
+
+Feature validation:
+
+| Feature | Rows | Validation |
+|---|---:|---|
+| `es_1m_bars` | 2,466,841 | no-lookahead PASS 50/50; reproducibility PASS |
+
+Decision: use `es_1m_ohlcv` and `es_1m_bars` as the preferred parent-market participation source for MES candidate-trade filtering and meta-labeling. ES has deeper liquidity than MES and carries Sierra `num_trades`, `bid_volume`, and `ask_volume`, making it suitable for cumulative-delta and flow-divergence features.
+
+### Sierra RTY SCID Admission
+
+Status on 2026-05-11: admitted from local Sierra quarterly SCID files.
+
+| Metric | Value |
+|---|---:|
+| Raw SCID records parsed inside coverage window | 266,592,896 |
+| Continuous 1m rows | 2,390,015 |
+| Overlapping contract-minutes dropped | 219,937 |
+| Coverage start | 2019-05-06 00:00:00 UTC |
+| Coverage end | 2026-04-30 23:59:00 UTC |
+| Batch id | `14076047e8a3e57d` |
+| Audit | Pass: no findings |
+
+Feature validation:
+
+| Feature | Rows | Validation |
+|---|---:|---|
+| `rty_1m_bars` | 2,390,015 | no-lookahead PASS 50/50; reproducibility PASS |
+
+Decision: use `rty_1m_ohlcv` and `rty_1m_bars` as the admitted small-cap breadth/dispersion input for MES candidate-trade filtering and equity-index regime classification.
+
+### Sierra YM SCID Admission
+
+Status on 2026-05-11: switched `ym_1m_ohlcv` from Databento OHLCV to Sierra Chart quarterly SCID files to add participation fields.
+
+| Metric | Value |
+|---|---:|
+| Raw SCID records parsed inside coverage window | 264,550,173 |
+| Continuous 1m rows | 2,451,476 |
+| Overlapping contract-minutes dropped | 267,671 |
+| Coverage start | 2019-05-06 00:00:00 UTC |
+| Coverage end | 2026-04-30 23:59:00 UTC |
+| Batch id | `dcdd2e70d7d6f7d6` |
+| Audit | Pass: no findings |
+
+Feature validation:
+
+| Feature | Rows | Validation |
+|---|---:|---|
+| `ym_1m_bars` | 2,451,476 | no-lookahead PASS 50/50; reproducibility PASS |
+
+Decision: use Sierra `ym_1m_ohlcv` and `ym_1m_bars` as the admitted Dow/value/industrials participation input for MES candidate-trade filtering and equity-index regime classification.
+
+### Sierra ZF SCID Admission
+
+Status on 2026-05-11: admitted from local Sierra quarterly SCID files.
+
+| Metric | Value |
+|---|---:|
+| Raw SCID records parsed inside coverage window | 356,537,090 |
+| Continuous 1m rows | 2,267,004 |
+| Overlapping contract-minutes dropped | 280,829 |
+| Coverage start | 2019-05-06 00:00:00 UTC |
+| Coverage end | 2026-04-30 23:59:00 UTC |
+| Batch id | `7ab01cff647fd02d` |
+| Audit | Pass: no findings |
+
+Feature validation:
+
+| Feature | Rows | Validation |
+|---|---:|---|
+| `zf_1m_bars` | 2,267,004 | no-lookahead PASS 50/50; reproducibility PASS |
+
+Parser note: the ZF audit initially surfaced 2 rows with non-positive low values caused by Sierra unset-price values. The SCID normalizer now treats non-positive high/low as missing for that record and uses close as the fallback, matching the existing unset-open handling.
+
+Decision: use `zf_1m_ohlcv` and `zf_1m_bars` as the admitted 5-year Treasury belly input for curve-shock classification and MES candidate-trade filtering.
+
+### Sierra ZB SCID Admission
+
+Status on 2026-05-11: admitted from local Sierra quarterly SCID files.
+
+| Metric | Value |
+|---|---:|
+| Raw SCID records parsed inside coverage window | 234,000,125 |
+| Continuous 1m rows | 2,208,951 |
+| Overlapping contract-minutes dropped | 253,989 |
+| Coverage start | 2019-05-06 00:00:00 UTC |
+| Coverage end | 2026-04-30 23:59:00 UTC |
+| Batch id | `315bf24c6eb82afb` |
+| Audit | Pass: no findings |
+
+Feature validation:
+
+| Feature | Rows | Validation |
+|---|---:|---|
+| `zb_1m_bars` | 2,208,951 | no-lookahead PASS 50/50; reproducibility PASS |
+
+Decision: use `zb_1m_ohlcv` and `zb_1m_bars` as the admitted 30-year Treasury long-end input for curve-shock classification and MES candidate-trade filtering.
+
+### Sierra CL SCID Admission
+
+Status on 2026-05-12: admitted from local Sierra monthly NYMEX CL files with an explicit negative-price audit floor.
+
+| Metric | Value |
+|---|---:|
+| Raw SCID records parsed inside coverage window | 448,451,393 |
+| Continuous 1m rows | 2,455,442 |
+| Overlapping contract-minutes dropped | 1,318,762 |
+| Coverage start | 2019-05-06 00:00:00 UTC |
+| Coverage end | 2026-04-21 18:29:00 UTC |
+| Batch id | `bf204e83f177f431` |
+| Audit | Pass: no findings after source-level `minimum_price: -100.0` policy |
+
+Feature validation:
+
+| Feature | Rows | Validation |
+|---|---:|---|
+| `cl_1m_bars` | 2,455,442 | no-lookahead PASS 50/50; reproducibility PASS |
+
+Audit note: the first CL audit flagged 358 non-positive price rows from `CLK20-NYMEX` between 2020-04-20 18:08 UTC and 2020-04-21 13:25 UTC. Those rows line up with the April 2020 WTI negative-price episode, so the data-source schema now supports a source-level `minimum_price` floor. CL declares `minimum_price: -100.0`; other sources remain strictly positive by default.
+
+Coverage note: local Sierra files currently stop at `CLK26-NYMEX.scid`. `CLM26-NYMEX.scid` is not present, so CL does not currently cover 2026-04-22 through 2026-04-30. Do not align CL-dependent models against the full April 2026 endpoint until the missing June 2026 contract file is added and the source is reingested/audited.
+
+Decision: use `cl_1m_ohlcv` and `cl_1m_bars` as the admitted energy/geopolitical shock input for regime classification and MES candidate-trade meta-labeling, with the shorter coverage window explicitly respected.
+
+### Sierra NQ Bar Export Attempt
+
+After the SCID-directory audit failed, a chart bar-data export was tested:
+
+```text
+/Users/dan/Applications/Kegworks/sierrachart.app/Contents/SharedSupport/prefix/drive_c/Program Files/SierraChart2739/Data/NQ-CME.scid_BarData.txt
+```
+
+Result on 2026-05-11:
+
+| Metric | Value |
+|---|---:|
+| Rows ingested | 43,619,910 |
+| Unique timestamps | 43,619,910 |
+| Coverage start | 2011-02-25 01:22:29 UTC |
+| Coverage end | 2026-05-11 20:28:45 UTC |
+| Batch id | `836d953ba500aeee` |
+| Audit | FAIL: 4 unexpected gaps > 604,800s; largest ~1,985 days |
+
+Year distribution:
+
+| Year | Rows |
+|---:|---:|
+| 2011 | 4,286,815 |
+| 2012 | 4,684,310 |
+| 2013 | 4,489,019 |
+| 2014 | 5,281,845 |
+| 2015 | 6,021,495 |
+| 2016 | 6,357,716 |
+| 2017 | 4,613,067 |
+| 2018 | 7,421 |
+| 2020 | 5,747,697 |
+| 2026 | 2,130,525 |
+
+Decision: the export proves the Sierra bar-data path is parseable, but the SCID-directory path is now cleaner and audit-passing after backfill. Keep `nq_sierra_ohlcv` as `not_admitted`; use admitted `nq_1m_ohlcv` and derived `nq_1m_bars` for research.
 
 ## First Executable Batch
 

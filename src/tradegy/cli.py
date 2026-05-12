@@ -56,7 +56,7 @@ from tradegy.ingest.csv_databento import ingest_databento_csv
 from tradegy.ingest.csv_es import ingest_csv
 from tradegy.ingest.csv_orats import ingest_orats_strikes_csv
 from tradegy.ingest.csv_sierra import ingest_sierra_csv
-from tradegy.ingest.sierra_scid import ingest_vx_scid_directory
+from tradegy.ingest.sierra_scid import ingest_scid_futures_directory
 from tradegy.registry.api import find_features, get_feature, value_at
 from tradegy.registry.loader import load_data_source, load_feature
 from tradegy.specs import load_spec
@@ -83,7 +83,8 @@ def ingest(
 
     Dispatches on `source.ingest.format`:
       * sierra_chart_csv → ingest_sierra_csv (multi-column timestamp, OHLCV).
-      * sierra_chart_scid_vx → ingest_vx_scid_directory (Sierra SCID directory).
+      * sierra_chart_scid_vx → ingest_scid_futures_directory (legacy VX SCID directory).
+      * sierra_chart_scid_futures → ingest_scid_futures_directory (Sierra futures SCID directory).
       * databento_ohlcv_csv → ingest_databento_csv (per-contract OHLCV with
         no-lookahead front-month roll).
       * orats_strikes_csv → ingest_orats_strikes_csv (per-(date, expiry,
@@ -94,8 +95,8 @@ def ingest(
     fmt = source.ingest.format if source.ingest is not None else "generic_csv"
     if fmt == "sierra_chart_csv":
         result = ingest_sierra_csv(csv_path, source, input_tz=input_tz)
-    elif fmt == "sierra_chart_scid_vx":
-        result = ingest_vx_scid_directory(csv_path, source)
+    elif fmt in {"sierra_chart_scid_vx", "sierra_chart_scid_futures"}:
+        result = ingest_scid_futures_directory(csv_path, source)
     elif fmt == "databento_ohlcv_csv":
         result = ingest_databento_csv(csv_path, source)
     elif fmt == "orats_strikes_csv":

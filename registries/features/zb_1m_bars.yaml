@@ -1,0 +1,29 @@
+# 1-minute OHLCV bars for ZB from the admitted Sierra Chart SCID source.
+
+id: zb_1m_bars
+version: v1
+description: >
+  1-minute OHLCV bars for CBOT 30-Year Treasury Bond futures (ZB), sourced from
+  the admitted `zb_1m_ohlcv` Sierra Chart SCID source. The resample transform
+  normalizes timestamps to the repo's right-labeled bar-close convention while
+  preserving summed trade count, bid volume, and ask volume for participation
+  features.
+type: derived
+inputs:
+  - source_id: zb_1m_ohlcv
+computation:
+  type: registered_transform
+  transform_id: resample_ohlcv_bars
+  parameters:
+    cadence: 1m
+    bar_close_label: right
+    closed: left
+cadence: 1m
+availability_latency_seconds: 1
+derivation: transform
+revisable: false
+expected_range:
+  min: 0.0
+  max: 300.0
+outlier_policy: flag_and_pass
+lifecycle_state: in_development

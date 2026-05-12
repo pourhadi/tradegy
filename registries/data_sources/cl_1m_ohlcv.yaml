@@ -1,0 +1,85 @@
+# NYMEX WTI Crude Oil (CL) continuous 1-minute OHLCV from Sierra Chart SCID.
+#
+# The raw Sierra files are per monthly contract (CL*_NYMEX.scid with Sierra's
+# dash naming, e.g. CLM24-NYMEX.scid). Ingest parses the binary files,
+# aggregates records to 1-minute bars, and builds a non-back-adjusted
+# front-month continuous series by selecting the earliest listed available
+# contract at each timestamp.
+
+id: cl_1m_ohlcv
+version: v1
+description: >
+  NYMEX WTI Crude Oil (CL) non-back-adjusted front-month 1-minute OHLCV bars
+  from Sierra Chart SCID files. Per-contract SCID records are aggregated to
+  1-minute bars and collapsed to the earliest listed available monthly contract
+  at each timestamp.
+type: market_data
+provider: sierra_chart
+revisable: false
+revision_policy: never_revised
+admission_rationale: >
+  Sierra Chart historical SCID files provide a low-cost local source of CL
+  intraday bars with trade count and bid/ask volume fields. CL adds an
+  inflation, energy, and geopolitical shock channel to the admitted equity,
+  volatility, and rates inputs for MES candidate-trade meta-labeling. The
+  deterministic roll rule uses only contract month ordering and timestamp
+  availability, not future volume or returns.
+coverage:
+  start_date: 2019-05-06
+  end_date: 2026-04-21
+  gaps: []
+cadence: 1m
+fields:
+  - {name: ts_utc, type: timestamp}
+  - {name: open, type: float}
+  - {name: high, type: float}
+  - {name: low, type: float}
+  - {name: close, type: float}
+  - {name: volume, type: int}
+  - {name: num_trades, type: int}
+  - {name: bid_volume, type: int}
+  - {name: ask_volume, type: int}
+  - {name: symbol, type: string}
+  - {name: contract_year, type: int}
+  - {name: contract_month, type: int}
+timestamp_column: ts_utc
+ingest:
+  format: sierra_chart_scid_futures
+  symbol_root: CL
+  exchange: NYMEX
+  contract_months: monthly
+  filename_pattern: sierra_dash
+session_calendar: NYMEX
+max_inactivity_seconds: 604800
+minimum_price: -100.0
+availability_latency:
+  median_seconds: 0.0
+  p99_seconds: 60.0
+  notes: >
+    Historical SCID files have zero replay latency once downloaded by Sierra
+    Chart. Live use would require Sierra file-writing parity or a live CL
+    adapter registered against this source schema.
+licensing:
+  live_use: false
+  backtest_use: true
+  redistribution: false
+known_issues:
+  - >
+    The continuous series is not back-adjusted. Price levels can step at monthly
+    contract transitions by the CL calendar spread. Use returns,
+    intraday-relative features, or explicitly modeled roll-aware features for
+    cross-contract research.
+  - >
+    The roll rule selects the earliest listed contract that has a bar at each
+    timestamp. This avoids lookahead but may differ from volume-based front
+    month selection near monthly rollover windows.
+  - >
+    The April 2020 WTI negative-price episode is valid exchange history, not a
+    parser failure. This source declares `minimum_price: -100.0` so the audit
+    keeps a hard lower-bound check without requiring CL OHLC prices to be
+    strictly positive.
+  - >
+    Local Sierra files currently stop at CLK26; CLM26-NYMEX.scid is not present,
+    so observed coverage ends 2026-04-21 18:29 UTC rather than matching the
+    April 30 endpoint of the equity-index and Treasury futures sources.
+audit_history: []

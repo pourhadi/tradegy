@@ -1,10 +1,10 @@
-"""Stage 1 — Sierra Chart SCID ingest for VX futures.
+"""Stage 1 — Sierra Chart SCID ingest for futures.
 
 Sierra Chart stores intraday chart data in binary ``.scid`` files. The files
-downloaded for VX are per contract month, so this ingest path performs three
-explicit steps:
+downloaded for futures are per contract month, so this ingest path performs
+three explicit steps:
 
-1. parse each matching ``VX*_FUT_CFE.scid`` file,
+1. parse each matching contract ``.scid`` file,
 2. aggregate records to 1-minute OHLCV bars,
 3. collapse overlapping contract months into a non-back-adjusted front-month
    continuous series by choosing the earliest listed contract available at each
@@ -56,6 +56,7 @@ _SCID_DTYPE = np.dtype(
     ]
 )
 _VX_SCID_RE = re.compile(r"^VX([FGHJKMNQUVXZ])(\d{2})_FUT_CFE\.scid$")
+_DASH_SCID_RE_TEMPLATE = r"^{root}([FGHJKMNQUVXZ])(\d{{2}})-{exchange}\.scid$"
 _MONTH_CODE_TO_NUM = {
     "F": 1,
     "G": 2,
@@ -73,6 +74,14 @@ _MONTH_CODE_TO_NUM = {
 
 
 @dataclass(frozen=True)
+class ScidSourceConfig:
+    symbol_root: str
+    exchange: str
+    contract_months: str
+    filename_pattern: str
+
+
+@dataclass(frozen=True)
 class ScidContract:
     path: Path
     symbol: str
@@ -84,7 +93,7 @@ class ScidContract:
         return self.year * 100 + self.month
 
 
-def ingest_vx_scid_directory(
+def ingest_scid_futures_directory(
     scid_dir: Path,
     source: DataSource,
     *,
@@ -92,19 +101,23 @@ def ingest_vx_scid_directory(
     start_date: date | None = None,
     end_date: date | None = None,
 ) -> IngestResult:
-    """Ingest Sierra Chart VX SCID files into a continuous 1-minute source.
+    """Ingest Sierra Chart futures SCID files into a continuous 1-minute source.
 
-    ``source.ingest.format`` must be ``sierra_chart_scid_vx``. If start/end
-    dates are omitted, the registry coverage window is used. ``end_date`` is
-    inclusive at the date level.
+    ``source.ingest.format`` must be ``sierra_chart_scid_vx`` or
+    ``sierra_chart_scid_futures``. If start/end dates are omitted, the registry
+    coverage window is used. ``end_date`` is inclusive at the date level.
     """
     if not scid_dir.exists() or not scid_dir.is_dir():
         raise NotADirectoryError(scid_dir)
-    if source.ingest is None or source.ingest.format != "sierra_chart_scid_vx":
+    if source.ingest is None or source.ingest.format not in {
+        "sierra_chart_scid_vx",
+        "sierra_chart_scid_futures",
+    }:
         raise ValueError(
-            f"source {source.id!r} is not declared as sierra_chart_scid_vx "
+            f"source {source.id!r} is not declared as Sierra SCID futures "
             "(ingest.format mismatch)"
         )
+    config = _source_config(source)
 
     start_date = start_date or source.coverage.start_date
     end_date = end_date or source.coverage.end_date
@@ -113,10 +126,12 @@ def ingest_vx_scid_directory(
     start_dt = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
     end_exclusive = datetime.combine(end_date, time.min, tzinfo=timezone.utc) + timedelta(days=1)
 
-    contracts = _discover_vx_contracts(scid_dir)
+    contracts = _discover_contracts(scid_dir, config)
     if not contracts:
-        raise FileNotFoundError(f"no VX*_FUT_CFE.scid files under {scid_dir}")
-    _assert_complete_months(contracts, start_date, end_date)
+        raise FileNotFoundError(
+            f"no {config.symbol_root} SCID contract files under {scid_dir}"
+        )
+    _assert_complete_contracts(contracts, start_date, end_date, config)
 
     minute_frames: list[pl.DataFrame] = []
     rows_in = 0
@@ -143,7 +158,7 @@ def ingest_vx_scid_directory(
 
     if not minute_frames:
         raise ValueError(
-            f"SCID files under {scid_dir} produced no 1m VX bars in "
+            f"SCID files under {scid_dir} produced no 1m {config.symbol_root} bars in "
             f"[{start_date}, {end_date}]"
         )
 
@@ -188,8 +203,12 @@ def ingest_vx_scid_directory(
             "source_id": source.id,
             "source_version": source.version,
             "batch_id": batch_id,
-            "format": "sierra_chart_scid_vx",
+            "format": source.ingest.format,
             "scid_dir": str(scid_dir),
+            "symbol_root": config.symbol_root,
+            "exchange": config.exchange,
+            "contract_months": config.contract_months,
+            "filename_pattern": config.filename_pattern,
             "manifest_hash": manifest_hash,
             "ingested_at": now_utc_iso(),
             "start_date": start_date.isoformat(),
@@ -220,10 +239,57 @@ def ingest_vx_scid_directory(
     )
 
 
-def _discover_vx_contracts(scid_dir: Path) -> list[ScidContract]:
+def ingest_vx_scid_directory(
+    scid_dir: Path,
+    source: DataSource,
+    *,
+    out_dir: Path | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> IngestResult:
+    return ingest_scid_futures_directory(
+        scid_dir,
+        source,
+        out_dir=out_dir,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+def _source_config(source: DataSource) -> ScidSourceConfig:
+    ingest = source.ingest
+    if ingest is None:
+        raise ValueError(f"source {source.id!r} has no ingest spec")
+    if ingest.format == "sierra_chart_scid_vx":
+        return ScidSourceConfig(
+            symbol_root="VX",
+            exchange="CFE",
+            contract_months="monthly",
+            filename_pattern="sierra_vx",
+        )
+
+    missing = [
+        name
+        for name in ("symbol_root", "exchange", "contract_months", "filename_pattern")
+        if getattr(ingest, name) is None
+    ]
+    if missing:
+        raise ValueError(
+            f"source {source.id!r} missing SCID ingest fields: {', '.join(missing)}"
+        )
+    return ScidSourceConfig(
+        symbol_root=ingest.symbol_root or "",
+        exchange=ingest.exchange or "",
+        contract_months=ingest.contract_months or "",
+        filename_pattern=ingest.filename_pattern or "",
+    )
+
+
+def _discover_contracts(scid_dir: Path, config: ScidSourceConfig) -> list[ScidContract]:
     contracts: list[ScidContract] = []
-    for path in scid_dir.glob("VX*_FUT_CFE.scid"):
-        match = _VX_SCID_RE.match(path.name)
+    pattern = _contract_filename_re(config)
+    for path in scid_dir.glob(f"{config.symbol_root}*.scid"):
+        match = pattern.match(path.name)
         if match is None:
             continue
         month_code, yy = match.groups()
@@ -239,23 +305,67 @@ def _discover_vx_contracts(scid_dir: Path) -> list[ScidContract]:
     return sorted(contracts, key=lambda c: c.sort_key)
 
 
-def _assert_complete_months(
-    contracts: list[ScidContract], start_date: date, end_date: date
+def _contract_filename_re(config: ScidSourceConfig) -> re.Pattern[str]:
+    if config.filename_pattern == "sierra_vx":
+        return _VX_SCID_RE
+    if config.filename_pattern != "sierra_dash":
+        raise ValueError(f"unsupported SCID filename_pattern {config.filename_pattern!r}")
+    root = re.escape(config.symbol_root)
+    exchange = re.escape(config.exchange)
+    return re.compile(_DASH_SCID_RE_TEMPLATE.format(root=root, exchange=exchange))
+
+
+def _assert_complete_contracts(
+    contracts: list[ScidContract],
+    start_date: date,
+    end_date: date,
+    config: ScidSourceConfig,
 ) -> None:
     available = {(c.year, c.month) for c in contracts}
+    expected = _expected_contracts(start_date, end_date, config.contract_months)
+    missing = [ym for ym in expected if ym not in available]
+    if missing:
+        rendered = ", ".join(f"{y}-{m:02d}" for y, m in missing)
+        raise FileNotFoundError(
+            f"missing {config.symbol_root} SCID contract months: {rendered}"
+        )
+
+
+def _expected_contracts(
+    start_date: date, end_date: date, contract_months: str
+) -> list[tuple[int, int]]:
     expected: list[tuple[int, int]] = []
+    if contract_months == "monthly":
+        month_set = set(range(1, 13))
+        start_month = start_date.month
+        end_month = end_date.month
+    elif contract_months == "quarterly":
+        month_set = {3, 6, 9, 12}
+        start_month = _first_contract_month_on_or_after(start_date.month, month_set)
+        end_month = _first_contract_month_on_or_after(end_date.month, month_set)
+    else:
+        raise ValueError(f"unsupported contract_months {contract_months!r}")
+
     year = start_date.year
-    month = start_date.month
-    while (year, month) <= (end_date.year, end_date.month):
-        expected.append((year, month))
+    month = start_month
+    end_year = end_date.year
+    if contract_months == "quarterly" and end_month < end_date.month:
+        end_year += 1
+    while (year, month) <= (end_year, end_month):
+        if month in month_set:
+            expected.append((year, month))
         month += 1
         if month == 13:
             year += 1
             month = 1
-    missing = [ym for ym in expected if ym not in available]
-    if missing:
-        rendered = ", ".join(f"{y}-{m:02d}" for y, m in missing)
-        raise FileNotFoundError(f"missing VX SCID contract months: {rendered}")
+    return expected
+
+
+def _first_contract_month_on_or_after(month: int, month_set: set[int]) -> int:
+    for candidate in sorted(month_set):
+        if candidate >= month:
+            return candidate
+    return min(month_set)
 
 
 def _read_scid_records(path: Path) -> pl.DataFrame:
@@ -324,18 +434,19 @@ def _aggregate_contract_to_1m(
         return pl.DataFrame()
 
     is_tick_with_bid_ask = pl.col("open") == 0.0
+    open_missing = pl.col("open") <= 0.0
     normalized = filtered.with_columns(
         [
             pl.col("ts_utc").dt.truncate("1m").alias("__minute"),
-            pl.when(is_tick_with_bid_ask)
+            pl.when(open_missing)
             .then(pl.col("close"))
             .otherwise(pl.col("open"))
             .alias("__open"),
-            pl.when(is_tick_with_bid_ask)
+            pl.when(is_tick_with_bid_ask | (pl.col("high") <= 0.0))
             .then(pl.col("close"))
             .otherwise(pl.col("high"))
             .alias("__high"),
-            pl.when(is_tick_with_bid_ask)
+            pl.when(is_tick_with_bid_ask | (pl.col("low") <= 0.0))
             .then(pl.col("close"))
             .otherwise(pl.col("low"))
             .alias("__low"),
